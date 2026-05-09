@@ -13,7 +13,7 @@
 * **Icons**: `lucide-react`。
 * **Data Fetching**: `TanStack Query` (React Query)。
 * **HTTP Client**: `Axios`。
-* **Routing**: `React Router v6`。
+* **Routing**: `React Router v7`。
 
 ## 3. 工程规范
 
