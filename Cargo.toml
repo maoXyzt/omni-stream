@@ -5,3 +5,15 @@ edition = "2024"
 publish = ["mirror"]
 
 [dependencies]
+tokio = { version = "1", features = ["fs", "io-util", "macros", "rt-multi-thread", "sync"] }
+async-trait = "0.1"
+bytes = "1"
+futures = "0.3"
+thiserror = "2"
+tokio-util = { version = "0.7", features = ["io"] }
+mime_guess = "2"
+
+aws-sdk-s3 = "1"
+aws-config = { version = "1", features = ["behavior-version-latest"] }
+
+tracing = "0.1"

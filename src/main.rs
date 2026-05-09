@@ -1,3 +1,6 @@
+mod error;
+mod storage;
+
 fn main() {
-    println!("Hello, world!");
+    println!("OmniStream skeleton ready");
 }
