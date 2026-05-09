@@ -1,0 +1,29 @@
+# OmniStream configuration template.
+# Place at $XDG_CONFIG_HOME/omni-stream/config.toml,
+# or set OMNI_CONFIG=/path/to/config.toml.
+
+[server]
+host = "127.0.0.1"
+port = 8080
+
+# Pick exactly one storage backend.
+[storage]
+type = "s3"
+bucket = "my-bucket"
+region = "us-east-1"
+endpoint = "http://localhost:9000"
+access_key_id = "minioadmin"
+secret_access_key = "minioadmin"
+force_path_style = true
+
+# Alternative: local filesystem
+# [storage]
+# type = "local_fs"
+# root = "/var/lib/omni-stream"
+
+# Environment overrides (take precedence over the file values above):
+#   OMNI_HOST, OMNI_PORT
+#   OMNI_S3_BUCKET, OMNI_S3_REGION, OMNI_S3_ENDPOINT,
+#   OMNI_S3_ACCESS_KEY_ID, OMNI_S3_SECRET_ACCESS_KEY,
+#   OMNI_S3_SESSION_TOKEN, OMNI_S3_FORCE_PATH_STYLE
+#   OMNI_LOCAL_ROOT

@@ -6,6 +6,7 @@ use std::pin::Pin;
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::Stream;
+use serde::Serialize;
 
 use crate::error::AppError;
 
@@ -26,7 +27,7 @@ pub struct StorageResponse {
     pub is_partial: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct FileMeta {
     pub path: String,
     pub size: u64,
@@ -36,7 +37,7 @@ pub struct FileMeta {
     pub is_dir: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct FileEntry {
     pub key: String,
     pub size: u64,
@@ -44,7 +45,7 @@ pub struct FileEntry {
     pub is_dir: bool,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct ListResult {
     pub entries: Vec<FileEntry>,
     pub next_token: Option<String>,

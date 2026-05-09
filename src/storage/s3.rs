@@ -5,6 +5,7 @@ use aws_sdk_s3::config::{Credentials, Region};
 use aws_sdk_s3::error::SdkError;
 use aws_sdk_s3::operation::get_object::GetObjectError;
 use aws_sdk_s3::operation::head_object::HeadObjectError;
+use serde::Deserialize;
 use tokio_util::io::ReaderStream;
 
 use super::{
@@ -15,7 +16,7 @@ use crate::error::AppError;
 const LIST_PAGE_SIZE: i32 = 1000;
 const CREDENTIAL_PROVIDER_NAME: &str = "omni-stream-config";
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Deserialize)]
 pub struct S3Config {
     pub bucket: String,
     pub region: Option<String>,
@@ -23,6 +24,7 @@ pub struct S3Config {
     pub access_key_id: Option<String>,
     pub secret_access_key: Option<String>,
     pub session_token: Option<String>,
+    #[serde(default)]
     pub force_path_style: bool,
 }
 
