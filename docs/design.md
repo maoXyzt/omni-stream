@@ -40,14 +40,14 @@ omni-stream/
 │       ├── s3.rs        # S3Backend 实现
 │       └── local.rs     # LocalFsBackend 实现
 ├── frontend/            # 前端 React/Vue 工程
-└── config.example.yaml  # 配置文件模板
+└── config.example.toml  # 配置文件模板
 ```
 
 ## 5. 开发任务指令清单 (Agent Prompt)
 
 ### Task 1: 基础工程与配置初始化
 
-* **任务**: 定义 `Config` 结构体及 `StorageConfig` 枚举。使用 `directories` 库确定 `~/.config/omni-stream/config.yaml` 路径。支持通过环境变量（如 `OMNI_S3_ENDPOINT`）覆盖文件配置。
+* **任务**: 定义 `Config` 结构体及 `StorageConfig` 枚举。使用 `directories` 库确定 `~/.config/omni-stream/config.toml` 路径。支持通过环境变量（如 `OMNI_S3_ENDPOINT`）覆盖文件配置。
 
 ### Task 2: 存储抽象层实现
 

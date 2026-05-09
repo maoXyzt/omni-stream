@@ -16,7 +16,7 @@
 * **存储解耦**: 严禁在 `handlers.rs` 中直接调用具体后端的实现。必须通过 `dyn StorageBackend` 进行调用。
 * **流式传输**: 任何文件读取逻辑（特别是 `get_file`）必须使用异步流 (Async Stream)，严禁将文件数据 `collect()` 到 `Vec<u8>` 中。
 * **错误映射**: 所有 `std::io::Error` 或 `aws_sdk_s3::Error` 必须统一转换为 `crate::error::AppError`，并实现 `IntoResponse`。
-* **配置规范**: 配置读取逻辑优先级为：`CLI Args` > `Env Vars` > `$XDG_CONFIG_HOME/omni-stream/config.yaml`。
+* **配置规范**: 配置读取逻辑优先级为：`CLI Args` > `Env Vars` > `$XDG_CONFIG_HOME/omni-stream/config.toml`。
 
 ## 3. 编码约定
 
