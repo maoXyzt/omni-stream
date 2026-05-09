@@ -9,7 +9,7 @@
 ## 2. 核心技术栈
 
 * **后端**: `Rust` + `Axum` + `Tokio` + `aws-sdk-s3`
-* **配置**: `serde` + `config` + `directories` (遵循 XDG 规范)
+* **配置**: `serde` + `toml` + `config` + `directories` (遵循 XDG 规范)
 * **前端集成**: `rust-embed` (静态资源嵌入)
 * **错误处理**: `thiserror` + `anyhow`
 
@@ -47,14 +47,15 @@ omni-stream/
 
 ### Task 1: 基础工程与配置初始化
 
-* **任务**: 定义 `Config` 结构体及 `StorageConfig` 枚举。使用 `directories` 库确定 `~/.config/omni-stream/config.toml` 路径。支持通过环境变量（如 `OMNI_S3_ENDPOINT`）覆盖文件配置。
+* **任务**: 定义 `Config`、`ServerConfig` 及 `StorageConfig` 结构，配置文件采用 `config.toml`。支持 `[[storages]]` 多后端定义与 `active` 激活标记；使用 `directories` 库定位 `~/.config/omni-stream/config.toml`；使用 `config` crate 合并环境变量（前缀 `OMNI_`）与文件配置。
 
 ### Task 2: 存储抽象层实现
 
 * **任务**:
     1. 在 `storage/mod.rs` 中定义 `StorageBackend` trait。
-    2. 在 `storage/s3.rs` 实现 `S3Backend`，使用 `aws-sdk-s3` 处理 `get_object` (含 Range) 和 `list_objects_v2` (含分页)。
-    3. 在 `storage/local.rs` 实现 `LocalFsBackend`，使用 `tokio::fs` 处理文件读写。
+    2. 在 `storage/factory.rs` 提供后端工厂逻辑：优先选择 `active == true` 的存储配置，若不存在则回退到第一项。
+    3. 在 `storage/s3.rs` 实现 `S3Backend`，使用 `aws-sdk-s3` 处理 `get_object` (含 Range) 和 `list_objects_v2` (含分页)。
+    4. 在 `storage/local.rs` 实现 `LocalFsBackend`，使用 `tokio::fs` 处理文件读写。
 
 ### Task 3: 路由处理逻辑
 
@@ -73,6 +74,6 @@ omni-stream/
 ## 6. 关键开发规范 (MUST FOLLOW)
 
 1. **内存安全**: 流式传输严禁一次性读取整个文件，必须使用异步生成器 (Async Stream)。
-2. **配置规范**: 必须使用 `$XDG_CONFIG_HOME` 作为配置查找路径，优先于默认路径。
+2. **配置规范**: 配置文件格式为 TOML，默认路径为 `$XDG_CONFIG_HOME/omni-stream/config.toml`，并支持环境变量前缀 `OMNI_` 覆盖（如 `OMNI_SERVER_PORT` -> `server.port`）。
 3. **错误处理**: 不要使用 `unwrap()`，所有 IO 异常必须映射为 `AppError`。
 4. **接口一致性**: 无论底层是 S3 还是本地 FS，`list_files` 的分页返回逻辑必须保持一致。
