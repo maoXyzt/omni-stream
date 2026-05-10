@@ -13,22 +13,27 @@ use tracing_subscriber::EnvFilter;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
-use crate::config::{Config, StorageConfig};
-use crate::handlers::{AppState, list_handler, proxy_handler, static_handler};
+use crate::config::Config;
+use crate::handlers::{
+    AppState, list_handler, proxy_handler, stat_handler, static_handler,
+};
 use crate::storage::StorageBackend;
-use crate::storage::local::LocalFsBackend;
-use crate::storage::s3::S3Backend;
+use crate::storage::factory::create_backend;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     init_tracing();
 
-    let cfg = Config::load()?;
-    let backend = build_backend(&cfg).await?;
+    // Config is immutable post-load (design §6) — wrap in Arc so future code paths
+    // (e.g. handlers exposing version/health info) can share it cheaply.
+    let cfg = Arc::new(Config::load().context("load configuration")?);
+
+    let backend: Arc<dyn StorageBackend> = create_backend(&cfg).await?.into();
     let state = AppState { backend };
 
     let app = Router::new()
         .route("/api/list", get(list_handler))
+        .route("/api/stat/{*key}", get(stat_handler))
         .route("/api/proxy/{*key}", get(proxy_handler))
         .fallback(static_handler)
         .with_state(state)
@@ -50,18 +55,6 @@ fn init_tracing() {
         .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
         .with(tracing_subscriber::fmt::layer())
         .init();
-}
-
-async fn build_backend(cfg: &Config) -> anyhow::Result<Arc<dyn StorageBackend>> {
-    let backend: Arc<dyn StorageBackend> = match &cfg.storage {
-        StorageConfig::S3(s3) => Arc::new(
-            S3Backend::new(s3.clone())
-                .await
-                .context("init S3 backend")?,
-        ),
-        StorageConfig::LocalFs(local) => Arc::new(LocalFsBackend::new(local.root.clone())),
-    };
-    Ok(backend)
 }
 
 async fn shutdown_signal() {

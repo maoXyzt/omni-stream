@@ -9,7 +9,7 @@ use rust_embed::RustEmbed;
 use serde::Deserialize;
 
 use crate::error::AppError;
-use crate::storage::{GetOptions, ListResult, StorageBackend};
+use crate::storage::{FileMeta, GetOptions, ListResult, StorageBackend};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -21,6 +21,14 @@ pub struct ListQuery {
     #[serde(default)]
     pub prefix: String,
     pub page_token: Option<String>,
+}
+
+pub async fn stat_handler(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+) -> Result<Json<FileMeta>, AppError> {
+    let meta = state.backend.stat(&key).await?;
+    Ok(Json(meta))
 }
 
 pub async fn list_handler(

@@ -6,24 +6,20 @@
 host = "127.0.0.1"
 port = 8080
 
-# Pick exactly one storage backend.
-[storage]
+# Define one or more storage backends. The entry with `active = true` is used;
+# if none is active, the first entry is the default.
+
+[[storages]]
+name = "production-s3"
 type = "s3"
-bucket = "my-bucket"
-region = "us-east-1"
-endpoint = "http://localhost:9000"
-access_key_id = "minioadmin"
-secret_access_key = "minioadmin"
-force_path_style = true
+active = true
+s3 = { endpoint = "http://localhost:9000", bucket = "my-bucket", access_key = "minioadmin", secret_key = "minioadmin", region = "us-east-1" }
 
-# Alternative: local filesystem
-# [storage]
-# type = "local_fs"
-# root = "/var/lib/omni-stream"
+[[storages]]
+name = "local-data"
+type = "local"
+active = false
+local = { root_path = "/var/lib/omni-stream" }
 
-# Environment overrides (take precedence over the file values above):
-#   OMNI_HOST, OMNI_PORT
-#   OMNI_S3_BUCKET, OMNI_S3_REGION, OMNI_S3_ENDPOINT,
-#   OMNI_S3_ACCESS_KEY_ID, OMNI_S3_SECRET_ACCESS_KEY,
-#   OMNI_S3_SESSION_TOKEN, OMNI_S3_FORCE_PATH_STYLE
-#   OMNI_LOCAL_ROOT
+# Environment overrides (prefix OMNI_, separator _):
+#   OMNI_SERVER_HOST, OMNI_SERVER_PORT

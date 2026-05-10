@@ -2,30 +2,38 @@ use async_trait::async_trait;
 use aws_config::BehaviorVersion;
 use aws_sdk_s3::Client;
 use aws_sdk_s3::config::{Credentials, Region};
-use aws_sdk_s3::error::SdkError;
+use aws_sdk_s3::error::{ProvideErrorMetadata, SdkError};
 use aws_sdk_s3::operation::get_object::GetObjectError;
 use aws_sdk_s3::operation::head_object::HeadObjectError;
-use serde::Deserialize;
 use tokio_util::io::ReaderStream;
 
 use super::{
     FileEntry, FileMeta, GetOptions, ListResult, StorageBackend, StorageResponse,
 };
+use crate::config::S3Config;
 use crate::error::AppError;
 
 const LIST_PAGE_SIZE: i32 = 1000;
 const CREDENTIAL_PROVIDER_NAME: &str = "omni-stream-config";
 
-#[derive(Debug, Clone, Default, Deserialize)]
-pub struct S3Config {
-    pub bucket: String,
-    pub region: Option<String>,
-    pub endpoint: Option<String>,
-    pub access_key_id: Option<String>,
-    pub secret_access_key: Option<String>,
-    pub session_token: Option<String>,
-    #[serde(default)]
-    pub force_path_style: bool,
+/// Map raw S3 HTTP status / error-code combos to AppError variants.
+/// `op` ("get" | "head" | "list") is purely for the diagnostic message.
+fn classify_s3_status(
+    status: u16,
+    code: &str,
+    op: &str,
+    raw: impl std::fmt::Display,
+) -> AppError {
+    match (status, code) {
+        (404, _) | (_, "NoSuchKey") => AppError::NotFound("S3 key not found".into()),
+        (403, _) | (_, "AccessDenied") | (_, "Forbidden") => {
+            AppError::Forbidden(format!("S3 {op} denied: {raw}"))
+        }
+        (416, _) | (_, "InvalidRange") => {
+            AppError::InvalidRange(format!("S3 {op} range invalid: {raw}"))
+        }
+        _ => AppError::Backend(format!("S3 {op} error: {raw}")),
+    }
 }
 
 pub struct S3Backend {
@@ -34,8 +42,8 @@ pub struct S3Backend {
 }
 
 impl S3Backend {
-    pub async fn new(cfg: S3Config) -> Result<Self, AppError> {
-        if cfg.bucket.is_empty() {
+    pub async fn new(cfg: &S3Config) -> Result<Self, AppError> {
+        if cfg.bucket.trim().is_empty() {
             return Err(AppError::Backend("S3 bucket is required".into()));
         }
 
@@ -44,50 +52,56 @@ impl S3Backend {
         if let Some(region) = cfg.region.clone() {
             loader = loader.region(Region::new(region));
         }
+        let custom_endpoint = cfg.endpoint.is_some();
         if let Some(endpoint) = cfg.endpoint.clone() {
             loader = loader.endpoint_url(endpoint);
         }
         if let (Some(akid), Some(sak)) =
-            (cfg.access_key_id.clone(), cfg.secret_access_key.clone())
+            (cfg.access_key.clone(), cfg.secret_key.clone())
         {
-            let creds = Credentials::new(
-                akid,
-                sak,
-                cfg.session_token.clone(),
-                None,
-                CREDENTIAL_PROVIDER_NAME,
-            );
+            let creds =
+                Credentials::new(akid, sak, None, None, CREDENTIAL_PROVIDER_NAME);
             loader = loader.credentials_provider(creds);
         }
 
         let shared = loader.load().await;
+        // Use path-style addressing whenever a custom endpoint is supplied
+        // (MinIO / LocalStack / Ceph need it); virtual-hosted-style on AWS itself.
         let s3_cfg = aws_sdk_s3::config::Builder::from(&shared)
-            .force_path_style(cfg.force_path_style)
+            .force_path_style(custom_endpoint)
             .build();
         let client = Client::from_conf(s3_cfg);
 
         Ok(Self {
             client,
-            bucket: cfg.bucket,
+            bucket: cfg.bucket.clone(),
         })
     }
 
     fn map_get_err(err: SdkError<GetObjectError>) -> AppError {
         match err {
-            SdkError::ServiceError(svc) => match svc.err() {
-                GetObjectError::NoSuchKey(_) => AppError::NotFound("S3 key not found".into()),
-                e => AppError::Backend(format!("S3 get error: {e}")),
-            },
+            SdkError::ServiceError(svc) => {
+                if matches!(svc.err(), GetObjectError::NoSuchKey(_)) {
+                    return AppError::NotFound("S3 key not found".into());
+                }
+                let status = svc.raw().status().as_u16();
+                let code = svc.err().code().unwrap_or_default();
+                classify_s3_status(status, code, "get", svc.err())
+            }
             e => AppError::Backend(format!("S3 get sdk error: {e}")),
         }
     }
 
     fn map_head_err(err: SdkError<HeadObjectError>) -> AppError {
         match err {
-            SdkError::ServiceError(svc) => match svc.err() {
-                HeadObjectError::NotFound(_) => AppError::NotFound("S3 key not found".into()),
-                e => AppError::Backend(format!("S3 head error: {e}")),
-            },
+            SdkError::ServiceError(svc) => {
+                if matches!(svc.err(), HeadObjectError::NotFound(_)) {
+                    return AppError::NotFound("S3 key not found".into());
+                }
+                let status = svc.raw().status().as_u16();
+                let code = svc.err().code().unwrap_or_default();
+                classify_s3_status(status, code, "head", svc.err())
+            }
             e => AppError::Backend(format!("S3 head sdk error: {e}")),
         }
     }

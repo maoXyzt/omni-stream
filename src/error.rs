@@ -11,6 +11,9 @@ pub enum AppError {
     #[error("not found: {0}")]
     NotFound(String),
 
+    #[error("forbidden: {0}")]
+    Forbidden(String),
+
     #[error("invalid range: {0}")]
     InvalidRange(String),
 
@@ -31,6 +34,7 @@ impl AppError {
     fn status(&self) -> StatusCode {
         match self {
             AppError::NotFound(_) => StatusCode::NOT_FOUND,
+            AppError::Forbidden(_) => StatusCode::FORBIDDEN,
             AppError::InvalidRange(_) => StatusCode::RANGE_NOT_SATISFIABLE,
             AppError::InvalidPath(_) | AppError::Unsupported(_) => StatusCode::BAD_REQUEST,
             AppError::Io(e) if e.kind() == io::ErrorKind::NotFound => StatusCode::NOT_FOUND,
