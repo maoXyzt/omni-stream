@@ -10,9 +10,6 @@ import {
   AlertCircle,
   ChevronLeft,
   ChevronRight,
-  File as FileIcon,
-  FileImage,
-  FileVideo,
   Folder,
   LogOut,
   Share2,
@@ -22,7 +19,8 @@ import { proxyUrl } from '@/api/storage'
 import { ApiError, getStoredToken, setStoredToken } from '@/api/client'
 import { useListFiles, useStorages } from '@/hooks/use-storage'
 import { PathBreadcrumb } from '@/components/PathBreadcrumb'
-import { PreviewModal, type PreviewKind } from '@/components/PreviewModal'
+import { PreviewModal } from '@/components/PreviewModal'
+import { iconForKey, previewableKind } from '@/components/preview/registry'
 import { StorageSwitcher } from '@/components/StorageSwitcher'
 import { TokenPrompt } from '@/components/TokenPrompt'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
@@ -37,25 +35,6 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import type { FileEntry } from '@/types/storage'
-
-const IMAGE_EXTENSIONS = new Set([
-  'png',
-  'jpg',
-  'jpeg',
-  'gif',
-  'webp',
-  'avif',
-  'bmp',
-  'svg',
-])
-const VIDEO_EXTENSIONS = new Set([
-  'mp4',
-  'webm',
-  'mov',
-  'mkv',
-  'm4v',
-  'ogv',
-])
 
 const PREVIEW_PARAM = 'preview'
 
@@ -411,28 +390,6 @@ function normalizePrefix(value: string): string {
 
 function stripPrefix(key: string, prefix: string): string {
   return key.startsWith(prefix) ? key.slice(prefix.length) : key
-}
-
-function previewableKind(key: string): PreviewKind | null {
-  const ext = extensionOf(key)
-  if (!ext) return null
-  if (IMAGE_EXTENSIONS.has(ext)) return 'image'
-  if (VIDEO_EXTENSIONS.has(ext)) return 'video'
-  return null
-}
-
-function iconForKey(key: string) {
-  const kind = previewableKind(key)
-  if (kind === 'image') return FileImage
-  if (kind === 'video') return FileVideo
-  return FileIcon
-}
-
-function extensionOf(key: string): string | null {
-  const stripped = key.replace(/\/+$/, '')
-  const dot = stripped.lastIndexOf('.')
-  if (dot < 0 || dot === stripped.length - 1) return null
-  return stripped.slice(dot + 1).toLowerCase()
 }
 
 function displayName(key: string, prefix: string): string {

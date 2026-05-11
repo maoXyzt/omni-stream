@@ -1,6 +1,8 @@
 import { Download, ExternalLink } from 'lucide-react'
 
 import { proxyUrl } from '@/api/storage'
+import { getPreviewType } from '@/components/preview/registry'
+import type { PreviewKind } from '@/components/preview/types'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -11,7 +13,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 
-export type PreviewKind = 'image' | 'video'
+export type { PreviewKind } from '@/components/preview/types'
 
 interface Props {
   fileKey: string
@@ -22,36 +24,26 @@ interface Props {
 
 export function PreviewModal({ fileKey, kind, storage, onClose }: Props) {
   const src = proxyUrl(fileKey, storage)
+  const type = getPreviewType(kind)
+  const Previewer = type?.Component
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-4xl">
+      <DialogContent className="flex h-[95vh] w-[95vw] max-w-[95vw] flex-col sm:max-w-[95vw]">
         <DialogHeader>
-          <DialogTitle className="break-all">{fileKey}</DialogTitle>
+          <DialogTitle className="break-all pr-8">{fileKey}</DialogTitle>
           <DialogDescription>
-            Streamed via <code>/api/proxy</code>. Video previews use the browser&apos;s
-            native <code>Range</code> support.
+            Streamed via <code>/api/proxy</code>.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex justify-center bg-muted/30 rounded-md p-2">
-          {kind === 'image' && (
-            <img
-              src={src}
-              alt={fileKey}
-              className="max-h-[70vh] w-auto rounded-md object-contain"
-            />
-          )}
-          {kind === 'video' && (
-            // <video> issues HTTP Range requests automatically; the backend
-            // returns 206 with Content-Range, so seeking works without buffering
-            // the whole file (design.md §6.1).
-            <video
-              src={src}
-              controls
-              preload="metadata"
-              className="max-h-[70vh] w-full rounded-md"
-            />
+        <div className="flex min-h-0 flex-1">
+          {Previewer ? (
+            <Previewer fileKey={fileKey} src={src} storage={storage} />
+          ) : (
+            <div className="flex h-full w-full items-center justify-center text-sm text-muted-foreground">
+              No previewer registered for this file.
+            </div>
           )}
         </div>
 
