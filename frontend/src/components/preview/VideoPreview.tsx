@@ -1,14 +1,15 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 
 import { PreviewSpinner } from './PreviewSpinner'
 import type { PreviewerProps } from './types'
 
 export function VideoPreview({ src }: PreviewerProps) {
   const [loaded, setLoaded] = useState(false)
-
-  useEffect(() => {
+  const [trackedSrc, setTrackedSrc] = useState(src)
+  if (src !== trackedSrc) {
+    setTrackedSrc(src)
     setLoaded(false)
-  }, [src])
+  }
 
   return (
     <div className="relative flex h-full w-full items-center justify-center overflow-hidden rounded-md bg-muted/30 p-2">
