@@ -50,9 +50,15 @@ impl S3Backend {
 
         let mut loader = aws_config::defaults(BehaviorVersion::latest());
 
-        if let Some(region) = cfg.region.clone() {
-            loader = loader.region(Region::new(region));
-        }
+        // SigV4 requires a region even against MinIO / LocalStack where the
+        // server itself doesn't validate it. Fall back to "us-east-1" so users
+        // don't have to set AWS_REGION just to talk to a local S3-compatible
+        // endpoint.
+        let region = cfg
+            .region
+            .clone()
+            .unwrap_or_else(|| "us-east-1".to_string());
+        loader = loader.region(Region::new(region));
         let custom_endpoint = cfg.endpoint.is_some();
         if let Some(endpoint) = cfg.endpoint.clone() {
             loader = loader.endpoint_url(endpoint);

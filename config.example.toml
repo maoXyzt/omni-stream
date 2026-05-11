@@ -20,7 +20,9 @@ enabled = false
 name = "production-s3"
 type = "s3"
 active = true
-s3 = { endpoint = "http://localhost:9000", bucket = "my-bucket", access_key = "minioadmin", secret_key = "minioadmin", region = "us-east-1" }
+# `region` is optional; defaults to "us-east-1" when omitted, which is enough
+# for MinIO / LocalStack and any AWS bucket that lives in us-east-1.
+s3 = { endpoint = "http://localhost:9000", bucket = "my-bucket", access_key = "minioadmin", secret_key = "minioadmin" }
 
 [[storages]]
 name = "local-data"
