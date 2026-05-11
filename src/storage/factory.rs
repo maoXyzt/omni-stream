@@ -1,27 +1,77 @@
+use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Arc;
 
 use anyhow::{Context, anyhow, bail};
 
 use super::StorageBackend;
 use super::local::LocalFsBackend;
 use super::s3::S3Backend;
-use crate::config::{Config, StorageType};
+use crate::config::{Config, StorageConfig, StorageType};
 
-/// Build a storage backend from validated configuration.
-/// Picks the entry with `active = true`; falls back to the first storage if none is active.
-pub async fn create_backend(cfg: &Config) -> anyhow::Result<Box<dyn StorageBackend>> {
-    let entry = cfg
+/// A storage backend together with its declared name and type — used by handlers
+/// to expose `/api/storages` without holding on to the full `Config`.
+#[derive(Clone)]
+pub struct NamedBackend {
+    pub name: String,
+    pub r#type: StorageType,
+    pub backend: Arc<dyn StorageBackend>,
+}
+
+/// Container of all configured backends with a designated default.
+pub struct BackendRegistry {
+    pub backends: HashMap<String, NamedBackend>,
+    pub order: Vec<String>,
+    pub default_name: String,
+}
+
+/// Build all backends declared in configuration. The default is the entry with
+/// `active = true`; if none is active, it falls back to the first defined storage.
+pub async fn create_registry(cfg: &Config) -> anyhow::Result<BackendRegistry> {
+    if cfg.storages.is_empty() {
+        bail!("no storages defined in configuration");
+    }
+
+    let default = cfg
         .active_storage()
         .ok_or_else(|| anyhow!("no storages defined in configuration"))?;
+    let default_name = default.name.clone();
 
-    tracing::info!(
-        storage.name = entry.name.as_str(),
-        storage.r#type = ?entry.r#type,
-        storage.active = entry.active,
-        "activating storage backend"
-    );
+    let mut backends: HashMap<String, NamedBackend> = HashMap::new();
+    let mut order: Vec<String> = Vec::with_capacity(cfg.storages.len());
+    for entry in &cfg.storages {
+        if backends.contains_key(&entry.name) {
+            bail!("duplicate storage name: '{}'", entry.name);
+        }
 
-    let backend: Box<dyn StorageBackend> = match entry.r#type {
+        tracing::info!(
+            storage.name = entry.name.as_str(),
+            storage.r#type = ?entry.r#type,
+            storage.default = entry.name == default_name,
+            "registering storage backend"
+        );
+
+        let backend = build_one(entry).await?;
+        backends.insert(
+            entry.name.clone(),
+            NamedBackend {
+                name: entry.name.clone(),
+                r#type: entry.r#type,
+                backend,
+            },
+        );
+        order.push(entry.name.clone());
+    }
+
+    Ok(BackendRegistry {
+        backends,
+        order,
+        default_name,
+    })
+}
+
+async fn build_one(entry: &StorageConfig) -> anyhow::Result<Arc<dyn StorageBackend>> {
+    let backend: Arc<dyn StorageBackend> = match entry.r#type {
         StorageType::S3 => {
             let s3 = entry.s3.as_ref().ok_or_else(|| {
                 anyhow!(
@@ -32,7 +82,7 @@ pub async fn create_backend(cfg: &Config) -> anyhow::Result<Box<dyn StorageBacke
             let backend = S3Backend::new(s3)
                 .await
                 .with_context(|| format!("init S3 backend '{}'", entry.name))?;
-            Box::new(backend)
+            Arc::new(backend)
         }
         StorageType::Local => {
             let local = entry.local.as_ref().ok_or_else(|| {
@@ -44,10 +94,9 @@ pub async fn create_backend(cfg: &Config) -> anyhow::Result<Box<dyn StorageBacke
             validate_local_root(&local.root_path).with_context(|| {
                 format!("invalid root_path for storage '{}'", entry.name)
             })?;
-            Box::new(LocalFsBackend::new(local.root_path.clone()))
+            Arc::new(LocalFsBackend::new(local.root_path.clone()))
         }
     };
-
     Ok(backend)
 }
 

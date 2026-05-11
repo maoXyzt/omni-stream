@@ -18,10 +18,10 @@ use tracing_subscriber::util::SubscriberInitExt;
 use crate::auth::{AuthState, auth_middleware};
 use crate::config::Config;
 use crate::handlers::{
-    AppState, list_handler, proxy_handler, stat_handler, static_handler,
+    AppState, list_handler, list_storages_handler, proxy_handler, stat_handler,
+    static_handler,
 };
-use crate::storage::StorageBackend;
-use crate::storage::factory::create_backend;
+use crate::storage::factory::create_registry;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -31,8 +31,8 @@ async fn main() -> anyhow::Result<()> {
     // (e.g. handlers exposing version/health info) can share it cheaply.
     let cfg = Arc::new(Config::load().context("load configuration")?);
 
-    let backend: Arc<dyn StorageBackend> = create_backend(&cfg).await?.into();
-    let state = AppState { backend };
+    let registry = create_registry(&cfg).await?;
+    let state = AppState::from_registry(registry);
     let auth_state = AuthState::from_config(&cfg.auth).context("init auth gate")?;
     if auth_state.enabled {
         tracing::info!("auth gate enabled: /api/* requires Bearer token");
@@ -41,6 +41,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let app = Router::new()
+        .route("/api/storages", get(list_storages_handler))
         .route("/api/list", get(list_handler))
         .route("/api/stat/{*key}", get(stat_handler))
         .route("/api/proxy/{*key}", get(proxy_handler))

@@ -1,5 +1,11 @@
-import { useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
+import {
+  Navigate,
+  useNavigate,
+  useParams,
+  useSearchParams,
+} from 'react-router-dom'
 import {
   AlertCircle,
   ChevronLeft,
@@ -9,13 +15,15 @@ import {
   FileVideo,
   Folder,
   LogOut,
+  Share2,
 } from 'lucide-react'
 
 import { proxyUrl } from '@/api/storage'
 import { ApiError, getStoredToken, setStoredToken } from '@/api/client'
-import { useListFiles } from '@/hooks/use-storage'
+import { useListFiles, useStorages } from '@/hooks/use-storage'
 import { PathBreadcrumb } from '@/components/PathBreadcrumb'
 import { PreviewModal, type PreviewKind } from '@/components/PreviewModal'
+import { StorageSwitcher } from '@/components/StorageSwitcher'
 import { TokenPrompt } from '@/components/TokenPrompt'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -49,24 +57,111 @@ const VIDEO_EXTENSIONS = new Set([
   'ogv',
 ])
 
+const PREVIEW_PARAM = 'preview'
+
 export function FileList() {
   const queryClient = useQueryClient()
-  const [prefix, setPrefix] = useState('')
+  const navigate = useNavigate()
+  const params = useParams()
+  const [searchParams, setSearchParams] = useSearchParams()
+
+  const storageName = params.storage ?? ''
+  // React Router exposes the catch-all match under the `*` key. Normalize so
+  // every non-empty prefix ends with `/` to match the backend's directory
+  // convention (e.g. `videos/` not `videos`).
+  const rawSplat = params['*'] ?? ''
+  const prefix = useMemo(() => normalizePrefix(rawSplat), [rawSplat])
+
+  const storagesQuery = useStorages()
   const [tokenStack, setTokenStack] = useState<Array<string | undefined>>([
     undefined,
   ])
-  const [preview, setPreview] = useState<{
-    key: string
-    kind: PreviewKind
-  } | null>(null)
-
   const currentToken = tokenStack[tokenStack.length - 1]
-  const query = useListFiles(prefix, currentToken)
+  const listQuery = useListFiles(prefix, currentToken, storageName || undefined)
+
+  const previewName = searchParams.get(PREVIEW_PARAM)
+  const previewState = useMemo(() => {
+    if (!previewName) return null
+    const kind = previewableKind(previewName)
+    if (!kind) return null
+    return { key: prefix + previewName, kind }
+  }, [previewName, prefix])
+
+  const goToPath = useCallback(
+    (nextPrefix: string) => {
+      // Clearing page state when switching directories is intentional: the
+      // page_token cursor returned by S3 is scoped to a specific prefix.
+      setTokenStack([undefined])
+      const clean = normalizePrefix(nextPrefix)
+      const trail = clean ? clean : ''
+      navigate({
+        pathname: `/s/${encodeURIComponent(storageName)}/${trail}`,
+        search: '',
+      })
+    },
+    [navigate, storageName],
+  )
+
+  const switchStorage = useCallback(
+    (name: string) => {
+      if (name === storageName) return
+      setTokenStack([undefined])
+      navigate({
+        pathname: `/s/${encodeURIComponent(name)}/`,
+        search: '',
+      })
+    },
+    [navigate, storageName],
+  )
+
+  const openPreview = useCallback(
+    (entry: FileEntry) => {
+      const rel = stripPrefix(entry.key, prefix)
+      setSearchParams(
+        (sp) => {
+          const next = new URLSearchParams(sp)
+          next.set(PREVIEW_PARAM, rel)
+          return next
+        },
+        { replace: false },
+      )
+    },
+    [prefix, setSearchParams],
+  )
+
+  const closePreview = useCallback(() => {
+    setSearchParams(
+      (sp) => {
+        const next = new URLSearchParams(sp)
+        next.delete(PREVIEW_PARAM)
+        return next
+      },
+      { replace: false },
+    )
+  }, [setSearchParams])
+
+  // Once we know the storages roster, validate the URL's storage name. If it
+  // doesn't exist, bounce to the server's default rather than rendering a
+  // perpetual 404 for a typo'd / removed backend.
+  if (
+    storagesQuery.data &&
+    !storagesQuery.data.storages.some((s) => s.name === storageName)
+  ) {
+    return (
+      <Navigate
+        to={`/s/${encodeURIComponent(storagesQuery.data.default)}/`}
+        replace
+      />
+    )
+  }
 
   const isAuthError =
-    query.isError &&
-    query.error instanceof ApiError &&
-    query.error.status === 401
+    (listQuery.isError &&
+      listQuery.error instanceof ApiError &&
+      listQuery.error.status === 401) ||
+    (storagesQuery.isError &&
+      storagesQuery.error instanceof ApiError &&
+      storagesQuery.error.status === 401)
 
   if (isAuthError) {
     return (
@@ -80,14 +175,9 @@ export function FileList() {
 
   const hasToken = getStoredToken() !== null
 
-  function navigate(next: string) {
-    setPrefix(next)
-    setTokenStack([undefined])
-  }
-
   function nextPage() {
-    if (query.data?.next_token) {
-      setTokenStack((stack) => [...stack, query.data!.next_token!])
+    if (listQuery.data?.next_token) {
+      setTokenStack((stack) => [...stack, listQuery.data!.next_token!])
     }
   }
 
@@ -97,44 +187,67 @@ export function FileList() {
 
   function handleEntry(entry: FileEntry) {
     if (entry.is_dir) {
-      navigate(entry.key)
+      goToPath(entry.key)
       return
     }
-    const kind = previewableKind(entry.key)
-    if (kind) {
-      setPreview({ key: entry.key, kind })
-    } else {
-      window.open(proxyUrl(entry.key), '_blank', 'noreferrer')
+    if (previewableKind(entry.key)) {
+      openPreview(entry)
+      return
     }
+    window.open(
+      proxyUrl(entry.key, storageName || undefined),
+      '_blank',
+      'noreferrer',
+    )
   }
 
   return (
     <div className="mx-auto flex max-w-5xl flex-col gap-4 p-6">
-      <header className="flex items-start justify-between gap-2">
+      <header className="flex flex-wrap items-start justify-between gap-2">
         <div className="flex flex-col gap-2">
-          <h1 className="text-2xl font-semibold">OmniStream</h1>
-          <PathBreadcrumb prefix={prefix} onNavigate={navigate} />
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-semibold">OmniStream</h1>
+            {storagesQuery.data && (
+              <StorageSwitcher
+                storages={storagesQuery.data.storages}
+                active={storageName}
+                onChange={switchStorage}
+              />
+            )}
+          </div>
+          <PathBreadcrumb prefix={prefix} onNavigate={goToPath} />
         </div>
-        {hasToken && (
+        <div className="flex items-center gap-2">
           <Button
             variant="outline"
             size="sm"
-            onClick={() => {
-              setStoredToken(null)
-              queryClient.invalidateQueries()
-            }}
+            onClick={() => copyShareUrl()}
+            title="Copy a shareable link to this view"
           >
-            <LogOut className="size-4" />
-            Sign out
+            <Share2 className="size-4" />
+            Share link
           </Button>
-        )}
+          {hasToken && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setStoredToken(null)
+                queryClient.invalidateQueries()
+              }}
+            >
+              <LogOut className="size-4" />
+              Sign out
+            </Button>
+          )}
+        </div>
       </header>
 
-      {query.isError && <ErrorState error={query.error} />}
+      {listQuery.isError && <ErrorState error={listQuery.error} />}
 
-      {query.isPending ? (
+      {listQuery.isPending ? (
         <ListSkeleton />
-      ) : query.data ? (
+      ) : listQuery.data ? (
         <>
           <Table>
             <TableHeader>
@@ -145,7 +258,7 @@ export function FileList() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {query.data.entries.length === 0 && (
+              {listQuery.data.entries.length === 0 && (
                 <TableRow>
                   <TableCell
                     colSpan={3}
@@ -155,7 +268,7 @@ export function FileList() {
                   </TableCell>
                 </TableRow>
               )}
-              {query.data.entries.map((entry) => (
+              {listQuery.data.entries.map((entry) => (
                 <FileRow
                   key={entry.key}
                   entry={entry}
@@ -168,23 +281,35 @@ export function FileList() {
 
           <Pager
             hasPrev={tokenStack.length > 1}
-            hasNext={Boolean(query.data.next_token)}
-            isFetching={query.isFetching}
+            hasNext={Boolean(listQuery.data.next_token)}
+            isFetching={listQuery.isFetching}
             onPrev={prevPage}
             onNext={nextPage}
           />
         </>
       ) : null}
 
-      {preview && (
+      {previewState && (
         <PreviewModal
-          fileKey={preview.key}
-          kind={preview.kind}
-          onClose={() => setPreview(null)}
+          fileKey={previewState.key}
+          kind={previewState.kind}
+          storage={storageName || undefined}
+          onClose={closePreview}
         />
       )}
     </div>
   )
+}
+
+function copyShareUrl() {
+  const url = window.location.href
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(url).catch(() => {
+      window.prompt('Copy this link:', url)
+    })
+    return
+  }
+  window.prompt('Copy this link:', url)
 }
 
 interface FileRowProps {
@@ -276,6 +401,16 @@ function ErrorState({ error }: { error: unknown }) {
       <AlertDescription>{message}</AlertDescription>
     </Alert>
   )
+}
+
+function normalizePrefix(value: string): string {
+  const trimmed = value.replace(/^\/+/, '')
+  if (!trimmed) return ''
+  return trimmed.endsWith('/') ? trimmed : `${trimmed}/`
+}
+
+function stripPrefix(key: string, prefix: string): string {
+  return key.startsWith(prefix) ? key.slice(prefix.length) : key
 }
 
 function previewableKind(key: string): PreviewKind | null {

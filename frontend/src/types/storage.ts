@@ -23,3 +23,13 @@ export interface ApiErrorBody {
   error?: string
   message?: string
 }
+
+export interface StorageDescriptor {
+  name: string
+  type: 'local' | 's3'
+}
+
+export interface StoragesResponse {
+  storages: StorageDescriptor[]
+  default: string
+}

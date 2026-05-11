@@ -1,21 +1,39 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 
-import { listFiles, statFile } from '@/api/storage'
+import { listFiles, listStorages, statFile } from '@/api/storage'
 
-export function useListFiles(prefix: string, pageToken?: string) {
+export function useStorages() {
   return useQuery({
-    queryKey: ['list', prefix, pageToken ?? null] as const,
-    queryFn: () => listFiles(prefix, pageToken),
-    placeholderData: keepPreviousData,
-    staleTime: 5_000,
+    queryKey: ['storages'] as const,
+    queryFn: listStorages,
+    // Storage roster is configured on the server and only changes on restart.
+    staleTime: Infinity,
   })
 }
 
-export function useFileStat(key: string, enabled: boolean = true) {
+export function useListFiles(
+  prefix: string,
+  pageToken: string | undefined,
+  storage: string | undefined,
+) {
   return useQuery({
-    queryKey: ['stat', key] as const,
-    queryFn: () => statFile(key),
-    enabled: enabled && key.length > 0,
+    queryKey: ['list', storage ?? null, prefix, pageToken ?? null] as const,
+    queryFn: () => listFiles(prefix, pageToken, storage),
+    placeholderData: keepPreviousData,
+    staleTime: 5_000,
+    enabled: storage !== undefined,
+  })
+}
+
+export function useFileStat(
+  key: string,
+  storage: string | undefined,
+  enabled: boolean = true,
+) {
+  return useQuery({
+    queryKey: ['stat', storage ?? null, key] as const,
+    queryFn: () => statFile(key, storage),
+    enabled: enabled && key.length > 0 && storage !== undefined,
     staleTime: 60_000,
   })
 }

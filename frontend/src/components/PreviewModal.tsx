@@ -16,11 +16,12 @@ export type PreviewKind = 'image' | 'video'
 interface Props {
   fileKey: string
   kind: PreviewKind
+  storage?: string
   onClose: () => void
 }
 
-export function PreviewModal({ fileKey, kind, onClose }: Props) {
-  const src = proxyUrl(fileKey)
+export function PreviewModal({ fileKey, kind, storage, onClose }: Props) {
+  const src = proxyUrl(fileKey, storage)
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
