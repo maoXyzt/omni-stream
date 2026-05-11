@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use anyhow::{Context, anyhow, bail};
 use config::{Config as ConfigBuilder, Environment, File, FileFormat};
 use directories::ProjectDirs;
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 
 const APP_QUALIFIER: &str = "";
 const APP_ORG: &str = "";
@@ -67,7 +67,7 @@ pub struct StorageConfig {
     pub local: Option<LocalConfig>,
 }
 
-#[derive(Clone, Default, Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct S3Config {
     #[serde(default)]
     pub endpoint: Option<String>,
@@ -78,6 +78,28 @@ pub struct S3Config {
     pub secret_key: Option<String>,
     #[serde(default)]
     pub region: Option<String>,
+    // Path-style addressing (`https://endpoint/bucket/key`). Disable for
+    // gateways that require virtual-host style (`https://bucket.endpoint/key`),
+    // e.g. some AOSS / OSS internal endpoints.
+    #[serde(default = "default_force_path_style")]
+    pub force_path_style: bool,
+}
+
+fn default_force_path_style() -> bool {
+    true
+}
+
+impl Default for S3Config {
+    fn default() -> Self {
+        Self {
+            endpoint: None,
+            bucket: String::new(),
+            access_key: None,
+            secret_key: None,
+            region: None,
+            force_path_style: default_force_path_style(),
+        }
+    }
 }
 
 // Manual Debug implementation: never leak access_key / secret_key into logs.
@@ -89,6 +111,7 @@ impl fmt::Debug for S3Config {
             .field("access_key", &mask_secret(self.access_key.as_deref()))
             .field("secret_key", &mask_secret(self.secret_key.as_deref()))
             .field("region", &self.region)
+            .field("force_path_style", &self.force_path_style)
             .finish()
     }
 }
@@ -102,7 +125,38 @@ fn mask_secret(s: Option<&str>) -> &'static str {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct LocalConfig {
+    #[serde(deserialize_with = "deser_path_expand_tilde")]
     pub root_path: PathBuf,
+    // Follow symlinks when serving / listing under `root_path`. When false,
+    // symlinks are surfaced as their own entries (size = link length, no
+    // traversal) and reading them returns Forbidden.
+    #[serde(default = "default_follow_symlinks")]
+    pub follow_symlinks: bool,
+}
+
+fn default_follow_symlinks() -> bool {
+    true
+}
+
+fn expand_tilde(s: &str) -> PathBuf {
+    if let Some(rest) = s.strip_prefix('~') {
+        if rest.is_empty() || rest.starts_with('/') {
+            if let Some(home) = env::var_os("HOME") {
+                let mut p = PathBuf::from(home);
+                let trimmed = rest.strip_prefix('/').unwrap_or(rest);
+                if !trimmed.is_empty() {
+                    p.push(trimmed);
+                }
+                return p;
+            }
+        }
+    }
+    PathBuf::from(s)
+}
+
+fn deser_path_expand_tilde<'de, D: Deserializer<'de>>(d: D) -> Result<PathBuf, D::Error> {
+    let s = String::deserialize(d)?;
+    Ok(expand_tilde(&s))
 }
 
 /// Optional bearer-token gate on `/api/*`. When `enabled = false` (default),
@@ -396,6 +450,7 @@ local = { root_path = "/tmp" }
             access_key: Some("AKIDsecret".into()),
             secret_key: Some("supersecret".into()),
             region: Some("us-east-1".into()),
+            force_path_style: true,
         };
         let dbg = format!("{s3:?}");
         assert!(!dbg.contains("AKIDsecret"), "access_key leaked: {dbg}");
@@ -403,6 +458,40 @@ local = { root_path = "/tmp" }
         assert!(dbg.contains("REDACTED"));
         assert!(dbg.contains("https://example.com"));
         assert!(dbg.contains("us-east-1"));
+    }
+
+    #[test]
+    fn local_root_path_expands_tilde() {
+        // SAFETY: tests run single-threaded enough for HOME mutation; if this
+        // becomes flaky we can switch to a serial_test guard.
+        unsafe {
+            env::set_var("HOME", "/home/tester");
+        }
+        let raw = r#"
+[[storages]]
+name = "x"
+type = "local"
+active = true
+local = { root_path = "~/data/foo" }
+"#;
+        let cfg: Config = toml::from_str(raw).expect("parse");
+        let local = cfg.storages[0].local.as_ref().expect("local");
+        assert_eq!(local.root_path, PathBuf::from("/home/tester/data/foo"));
+    }
+
+    #[test]
+    fn local_root_path_bare_tilde_is_home() {
+        unsafe {
+            env::set_var("HOME", "/home/tester");
+        }
+        assert_eq!(expand_tilde("~"), PathBuf::from("/home/tester"));
+    }
+
+    #[test]
+    fn local_root_path_no_tilde_passthrough() {
+        assert_eq!(expand_tilde("/var/data"), PathBuf::from("/var/data"));
+        // Leading "~user" is not expanded (we don't resolve other users).
+        assert_eq!(expand_tilde("~other/data"), PathBuf::from("~other/data"));
     }
 
     #[test]

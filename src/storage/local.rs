@@ -7,20 +7,30 @@ use tokio::fs;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio_util::io::ReaderStream;
 
-use super::{
-    FileEntry, FileMeta, GetOptions, ListResult, StorageBackend, StorageResponse,
-};
+use super::{FileEntry, FileMeta, GetOptions, ListResult, StorageBackend, StorageResponse};
 use crate::error::AppError;
 
 const LIST_PAGE_SIZE: usize = 1000;
 
 pub struct LocalFsBackend {
     root: PathBuf,
+    follow_symlinks: bool,
 }
 
 impl LocalFsBackend {
-    pub fn new(root: impl Into<PathBuf>) -> Self {
-        Self { root: root.into() }
+    pub fn new(root: impl Into<PathBuf>, follow_symlinks: bool) -> Self {
+        Self {
+            root: root.into(),
+            follow_symlinks,
+        }
+    }
+
+    async fn leaf_metadata(&self, full: &Path) -> std::io::Result<std::fs::Metadata> {
+        if self.follow_symlinks {
+            fs::metadata(full).await
+        } else {
+            fs::symlink_metadata(full).await
+        }
     }
 
     fn resolve(&self, path: &str) -> Result<PathBuf, AppError> {
@@ -117,20 +127,22 @@ fn system_time_to_unix_string(t: SystemTime) -> Option<String> {
 
 #[async_trait]
 impl StorageBackend for LocalFsBackend {
-    async fn get_file(
-        &self,
-        path: &str,
-        opts: GetOptions,
-    ) -> Result<StorageResponse, AppError> {
+    async fn get_file(&self, path: &str, opts: GetOptions) -> Result<StorageResponse, AppError> {
         let full = self.resolve(path)?;
 
-        let metadata = match fs::metadata(&full).await {
+        let metadata = match self.leaf_metadata(&full).await {
             Ok(m) => m,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 return Err(AppError::NotFound(path.to_string()));
             }
             Err(e) => return Err(AppError::Io(e)),
         };
+
+        if !self.follow_symlinks && metadata.file_type().is_symlink() {
+            return Err(AppError::Forbidden(format!(
+                "symlink traversal disabled: {path}"
+            )));
+        }
 
         if metadata.is_dir() {
             return Err(AppError::Unsupported(format!(
@@ -144,12 +156,7 @@ impl StorageBackend for LocalFsBackend {
         let (start, end, is_partial, content_range) = if let Some(range) = opts.range {
             let (s, e) = parse_range(&range, total_size)?;
             file.seek(SeekFrom::Start(s)).await?;
-            (
-                s,
-                e,
-                true,
-                Some(format!("bytes {s}-{e}/{total_size}")),
-            )
+            (s, e, true, Some(format!("bytes {s}-{e}/{total_size}")))
         } else {
             let end = total_size.saturating_sub(1);
             (0, end, false, None)
@@ -159,10 +166,11 @@ impl StorageBackend for LocalFsBackend {
         let limited = file.take(length);
         let stream = ReaderStream::new(limited);
 
-        let content_type = mime_guess::from_path(&full)
-            .first_raw()
-            .map(str::to_string);
-        let last_modified = metadata.modified().ok().and_then(system_time_to_unix_string);
+        let content_type = mime_guess::from_path(&full).first_raw().map(str::to_string);
+        let last_modified = metadata
+            .modified()
+            .ok()
+            .and_then(system_time_to_unix_string);
 
         Ok(StorageResponse {
             body: Box::pin(stream),
@@ -182,7 +190,9 @@ impl StorageBackend for LocalFsBackend {
     ) -> Result<ListResult, AppError> {
         let dir_path = self.resolve(prefix)?;
 
-        let metadata = match fs::metadata(&dir_path).await {
+        // The directory we list at must itself be a directory. We follow it if
+        // configured to, so a symlinked root subdir works as expected.
+        let metadata = match self.leaf_metadata(&dir_path).await {
             Ok(m) => m,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 return Err(AppError::NotFound(prefix.to_string()));
@@ -191,22 +201,29 @@ impl StorageBackend for LocalFsBackend {
         };
 
         if !metadata.is_dir() {
-            return Err(AppError::Unsupported(format!(
-                "not a directory: {prefix}"
-            )));
+            return Err(AppError::Unsupported(format!("not a directory: {prefix}")));
         }
 
         let mut read = fs::read_dir(&dir_path).await?;
         let mut all: Vec<FileEntry> = Vec::new();
         while let Some(entry) = read.next_entry().await? {
-            let ft = entry.file_type().await?;
             let entry_path = entry.path();
-            let is_dir = ft.is_dir();
+            // For each child resolve type with follow/no-follow semantics. On
+            // a dangling symlink with follow=true, fall back to lstat so the
+            // entry stays visible rather than disappearing from the listing.
+            let m = if self.follow_symlinks {
+                match fs::metadata(&entry_path).await {
+                    Ok(m) => m,
+                    Err(_) => entry.metadata().await?,
+                }
+            } else {
+                entry.metadata().await?
+            };
+            let is_dir = m.is_dir();
             let key = self.relative_key(&entry_path, is_dir);
             let (size, last_modified) = if is_dir {
                 (0u64, None)
             } else {
-                let m = entry.metadata().await?;
                 (
                     m.len(),
                     m.modified().ok().and_then(system_time_to_unix_string),
@@ -222,10 +239,7 @@ impl StorageBackend for LocalFsBackend {
 
         all.sort_by(|a, b| a.key.cmp(&b.key));
 
-        let offset: usize = token
-            .as_deref()
-            .and_then(|t| t.parse().ok())
-            .unwrap_or(0);
+        let offset: usize = token.as_deref().and_then(|t| t.parse().ok()).unwrap_or(0);
         let end = (offset + LIST_PAGE_SIZE).min(all.len());
         let entries: Vec<FileEntry> = if offset >= all.len() {
             Vec::new()
@@ -246,7 +260,7 @@ impl StorageBackend for LocalFsBackend {
 
     async fn stat(&self, path: &str) -> Result<FileMeta, AppError> {
         let full = self.resolve(path)?;
-        let metadata = match fs::metadata(&full).await {
+        let metadata = match self.leaf_metadata(&full).await {
             Ok(m) => m,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 return Err(AppError::NotFound(path.to_string()));
@@ -258,9 +272,7 @@ impl StorageBackend for LocalFsBackend {
         let content_type = if is_dir {
             None
         } else {
-            mime_guess::from_path(&full)
-                .first_raw()
-                .map(str::to_string)
+            mime_guess::from_path(&full).first_raw().map(str::to_string)
         };
 
         Ok(FileMeta {
@@ -268,7 +280,10 @@ impl StorageBackend for LocalFsBackend {
             size: if is_dir { 0 } else { metadata.len() },
             etag: None,
             content_type,
-            last_modified: metadata.modified().ok().and_then(system_time_to_unix_string),
+            last_modified: metadata
+                .modified()
+                .ok()
+                .and_then(system_time_to_unix_string),
             is_dir,
         })
     }

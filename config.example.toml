@@ -15,20 +15,53 @@ enabled = false
 
 # Define one or more storage backends. The entry with `active = true` is used;
 # if none is active, the first entry is the default.
+#
+# Common fields:
+#   name      Display name shown in the UI / used in /api?storage=<name>.
+#   type      "s3" or "local".
+#   active    Exactly one entry should be true; that one is served by default.
 
+# ---- S3-compatible backend ----------------------------------------------
+# Talks to AWS S3 or any S3-compatible gateway (MinIO, Ceph, AOSS, OSS, COS).
+#
+# s3 fields:
+#   endpoint          Optional override. Omit for real AWS; set for self-hosted
+#                     gateways. Use the *-internal variant when running inside
+#                     the same VPC to avoid public-endpoint quotas / throttling.
+#   bucket            Required. Bucket name only — no scheme, no slashes.
+#   access_key,
+#   secret_key        Static credentials. Prefer env-injected values over
+#                     committing plaintext here.
+#   region            Optional. Defaults to "us-east-1", which satisfies SigV4
+#                     for MinIO / LocalStack and AWS us-east-1 buckets.
+#   force_path_style  Default true. Path-style URL = `endpoint/bucket/key`,
+#                     used by MinIO / LocalStack / Ceph. Set false to switch to
+#                     virtual-host style (`bucket.endpoint/key`), required by
+#                     some gateways such as AOSS-internal that only resolve
+#                     `*.bucket-host` and reject path-style.
 [[storages]]
 name = "production-s3"
 type = "s3"
 active = true
-# `region` is optional; defaults to "us-east-1" when omitted, which is enough
-# for MinIO / LocalStack and any AWS bucket that lives in us-east-1.
-s3 = { endpoint = "http://localhost:9000", bucket = "my-bucket", access_key = "minioadmin", secret_key = "minioadmin" }
+s3 = { endpoint = "http://localhost:9000", bucket = "my-bucket", access_key = "minioadmin", secret_key = "minioadmin", force_path_style = true }
 
+# ---- Local filesystem backend -------------------------------------------
+# Serves files under a directory on the host.
+#
+# local fields:
+#   root_path         Required. Absolute path or `~` / `~/sub/dir` — a leading
+#                     tilde is expanded to $HOME at config-load time. Path
+#                     traversal (`..`) outside this root is rejected.
+#   follow_symlinks   Default true. When true, symlinks under root are followed
+#                     transparently (a symlinked directory shows as a directory
+#                     in listings). When false, symlinks are surfaced as their
+#                     own entries and reading them returns Forbidden — useful
+#                     when root contains untrusted user-controlled paths.
 [[storages]]
 name = "local-data"
 type = "local"
 active = false
-local = { root_path = "/var/lib/omni-stream" }
+local = { root_path = "/var/lib/omni-stream", follow_symlinks = true }
 
 # Environment overrides (prefix OMNI_, separator _):
 #   OMNI_SERVER_HOST, OMNI_SERVER_PORT

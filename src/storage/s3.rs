@@ -14,7 +14,7 @@ use super::{
 use crate::config::S3Config;
 use crate::error::AppError;
 
-const LIST_PAGE_SIZE: i32 = 1000;
+const LIST_PAGE_SIZE: i32 = 100;
 const CREDENTIAL_PROVIDER_NAME: &str = "omni-stream-config";
 
 /// Map raw S3 HTTP status / error-code combos to AppError variants.
@@ -72,10 +72,13 @@ impl S3Backend {
         }
 
         let shared = loader.load().await;
-        // Use path-style addressing whenever a custom endpoint is supplied
-        // (MinIO / LocalStack / Ceph need it); virtual-hosted-style on AWS itself.
+        // Default to path-style with custom endpoints (MinIO / LocalStack / Ceph
+        // need it), and to virtual-host style on AWS itself. `force_path_style`
+        // in config overrides this — set false for gateways like AOSS-internal
+        // that only accept `bucket.endpoint` addressing.
+        let path_style = cfg.force_path_style && custom_endpoint;
         let s3_cfg = aws_sdk_s3::config::Builder::from(&shared)
-            .force_path_style(custom_endpoint)
+            .force_path_style(path_style)
             .build();
         let client = Client::from_conf(s3_cfg);
 
