@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import {
   AlertCircle,
   ChevronLeft,
@@ -7,13 +8,15 @@ import {
   FileImage,
   FileVideo,
   Folder,
+  LogOut,
 } from 'lucide-react'
 
 import { proxyUrl } from '@/api/storage'
-import { ApiError } from '@/api/client'
+import { ApiError, getStoredToken, setStoredToken } from '@/api/client'
 import { useListFiles } from '@/hooks/use-storage'
 import { PathBreadcrumb } from '@/components/PathBreadcrumb'
 import { PreviewModal, type PreviewKind } from '@/components/PreviewModal'
+import { TokenPrompt } from '@/components/TokenPrompt'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -47,6 +50,7 @@ const VIDEO_EXTENSIONS = new Set([
 ])
 
 export function FileList() {
+  const queryClient = useQueryClient()
   const [prefix, setPrefix] = useState('')
   const [tokenStack, setTokenStack] = useState<Array<string | undefined>>([
     undefined,
@@ -58,6 +62,23 @@ export function FileList() {
 
   const currentToken = tokenStack[tokenStack.length - 1]
   const query = useListFiles(prefix, currentToken)
+
+  const isAuthError =
+    query.isError &&
+    query.error instanceof ApiError &&
+    query.error.status === 401
+
+  if (isAuthError) {
+    return (
+      <TokenPrompt
+        onSubmit={() => {
+          queryClient.invalidateQueries()
+        }}
+      />
+    )
+  }
+
+  const hasToken = getStoredToken() !== null
 
   function navigate(next: string) {
     setPrefix(next)
@@ -89,9 +110,24 @@ export function FileList() {
 
   return (
     <div className="mx-auto flex max-w-5xl flex-col gap-4 p-6">
-      <header className="flex flex-col gap-2">
-        <h1 className="text-2xl font-semibold">OmniStream</h1>
-        <PathBreadcrumb prefix={prefix} onNavigate={navigate} />
+      <header className="flex items-start justify-between gap-2">
+        <div className="flex flex-col gap-2">
+          <h1 className="text-2xl font-semibold">OmniStream</h1>
+          <PathBreadcrumb prefix={prefix} onNavigate={navigate} />
+        </div>
+        {hasToken && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              setStoredToken(null)
+              queryClient.invalidateQueries()
+            }}
+          >
+            <LogOut className="size-4" />
+            Sign out
+          </Button>
+        )}
       </header>
 
       {query.isError && <ErrorState error={query.error} />}
