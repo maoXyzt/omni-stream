@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { Download, ExternalLink } from 'lucide-react'
 
 import { proxyUrl } from '@/api/storage'
@@ -20,12 +21,51 @@ interface Props {
   kind: PreviewKind
   storage?: string
   onClose: () => void
+  onNavigate?: (dir: 'prev' | 'next') => void
 }
 
-export function PreviewModal({ fileKey, kind, storage, onClose }: Props) {
+export function PreviewModal({
+  fileKey,
+  kind,
+  storage,
+  onClose,
+  onNavigate,
+}: Props) {
   const src = proxyUrl(fileKey, storage)
   const type = getPreviewType(kind)
   const Previewer = type?.Component
+
+  useEffect(() => {
+    if (!onNavigate) return
+    const handler = (e: KeyboardEvent) => {
+      // Don't hijack arrow keys when the user is typing or interacting with a
+      // form field; video controls also handle ArrowUp/Down for volume so skip
+      // when the focused element is a media element.
+      const target = e.target as HTMLElement | null
+      if (target) {
+        const tag = target.tagName
+        if (
+          tag === 'INPUT' ||
+          tag === 'TEXTAREA' ||
+          tag === 'SELECT' ||
+          tag === 'VIDEO' ||
+          tag === 'AUDIO' ||
+          target.isContentEditable
+        ) {
+          return
+        }
+      }
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        onNavigate('next')
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        onNavigate('prev')
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [onNavigate])
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>

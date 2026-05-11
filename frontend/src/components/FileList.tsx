@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import {
   Navigate,
@@ -8,6 +8,7 @@ import {
 } from 'react-router-dom'
 import {
   AlertCircle,
+  Check,
   ChevronLeft,
   ChevronRight,
   Folder,
@@ -119,6 +120,31 @@ export function FileList() {
     )
   }, [setSearchParams])
 
+  // Keyboard navigation only steps through the previewable subset of the
+  // current page — pagination boundaries are deliberate stops since the next
+  // page hasn't been fetched yet.
+  const previewableEntries = useMemo(
+    () =>
+      listQuery.data?.entries.filter(
+        (e) => !e.is_dir && previewableKind(e.key),
+      ) ?? [],
+    [listQuery.data?.entries],
+  )
+
+  const navigatePreview = useCallback(
+    (dir: 'prev' | 'next') => {
+      if (!previewState || previewableEntries.length === 0) return
+      const idx = previewableEntries.findIndex(
+        (e) => e.key === previewState.key,
+      )
+      if (idx < 0) return
+      const nextIdx = dir === 'next' ? idx + 1 : idx - 1
+      if (nextIdx < 0 || nextIdx >= previewableEntries.length) return
+      openPreview(previewableEntries[nextIdx])
+    },
+    [previewState, previewableEntries, openPreview],
+  )
+
   // Once we know the storages roster, validate the URL's storage name. If it
   // doesn't exist, bounce to the server's default rather than rendering a
   // perpetual 404 for a typo'd / removed backend.
@@ -197,15 +223,7 @@ export function FileList() {
           <PathBreadcrumb prefix={prefix} onNavigate={goToPath} />
         </div>
         <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => copyShareUrl()}
-            title="Copy a shareable link to this view"
-          >
-            <Share2 className="size-4" />
-            Share link
-          </Button>
+          <ShareLinkButton />
           {hasToken && (
             <Button
               variant="outline"
@@ -274,21 +292,56 @@ export function FileList() {
           kind={previewState.kind}
           storage={storageName || undefined}
           onClose={closePreview}
+          onNavigate={navigatePreview}
         />
       )}
     </div>
   )
 }
 
-function copyShareUrl() {
-  const url = window.location.href
-  if (navigator.clipboard?.writeText) {
-    navigator.clipboard.writeText(url).catch(() => {
-      window.prompt('Copy this link:', url)
-    })
-    return
+function ShareLinkButton() {
+  const [copied, setCopied] = useState(false)
+
+  useEffect(() => {
+    if (!copied) return
+    const t = window.setTimeout(() => setCopied(false), 1800)
+    return () => window.clearTimeout(t)
+  }, [copied])
+
+  async function onClick() {
+    const url = window.location.href
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(url)
+        setCopied(true)
+        return
+      }
+    } catch {
+      // fall through to prompt
+    }
+    window.prompt('Copy this link:', url)
   }
-  window.prompt('Copy this link:', url)
+
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      onClick={onClick}
+      title="Copy a shareable link to this view"
+    >
+      {copied ? (
+        <>
+          <Check className="size-4" />
+          Copied
+        </>
+      ) : (
+        <>
+          <Share2 className="size-4" />
+          Share link
+        </>
+      )}
+    </Button>
+  )
 }
 
 interface FileRowProps {
