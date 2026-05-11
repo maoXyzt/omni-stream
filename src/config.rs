@@ -19,6 +19,8 @@ pub struct Config {
     pub server: ServerConfig,
     #[serde(default)]
     pub storages: Vec<StorageConfig>,
+    #[serde(default)]
+    pub auth: AuthConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -103,6 +105,26 @@ pub struct LocalConfig {
     pub root_path: PathBuf,
 }
 
+/// Optional bearer-token gate on `/api/*`. When `enabled = false` (default),
+/// the API is open to anyone who can reach the listening port.
+#[derive(Clone, Default, Deserialize)]
+pub struct AuthConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub token: Option<String>,
+}
+
+// Manual Debug: token is a secret; never let it surface via tracing or panic dumps.
+impl fmt::Debug for AuthConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AuthConfig")
+            .field("enabled", &self.enabled)
+            .field("token", &mask_secret(self.token.as_deref()))
+            .finish()
+    }
+}
+
 impl Config {
     pub fn load() -> anyhow::Result<Self> {
         let path = config_file_path();
@@ -159,6 +181,18 @@ impl Config {
                         bail!("storage '{}': local.root_path is required", s.name);
                     }
                 }
+            }
+        }
+        if self.auth.enabled {
+            let token_empty = self
+                .auth
+                .token
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .is_none();
+            if token_empty {
+                bail!("auth.enabled = true but auth.token is missing or empty");
             }
         }
         Ok(())
@@ -278,6 +312,80 @@ port = 9000
 "#;
         let cfg: Config = toml::from_str(raw).expect("syntactic parse");
         assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn auth_disabled_by_default() {
+        let raw = r#"
+[[storages]]
+name = "x"
+type = "local"
+active = true
+local = { root_path = "/tmp" }
+"#;
+        let cfg = parse(raw);
+        assert!(!cfg.auth.enabled);
+        assert!(cfg.auth.token.is_none());
+    }
+
+    #[test]
+    fn auth_enabled_requires_non_empty_token() {
+        let cases = [
+            r#"
+[auth]
+enabled = true
+
+[[storages]]
+name = "x"
+type = "local"
+active = true
+local = { root_path = "/tmp" }
+"#,
+            r#"
+[auth]
+enabled = true
+token = "   "
+
+[[storages]]
+name = "x"
+type = "local"
+active = true
+local = { root_path = "/tmp" }
+"#,
+        ];
+        for raw in cases {
+            let cfg: Config = toml::from_str(raw).expect("syntactic");
+            assert!(cfg.validate().is_err(), "should reject: {raw}");
+        }
+    }
+
+    #[test]
+    fn auth_enabled_with_token_validates() {
+        let raw = r#"
+[auth]
+enabled = true
+token = "secret-token"
+
+[[storages]]
+name = "x"
+type = "local"
+active = true
+local = { root_path = "/tmp" }
+"#;
+        let cfg = parse(raw);
+        assert!(cfg.auth.enabled);
+        assert_eq!(cfg.auth.token.as_deref(), Some("secret-token"));
+    }
+
+    #[test]
+    fn debug_masks_auth_token() {
+        let auth = AuthConfig {
+            enabled: true,
+            token: Some("very-secret-bearer-value".into()),
+        };
+        let dbg = format!("{auth:?}");
+        assert!(!dbg.contains("very-secret-bearer-value"), "leaked: {dbg}");
+        assert!(dbg.contains("REDACTED"));
     }
 
     #[test]

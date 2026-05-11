@@ -1,3 +1,4 @@
+mod auth;
 mod config;
 mod error;
 mod handlers;
@@ -7,12 +8,14 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use axum::Router;
+use axum::middleware;
 use axum::routing::get;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
+use crate::auth::{AuthState, auth_middleware};
 use crate::config::Config;
 use crate::handlers::{
     AppState, list_handler, proxy_handler, stat_handler, static_handler,
@@ -30,11 +33,20 @@ async fn main() -> anyhow::Result<()> {
 
     let backend: Arc<dyn StorageBackend> = create_backend(&cfg).await?.into();
     let state = AppState { backend };
+    let auth_state = AuthState::from_config(&cfg.auth).context("init auth gate")?;
+    if auth_state.enabled {
+        tracing::info!("auth gate enabled: /api/* requires Bearer token");
+    } else {
+        tracing::info!("auth gate disabled (open API)");
+    }
 
     let app = Router::new()
         .route("/api/list", get(list_handler))
         .route("/api/stat/{*key}", get(stat_handler))
         .route("/api/proxy/{*key}", get(proxy_handler))
+        // route_layer applies only to routes registered above; fallback (SPA HTML/
+        // JS/CSS) stays open so the browser can load the login UI.
+        .route_layer(middleware::from_fn_with_state(auth_state, auth_middleware))
         .fallback(static_handler)
         .with_state(state)
         .layer(TraceLayer::new_for_http());

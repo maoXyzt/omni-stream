@@ -82,11 +82,41 @@ s3 = { endpoint = "http://minio.local:9000", bucket = "data", access_key = "..."
 | --- | --- |
 | `OMNI_SERVER_HOST` | 覆盖 `server.host` |
 | `OMNI_SERVER_PORT` | 覆盖 `server.port` |
+| `OMNI_AUTH_ENABLED` | 覆盖 `auth.enabled`（`true` / `false`） |
+| `OMNI_AUTH_TOKEN` | 覆盖 `auth.token`（建议把 secret 放这里而不是配置文件） |
 | `OMNI_CONFIG` | 强制使用某个绝对路径的 `config.toml` |
 | `RUST_LOG` | tracing 过滤，例如 `info,tower_http=debug,aws=info` |
 
-S3 的 `access_key` / `secret_key` 不会进 `tracing` 日志（`S3Config` 有手写的
-masked `Debug`，无论怎么打印都是 `***REDACTED***`）。
+S3 的 `access_key` / `secret_key` 与 `auth.token` 都不会进 `tracing` 日志
+（`S3Config` 与 `AuthConfig` 都手写了 masked `Debug`，无论怎么打印都是
+`***REDACTED***`）。
+
+### 鉴权（可选）
+
+默认状态下 `/api/*` 是开放的——这只适合局域网信任环境。要开启 Bearer token 鉴权：
+
+```toml
+[auth]
+enabled = true
+token = "any-long-random-string"
+```
+
+或者只用环境变量（不把 secret 放进配置文件）：
+
+```bash
+OMNI_AUTH_ENABLED=true OMNI_AUTH_TOKEN=$(openssl rand -hex 32) ./omni-stream
+```
+
+启用后：
+
+- 所有 `/api/*` 请求必须带 `Authorization: Bearer <token>`，否则返回 `401` +
+  `WWW-Authenticate: Bearer realm="omni-stream"`。
+- token 比对走常时间字节比较，不会因长度 / 内容差异泄漏时序。
+- 嵌入的前端 SPA（`/`、`/assets/*`）保持开放——浏览器要先把页面拉下来，才有
+  地方让用户输入 token。第一次访问 API 拿到 401，前端会弹出 token 输入框，
+  存到 `localStorage`，之后的请求自动带上。
+- TLS 不在本进程职责范围内。要暴露到不信任网络，请在前面挡 nginx / caddy /
+  Cloudflare 反代，让其负责 HTTPS。
 
 ## 4. 启动
 
@@ -154,6 +184,7 @@ omni-stream/
 
 | 触发 | HTTP | AppError |
 | --- | --- | --- |
+| 鉴权开启但未带 / token 错误 | 401 | （middleware，不走 AppError） |
 | 文件不存在 | 404 | `NotFound` |
 | 凭据无 GetObject 权限 / S3 AccessDenied | 403 | `Forbidden` |
 | 越界 / 非法 Range | 416 | `InvalidRange` |

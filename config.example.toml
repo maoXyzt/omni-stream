@@ -6,6 +6,13 @@
 host = "127.0.0.1"
 port = 8080
 
+# Optional bearer-token gate on /api/*. When disabled (default), the API is
+# open to anyone who can reach the port. Enable for internal-tool deployment.
+# The token can also be supplied via the OMNI_AUTH_TOKEN environment variable.
+[auth]
+enabled = false
+# token = "replace-with-a-long-random-string"
+
 # Define one or more storage backends. The entry with `active = true` is used;
 # if none is active, the first entry is the default.
 

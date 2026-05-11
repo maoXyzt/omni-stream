@@ -5,6 +5,7 @@ use aws_sdk_s3::config::{Credentials, Region};
 use aws_sdk_s3::error::{ProvideErrorMetadata, SdkError};
 use aws_sdk_s3::operation::get_object::GetObjectError;
 use aws_sdk_s3::operation::head_object::HeadObjectError;
+use aws_sdk_s3::operation::list_objects_v2::ListObjectsV2Error;
 use tokio_util::io::ReaderStream;
 
 use super::{
@@ -105,6 +106,17 @@ impl S3Backend {
             e => AppError::Backend(format!("S3 head sdk error: {e}")),
         }
     }
+
+    fn map_list_err(err: SdkError<ListObjectsV2Error>) -> AppError {
+        match err {
+            SdkError::ServiceError(svc) => {
+                let status = svc.raw().status().as_u16();
+                let code = svc.err().code().unwrap_or_default();
+                classify_s3_status(status, code, "list", svc.err())
+            }
+            e => AppError::Backend(format!("S3 list sdk error: {e}")),
+        }
+    }
 }
 
 #[async_trait]
@@ -163,7 +175,7 @@ impl StorageBackend for S3Backend {
         let resp = req
             .send()
             .await
-            .map_err(|e| AppError::Backend(format!("S3 list error: {e}")))?;
+            .map_err(Self::map_list_err)?;
 
         let mut entries: Vec<FileEntry> = Vec::new();
 
