@@ -3,6 +3,7 @@ import { Maximize, ZoomIn, ZoomOut } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 
+import { PreviewSpinner } from './PreviewSpinner'
 import type { PreviewerProps } from './types'
 
 type Zoom = 'fit' | number
@@ -14,6 +15,16 @@ const ZOOM_MAX = 16
 export function ImagePreview({ fileKey, src }: PreviewerProps) {
   const [zoom, setZoom] = useState<Zoom>('fit')
   const [natural, setNatural] = useState<{ w: number; h: number } | null>(null)
+  const [loaded, setLoaded] = useState(false)
+  // src can change in place when the user navigates between images. Reset
+  // load/natural state during render (React's "adjusting state on prop change"
+  // pattern) so the spinner reappears immediately for the new image.
+  const [trackedSrc, setTrackedSrc] = useState(src)
+  if (src !== trackedSrc) {
+    setTrackedSrc(src)
+    setLoaded(false)
+    setNatural(null)
+  }
 
   function zoomIn() {
     setZoom((z) =>
@@ -29,14 +40,17 @@ export function ImagePreview({ fileKey, src }: PreviewerProps) {
   const isFit = zoom === 'fit'
   const scale = typeof zoom === 'number' ? zoom : null
 
-  const onLoad = (e: React.SyntheticEvent<HTMLImageElement>) =>
+  const onLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
     setNatural({
       w: e.currentTarget.naturalWidth,
       h: e.currentTarget.naturalHeight,
     })
+    setLoaded(true)
+  }
 
   return (
     <div className="relative h-full w-full overflow-hidden rounded-md bg-muted/30">
+      {!loaded && <PreviewSpinner />}
       {isFit ? (
         // Fit mode: no scroll wrapper. The flex container is pinned to the
         // outer box, and the image uses min-h-0/min-w-0 so flex doesn't grant
