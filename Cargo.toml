@@ -64,7 +64,6 @@ sha2 = "0.10"
 # CI takes over after the tag lands and runs `cargo publish`, so the local
 # command must NOT publish.
 [package.metadata.release]
-tag-prefix = "v"
 publish = false
 pre-release-commit-message = "release: {{version}}"
 tag-message = "release {{version}}"

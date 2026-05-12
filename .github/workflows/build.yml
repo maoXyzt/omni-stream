@@ -34,6 +34,36 @@ permissions:
   contents: read
 
 jobs:
+  # `cargo release` pushes the version-bump commit to main and then pushes a
+  # v* tag pointing at the same commit. Both pushes trigger this workflow on
+  # different refs, so without a gate the whole 4-platform matrix runs twice.
+  # The tag run is the one that produces shippable artifacts; the main run is
+  # pure waste. We detect the release commit by its message (set in
+  # `[package.metadata.release].pre-release-commit-message`) and propagate the
+  # skip through the `needs` chain by gating the two root jobs (`frontend`,
+  # `matrix-config`). Message-matching beats `git tag --points-at HEAD` here
+  # because the tag may not yet exist on the remote when the main push fires.
+  preflight:
+    name: Detect cargo-release commit
+    runs-on: ubuntu-latest
+    outputs:
+      skip: ${{ steps.gate.outputs.skip }}
+    steps:
+      - id: gate
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          MSG: ${{ github.event.head_commit.message }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT" == "push" && "$REF" == "refs/heads/main" && "$MSG" == release:* ]]; then
+            echo "skip=true" >>"$GITHUB_OUTPUT"
+            echo "::notice::Skipping main-branch build for cargo-release commit; the v* tag push will run the full pipeline."
+          else
+            echo "skip=false" >>"$GITHUB_OUTPUT"
+          fi
+
   # Cheap preflight that gates `release` and `publish`. Failing here costs ~30s
   # instead of ~20min of backend / publish work on a mistyped tag.
   verify-tag:
@@ -62,6 +92,8 @@ jobs:
   # wasted spend.
   matrix-config:
     name: Backend matrix config
+    needs: preflight
+    if: needs.preflight.outputs.skip != 'true'
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.set.outputs.matrix }}
@@ -87,6 +119,8 @@ jobs:
 
   frontend:
     name: Frontend
+    needs: preflight
+    if: needs.preflight.outputs.skip != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
