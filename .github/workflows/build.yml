@@ -1,10 +1,18 @@
 name: build
 
 on:
+  # `paths-ignore` skips the entire workflow when a push / PR touches only
+  # documentation. Tag pushes share this filter (GitHub has no per-trigger
+  # `paths-ignore`), but in practice tags created via `cargo release` always
+  # commit a Cargo.toml + Cargo.lock version bump, so a md-only release commit
+  # never happens. If you ever hand-tag a doc-only commit, prefix with
+  # `git commit --allow-empty -m "release prep"` to force the workflow to fire.
   push:
     branches: [main, dev]
     tags: ['v*']
+    paths-ignore: ['**/*.md', 'docs/**']
   pull_request:
+    paths-ignore: ['**/*.md', 'docs/**']
   workflow_dispatch:
 
 concurrency:
