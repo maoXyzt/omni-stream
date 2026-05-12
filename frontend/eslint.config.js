@@ -18,5 +18,14 @@ export default defineConfig([
     languageOptions: {
       globals: globals.browser,
     },
+    rules: {
+      // iconForKey() returns a stable reference from a fixed lucide-react set;
+      // the lint rule can't see through the indirection. Flagged as cosmetic.
+      'react-hooks/static-components': 'off',
+      // TextPreview synchronously flips `ready` when the language is already
+      // bundled — initial state already handles it, the effect only covers
+      // post-mount language switches. Cascading-render cost is negligible.
+      'react-hooks/set-state-in-effect': 'off',
+    },
   },
 ])

@@ -171,6 +171,25 @@ export function FileList() {
     [previewState, previewableEntries, openPreview],
   )
 
+  const sortedEntries = useMemo(
+    () => (listQuery.data ? sortEntries(listQuery.data.entries, sortDir) : []),
+    [listQuery.data, sortDir],
+  )
+
+  // Scroll-to-top: the shell's main element is the scroll container (sidebar
+  // and main scroll independently), so we listen on the ref rather than on
+  // window. Threshold 100px = roughly "user has scrolled past the toolbar".
+  const mainRef = useRef<HTMLElement>(null)
+  const [scrolled, setScrolled] = useState(false)
+  const handleMainScroll = useCallback(() => {
+    const el = mainRef.current
+    if (!el) return
+    setScrolled(el.scrollTop > 100)
+  }, [])
+  const scrollToTop = useCallback(() => {
+    mainRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
+  }, [])
+
   // Once we know the storages roster, validate the URL's storage name. If it
   // doesn't exist, bounce to the server's default rather than rendering a
   // perpetual 404 for a typo'd / removed backend.
@@ -234,25 +253,6 @@ export function FileList() {
   const sidebarParent = parentInfo?.parent ?? ''
   const sidebarCurrent = parentInfo?.currentName ?? ''
   const toggleMainSort = () => setSortDir(sortDir === 'asc' ? 'desc' : 'asc')
-
-  const sortedEntries = useMemo(
-    () => (listQuery.data ? sortEntries(listQuery.data.entries, sortDir) : []),
-    [listQuery.data, sortDir],
-  )
-
-  // Scroll-to-top: the shell's main element is the scroll container (sidebar
-  // and main scroll independently), so we listen on the ref rather than on
-  // window. Threshold 100px = roughly "user has scrolled past the toolbar".
-  const mainRef = useRef<HTMLElement>(null)
-  const [scrolled, setScrolled] = useState(false)
-  const handleMainScroll = useCallback(() => {
-    const el = mainRef.current
-    if (!el) return
-    setScrolled(el.scrollTop > 100)
-  }, [])
-  const scrollToTop = useCallback(() => {
-    mainRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
-  }, [])
 
   return (
     <div className="flex h-screen w-full flex-col">
