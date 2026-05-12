@@ -359,11 +359,7 @@ pub fn inventory_cache(root: &Path) -> std::io::Result<CacheInventory> {
 /// (2) if the surviving total still exceeds `max_bytes`, delete by mtime
 /// ascending (oldest first) until under cap. Touch-on-hit refreshes mtime so
 /// this approximates LRU without any sidecar database.
-pub fn sweep_cache(
-    root: &Path,
-    max_bytes: u64,
-    max_age: Duration,
-) -> std::io::Result<SweepStats> {
+pub fn sweep_cache(root: &Path, max_bytes: u64, max_age: Duration) -> std::io::Result<SweepStats> {
     let now = SystemTime::now();
     let age_check = !max_age.is_zero();
     let mut stats = SweepStats::default();
@@ -381,9 +377,7 @@ pub fn sweep_cache(
                 .is_some_and(|n| n.contains(".tmp."))
             {
                 let mtime = meta.modified().unwrap_or(UNIX_EPOCH);
-                if now.duration_since(mtime).unwrap_or_default()
-                    > Duration::from_secs(86_400)
-                {
+                if now.duration_since(mtime).unwrap_or_default() > Duration::from_secs(86_400) {
                     let _ = std::fs::remove_file(path);
                 }
             }
@@ -533,7 +527,10 @@ mod tests {
             let p = root.join(name);
             std::fs::create_dir_all(p.parent().unwrap()).unwrap();
             std::fs::write(&p, vec![0u8; *size as usize]).unwrap();
-            std::fs::File::open(&p).unwrap().set_modified(*mtime).unwrap();
+            std::fs::File::open(&p)
+                .unwrap()
+                .set_modified(*mtime)
+                .unwrap();
         }
     }
 

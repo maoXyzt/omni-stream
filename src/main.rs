@@ -114,10 +114,7 @@ fn spawn_thumb_sweep(state: Arc<ThumbState>) {
         // First sweep deferred by the interval rather than running at boot —
         // a freshly-restarted server probably hasn't drifted over the cap
         // yet, and deferring keeps startup logs uncluttered.
-        let mut ticker = tokio::time::interval_at(
-            tokio::time::Instant::now() + interval,
-            interval,
-        );
+        let mut ticker = tokio::time::interval_at(tokio::time::Instant::now() + interval, interval);
         // Don't try to "catch up" if a sweep ran long; just resume cadence.
         ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
         loop {
@@ -185,7 +182,11 @@ fn cmd_cache_info(cfg: &Config) -> anyhow::Result<()> {
     println!(
         "age cap:    {} days{}",
         cfg.thumbnails.max_age_days,
-        if cfg.thumbnails.max_age_days == 0 { " (disabled)" } else { "" },
+        if cfg.thumbnails.max_age_days == 0 {
+            " (disabled)"
+        } else {
+            ""
+        },
     );
     println!("oldest:     {}", fmt_age(inv.oldest));
     println!("newest:     {}", fmt_age(inv.newest));
@@ -223,8 +224,7 @@ fn cmd_cache_clear(cfg: &Config) -> anyhow::Result<()> {
         println!("cache root does not exist: {}", root.display());
         return Ok(());
     }
-    std::fs::remove_dir_all(&root)
-        .with_context(|| format!("remove {}", root.display()))?;
+    std::fs::remove_dir_all(&root).with_context(|| format!("remove {}", root.display()))?;
     println!("removed: {}", root.display());
     Ok(())
 }
