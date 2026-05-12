@@ -128,6 +128,9 @@ omni-stream
 # 或显式指定一份
 OMNI_CONFIG=/etc/omni-stream/config.toml omni-stream
 
+# 或显式指定端口
+OMNI_SERVER_PORT=8081 omni-stream
+
 # 调试时打开请求日志
 RUST_LOG=info,tower_http=debug omni-stream
 ```
