@@ -20,7 +20,10 @@ export function useListFiles(
     queryKey: ['list', storage ?? null, prefix, pageToken ?? null] as const,
     queryFn: () => listFiles(prefix, pageToken, storage),
     placeholderData: keepPreviousData,
-    staleTime: 5_000,
+    // 5 minutes: long enough that navigating between sibling dirs (and the
+    // sidebar's parent-dir read) reuses the cache without refetching. Short
+    // enough that a user returning after a break sees a fresh listing.
+    staleTime: 5 * 60_000,
     enabled: storage !== undefined,
   })
 }

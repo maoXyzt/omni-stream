@@ -19,11 +19,19 @@ import {
 import { proxyUrl } from '@/api/storage'
 import { ApiError, getStoredToken, setStoredToken } from '@/api/client'
 import { useListFiles, useStorages } from '@/hooks/use-storage'
+import { useSortDir } from '@/hooks/use-sort-dir'
 import { useViewMode } from '@/hooks/use-view-mode'
+import { sortEntries } from '@/lib/sort'
 import { FileGrid } from '@/components/FileGrid'
 import { PathBreadcrumb } from '@/components/PathBreadcrumb'
 import { PreviewModal } from '@/components/PreviewModal'
-import { iconForKey, previewableKind } from '@/components/preview/registry'
+import { Sidebar } from '@/components/Sidebar'
+import {
+  FOLDER_COLOR,
+  colorForKey,
+  iconForKey,
+  previewableKind,
+} from '@/components/preview/registry'
 import { StorageSwitcher } from '@/components/StorageSwitcher'
 import { TokenPrompt } from '@/components/TokenPrompt'
 import { ViewToggle } from '@/components/ViewToggle'
@@ -54,9 +62,11 @@ export function FileList() {
   // convention (e.g. `videos/` not `videos`).
   const rawSplat = params['*'] ?? ''
   const prefix = useMemo(() => normalizePrefix(rawSplat), [rawSplat])
+  const parentInfo = useMemo(() => parentOf(prefix), [prefix])
 
   const storagesQuery = useStorages()
   const [viewMode, setViewMode] = useViewMode()
+  const [sortDir, setSortDir] = useSortDir()
   const [tokenStack, setTokenStack] = useState<Array<string | undefined>>([
     undefined,
   ])
@@ -129,10 +139,11 @@ export function FileList() {
   // page hasn't been fetched yet.
   const previewableEntries = useMemo(
     () =>
-      listQuery.data?.entries.filter(
-        (e) => !e.is_dir && previewableKind(e.key),
-      ) ?? [],
-    [listQuery.data?.entries],
+      (listQuery.data
+        ? sortEntries(listQuery.data.entries, sortDir)
+        : []
+      ).filter((e) => !e.is_dir && previewableKind(e.key)),
+    [listQuery.data, sortDir],
   )
 
   const navigatePreview = useCallback(
@@ -210,9 +221,34 @@ export function FileList() {
     )
   }
 
+  // Keep sidebar visible even at the storage root so the main pane's width
+  // doesn't reflow on navigation. At root the up button is omitted but the
+  // panel still shows root-level folders for quick jumps.
+  const sidebarParent = parentInfo?.parent ?? ''
+  const sidebarCurrent = parentInfo?.currentName ?? ''
+  const toggleSort = () => setSortDir(sortDir === 'asc' ? 'desc' : 'asc')
+
+  const sortedEntries = useMemo(
+    () => (listQuery.data ? sortEntries(listQuery.data.entries, sortDir) : []),
+    [listQuery.data, sortDir],
+  )
+
   return (
-    <div className="mx-auto flex max-w-5xl flex-col gap-4 p-6">
-      <header className="flex flex-wrap items-start justify-between gap-2">
+    <div className="flex w-full">
+      {storageName && (
+        <aside className="hidden md:flex md:w-64 md:shrink-0 md:flex-col md:border-r md:border-border">
+          <Sidebar
+            parent={sidebarParent}
+            currentName={sidebarCurrent}
+            storageName={storageName}
+            onNavigate={goToPath}
+            sortDir={sortDir}
+            onToggleSort={toggleSort}
+          />
+        </aside>
+      )}
+      <div className="flex w-full min-w-0 flex-col gap-4 px-6 py-4">
+        <header className="flex flex-wrap items-start justify-between gap-2">
         <div className="flex flex-col gap-2">
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-semibold">OmniStream</h1>
@@ -253,7 +289,7 @@ export function FileList() {
         <>
           {viewMode === 'grid' ? (
             <FileGrid
-              entries={listQuery.data.entries}
+              entries={sortedEntries}
               prefix={prefix}
               storageName={storageName}
               onSelect={handleEntry}
@@ -268,7 +304,7 @@ export function FileList() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {listQuery.data.entries.length === 0 && (
+                {sortedEntries.length === 0 && (
                   <TableRow>
                     <TableCell
                       colSpan={3}
@@ -278,7 +314,7 @@ export function FileList() {
                     </TableCell>
                   </TableRow>
                 )}
-                {listQuery.data.entries.map((entry) => (
+                {sortedEntries.map((entry) => (
                   <FileRow
                     key={entry.key}
                     entry={entry}
@@ -300,15 +336,16 @@ export function FileList() {
         </>
       ) : null}
 
-      {previewState && (
-        <PreviewModal
-          fileKey={previewState.key}
-          kind={previewState.kind}
-          storage={storageName || undefined}
-          onClose={closePreview}
-          onNavigate={navigatePreview}
-        />
-      )}
+        {previewState && (
+          <PreviewModal
+            fileKey={previewState.key}
+            kind={previewState.kind}
+            storage={storageName || undefined}
+            onClose={closePreview}
+            onNavigate={navigatePreview}
+          />
+        )}
+      </div>
     </div>
   )
 }
@@ -365,9 +402,8 @@ interface FileRowProps {
 }
 
 function FileRow({ entry, prefix, onSelect }: FileRowProps) {
-  const Icon = entry.is_dir
-    ? Folder
-    : iconForKey(entry.key)
+  const Icon = entry.is_dir ? Folder : iconForKey(entry.key)
+  const color = entry.is_dir ? FOLDER_COLOR : colorForKey(entry.key)
   const name = displayName(entry.key, prefix)
 
   return (
@@ -376,7 +412,7 @@ function FileRow({ entry, prefix, onSelect }: FileRowProps) {
       onClick={() => onSelect(entry)}
     >
       <TableCell className="flex items-center gap-2 truncate">
-        <Icon className="size-4 shrink-0 text-muted-foreground" />
+        <Icon className={`size-4 shrink-0 ${color}`} />
         <span className="truncate">{name}</span>
       </TableCell>
       <TableCell className="text-right tabular-nums text-muted-foreground">
@@ -435,8 +471,8 @@ function ListSkeleton() {
 
 function GridSkeleton() {
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
-      {Array.from({ length: 12 }).map((_, i) => (
+    <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 xl:grid-cols-10">
+      {Array.from({ length: 20 }).map((_, i) => (
         <Skeleton key={i} className="aspect-square w-full rounded-md" />
       ))}
     </div>
@@ -463,6 +499,21 @@ function normalizePrefix(value: string): string {
   const trimmed = value.replace(/^\/+/, '')
   if (!trimmed) return ''
   return trimmed.endsWith('/') ? trimmed : `${trimmed}/`
+}
+
+/// Split a normalized prefix into (parent prefix, current dir name). Returns
+/// null at the storage root — no sidebar in that case.
+function parentOf(prefix: string): { parent: string; currentName: string } | null {
+  if (!prefix) return null
+  const stripped = prefix.replace(/\/+$/, '')
+  const lastSlash = stripped.lastIndexOf('/')
+  if (lastSlash < 0) {
+    return { parent: '', currentName: stripped }
+  }
+  return {
+    parent: stripped.slice(0, lastSlash + 1),
+    currentName: stripped.slice(lastSlash + 1),
+  }
 }
 
 function stripPrefix(key: string, prefix: string): string {

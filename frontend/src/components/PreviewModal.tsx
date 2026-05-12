@@ -39,8 +39,8 @@ export function PreviewModal({
     if (!onNavigate) return
     const handler = (e: KeyboardEvent) => {
       // Don't hijack arrow keys when the user is typing or interacting with a
-      // form field; video controls also handle ArrowUp/Down for volume so skip
-      // when the focused element is a media element.
+      // form field; video/audio controls also handle arrows for volume and
+      // scrubbing so skip when a media element is focused.
       const target = e.target as HTMLElement | null
       if (target) {
         const tag = target.tagName
@@ -55,10 +55,13 @@ export function PreviewModal({
           return
         }
       }
-      if (e.key === 'ArrowDown') {
+      // Both axes navigate: up/down match the list view's vertical flow, and
+      // left/right match the grid view's horizontal tile layout. Mapping all
+      // four lets muscle memory carry over either way.
+      if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
         e.preventDefault()
         onNavigate('next')
-      } else if (e.key === 'ArrowUp') {
+      } else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
         e.preventDefault()
         onNavigate('prev')
       }

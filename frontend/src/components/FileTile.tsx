@@ -2,7 +2,12 @@ import { useState, type ComponentType } from 'react'
 import { Folder, ImageOff } from 'lucide-react'
 
 import { proxyUrl, thumbUrl } from '@/api/storage'
-import { iconForKey, previewableKind } from '@/components/preview/registry'
+import {
+  FOLDER_COLOR,
+  colorForKey,
+  iconForKey,
+  previewableKind,
+} from '@/components/preview/registry'
 import { cn } from '@/lib/utils'
 import type { FileEntry } from '@/types/storage'
 
@@ -10,6 +15,11 @@ import type { FileEntry } from '@/types/storage'
 // from resizing). SVG is its own thumbnail; ICO/AVIF would 415 from the
 // server. Skip the round-trip and serve the original directly.
 const THUMB_SKIP_EXTS = new Set(['svg', 'ico', 'avif'])
+
+// Below this size, a 320 px WebP thumbnail (~10–15 KB) wouldn't save bandwidth
+// vs. the original — small images are already well-compressed. Serve the
+// original via proxy instead, avoiding the decode/resize/re-encode cost.
+const THUMB_MIN_BYTES = 64 * 1024
 
 interface FileTileProps {
   entry: FileEntry
@@ -31,7 +41,7 @@ export function FileTile({ entry, prefix, storageName, onSelect }: FileTileProps
     >
       <div className="relative aspect-square overflow-hidden rounded-md border bg-muted/40 transition-colors group-hover:bg-muted">
         {entry.is_dir ? (
-          <IconFill icon={Folder} />
+          <IconFill icon={Folder} color={FOLDER_COLOR} />
         ) : isImage ? (
           <ImageContent
             entry={entry}
@@ -39,7 +49,7 @@ export function FileTile({ entry, prefix, storageName, onSelect }: FileTileProps
             alt={name}
           />
         ) : (
-          <IconFill icon={iconForKey(entry.key)} />
+          <IconFill icon={iconForKey(entry.key)} color={colorForKey(entry.key)} />
         )}
       </div>
       <div className="truncate px-1 text-xs text-muted-foreground">{name}</div>
@@ -59,7 +69,8 @@ function ImageContent({ entry, storageName, alt }: ImageContentProps) {
   const [usingFallback, setUsingFallback] = useState(false)
 
   const ext = extensionOf(entry.key)
-  const useThumb = !ext || !THUMB_SKIP_EXTS.has(ext)
+  const useThumb =
+    (!ext || !THUMB_SKIP_EXTS.has(ext)) && entry.size > THUMB_MIN_BYTES
   const src =
     useThumb && !usingFallback
       ? thumbUrl(entry.key, {
@@ -99,9 +110,15 @@ function ImageContent({ entry, storageName, alt }: ImageContentProps) {
   )
 }
 
-function IconFill({ icon: Icon }: { icon: ComponentType<{ className?: string }> }) {
+function IconFill({
+  icon: Icon,
+  color = 'text-muted-foreground',
+}: {
+  icon: ComponentType<{ className?: string }>
+  color?: string
+}) {
   return (
-    <div className="flex size-full items-center justify-center text-muted-foreground">
+    <div className={cn('flex size-full items-center justify-center', color)}>
       <Icon className="size-10" />
     </div>
   )
