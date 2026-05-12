@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import {
   Navigate,
@@ -10,6 +10,7 @@ import {
   AlertCircle,
   ArrowDownAZ,
   ArrowDownZA,
+  ArrowUp,
   Check,
   ChevronLeft,
   ChevronRight,
@@ -236,6 +237,20 @@ export function FileList() {
     [listQuery.data, sortDir],
   )
 
+  // Scroll-to-top: the shell's main element is the scroll container (sidebar
+  // and main scroll independently), so we listen on the ref rather than on
+  // window. Threshold 200px = roughly "user has scrolled past the toolbar".
+  const mainRef = useRef<HTMLElement>(null)
+  const [scrolled, setScrolled] = useState(false)
+  const handleMainScroll = useCallback(() => {
+    const el = mainRef.current
+    if (!el) return
+    setScrolled(el.scrollTop > 200)
+  }, [])
+  const scrollToTop = useCallback(() => {
+    mainRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
+  }, [])
+
   return (
     <div className="flex h-screen w-full flex-col">
       <header className="flex shrink-0 flex-wrap items-center gap-3 border-b border-border bg-background px-6 py-3">
@@ -267,7 +282,11 @@ export function FileList() {
             />
           </aside>
         )}
-        <main className="flex w-full min-w-0 flex-col gap-4 overflow-y-auto px-6 py-4">
+        <main
+          ref={mainRef}
+          onScroll={handleMainScroll}
+          className="flex w-full min-w-0 flex-col gap-4 overflow-y-auto px-6 py-4"
+        >
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="min-w-0 flex-1">
               <PathBreadcrumb prefix={prefix} onNavigate={goToPath} />
@@ -315,6 +334,14 @@ export function FileList() {
         viewMode === 'grid' ? <GridSkeleton /> : <ListSkeleton />
       ) : listQuery.data ? (
         <>
+          <Pager
+            hasPrev={tokenStack.length > 1}
+            hasNext={Boolean(listQuery.data.next_token)}
+            isFetching={listQuery.isFetching}
+            onPrev={prevPage}
+            onNext={nextPage}
+          />
+
           {viewMode === 'grid' ? (
             <FileGrid
               entries={sortedEntries}
@@ -353,19 +380,24 @@ export function FileList() {
               </TableBody>
             </Table>
           )}
-
-          <Pager
-            hasPrev={tokenStack.length > 1}
-            hasNext={Boolean(listQuery.data.next_token)}
-            isFetching={listQuery.isFetching}
-            onPrev={prevPage}
-            onNext={nextPage}
-          />
         </>
       ) : null}
 
         </main>
       </div>
+
+      {scrolled && (
+        <Button
+          variant="secondary"
+          size="icon"
+          aria-label="Back to top"
+          title="Back to top"
+          onClick={scrollToTop}
+          className="fixed bottom-6 right-6 size-11 rounded-full shadow-lg"
+        >
+          <ArrowUp className="size-5" />
+        </Button>
+      )}
 
       {previewState && (
         <PreviewModal
