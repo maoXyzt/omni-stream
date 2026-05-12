@@ -258,7 +258,11 @@ jobs:
         with:
           key: publish-dry-run
 
-      - run: cargo publish --dry-run --locked --registry crates-io
+      # `--allow-dirty`: `frontend/dist/` is gitignored but pulled from the
+      # `frontend` artifact at runtime; cargo otherwise refuses to package
+      # with uncommitted files in the tree. The `include` field in Cargo.toml
+      # is what actually ships dist into the tarball.
+      - run: cargo publish --dry-run --locked --allow-dirty --registry crates-io
 
   publish:
     name: cargo publish
@@ -280,7 +284,8 @@ jobs:
         with:
           key: publish
 
+      # See `publish-dry-run` for why `--allow-dirty` is required.
       - name: cargo publish
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: cargo publish --locked --registry crates-io
+        run: cargo publish --locked --allow-dirty --registry crates-io
