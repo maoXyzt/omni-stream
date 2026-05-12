@@ -91,9 +91,8 @@ async fn build_one(entry: &StorageConfig) -> anyhow::Result<Arc<dyn StorageBacke
                     entry.name
                 )
             })?;
-            validate_local_root(&local.root_path).with_context(|| {
-                format!("invalid root_path for storage '{}'", entry.name)
-            })?;
+            validate_local_root(&local.root_path)
+                .with_context(|| format!("invalid root_path for storage '{}'", entry.name))?;
             Arc::new(LocalFsBackend::new(
                 local.root_path.clone(),
                 local.follow_symlinks,

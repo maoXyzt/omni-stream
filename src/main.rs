@@ -18,8 +18,7 @@ use tracing_subscriber::util::SubscriberInitExt;
 use crate::auth::{AuthState, auth_middleware};
 use crate::config::Config;
 use crate::handlers::{
-    AppState, list_handler, list_storages_handler, proxy_handler, stat_handler,
-    static_handler,
+    AppState, list_handler, list_storages_handler, proxy_handler, stat_handler, static_handler,
 };
 use crate::storage::factory::create_registry;
 

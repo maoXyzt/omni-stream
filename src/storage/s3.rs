@@ -8,9 +8,7 @@ use aws_sdk_s3::operation::head_object::HeadObjectError;
 use aws_sdk_s3::operation::list_objects_v2::ListObjectsV2Error;
 use tokio_util::io::ReaderStream;
 
-use super::{
-    FileEntry, FileMeta, GetOptions, ListResult, StorageBackend, StorageResponse,
-};
+use super::{FileEntry, FileMeta, GetOptions, ListResult, StorageBackend, StorageResponse};
 use crate::config::S3Config;
 use crate::error::AppError;
 
@@ -19,12 +17,7 @@ const CREDENTIAL_PROVIDER_NAME: &str = "omni-stream-config";
 
 /// Map raw S3 HTTP status / error-code combos to AppError variants.
 /// `op` ("get" | "head" | "list") is purely for the diagnostic message.
-fn classify_s3_status(
-    status: u16,
-    code: &str,
-    op: &str,
-    raw: impl std::fmt::Display,
-) -> AppError {
+fn classify_s3_status(status: u16, code: &str, op: &str, raw: impl std::fmt::Display) -> AppError {
     match (status, code) {
         (404, _) | (_, "NoSuchKey") => AppError::NotFound("S3 key not found".into()),
         (403, _) | (_, "AccessDenied") | (_, "Forbidden") => {
@@ -63,11 +56,8 @@ impl S3Backend {
         if let Some(endpoint) = cfg.endpoint.clone() {
             loader = loader.endpoint_url(endpoint);
         }
-        if let (Some(akid), Some(sak)) =
-            (cfg.access_key.clone(), cfg.secret_key.clone())
-        {
-            let creds =
-                Credentials::new(akid, sak, None, None, CREDENTIAL_PROVIDER_NAME);
+        if let (Some(akid), Some(sak)) = (cfg.access_key.clone(), cfg.secret_key.clone()) {
+            let creds = Credentials::new(akid, sak, None, None, CREDENTIAL_PROVIDER_NAME);
             loader = loader.credentials_provider(creds);
         }
 
@@ -130,11 +120,7 @@ impl S3Backend {
 
 #[async_trait]
 impl StorageBackend for S3Backend {
-    async fn get_file(
-        &self,
-        path: &str,
-        opts: GetOptions,
-    ) -> Result<StorageResponse, AppError> {
+    async fn get_file(&self, path: &str, opts: GetOptions) -> Result<StorageResponse, AppError> {
         let mut req = self.client.get_object().bucket(&self.bucket).key(path);
         if let Some(range) = opts.range {
             req = req.range(range);
@@ -181,10 +167,7 @@ impl StorageBackend for S3Backend {
             req = req.continuation_token(t);
         }
 
-        let resp = req
-            .send()
-            .await
-            .map_err(Self::map_list_err)?;
+        let resp = req.send().await.map_err(Self::map_list_err)?;
 
         let mut entries: Vec<FileEntry> = Vec::new();
 

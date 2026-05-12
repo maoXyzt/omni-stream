@@ -68,9 +68,7 @@ pub struct StoragesResponse {
     pub default: String,
 }
 
-pub async fn list_storages_handler(
-    State(state): State<AppState>,
-) -> Json<StoragesResponse> {
+pub async fn list_storages_handler(State(state): State<AppState>) -> Json<StoragesResponse> {
     let storages = state
         .order
         .iter()

@@ -218,7 +218,10 @@ impl Config {
             match s.r#type {
                 StorageType::S3 => {
                     let s3 = s.s3.as_ref().ok_or_else(|| {
-                        anyhow!("storage '{}' has type=s3 but is missing the s3 sub-table", s.name)
+                        anyhow!(
+                            "storage '{}' has type=s3 but is missing the s3 sub-table",
+                            s.name
+                        )
                     })?;
                     if s3.bucket.trim().is_empty() {
                         bail!("storage '{}': s3.bucket is required", s.name);

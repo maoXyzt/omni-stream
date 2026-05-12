@@ -41,11 +41,7 @@ impl AuthState {
     }
 }
 
-pub async fn auth_middleware(
-    State(auth): State<AuthState>,
-    req: Request,
-    next: Next,
-) -> Response {
+pub async fn auth_middleware(State(auth): State<AuthState>, req: Request, next: Next) -> Response {
     if !auth.enabled {
         return next.run(req).await;
     }
@@ -58,9 +54,7 @@ pub async fn auth_middleware(
         .map(str::trim)
         .unwrap_or("");
 
-    if !presented.is_empty()
-        && constant_time_eq(presented.as_bytes(), auth.token.as_bytes())
-    {
+    if !presented.is_empty() && constant_time_eq(presented.as_bytes(), auth.token.as_bytes()) {
         return next.run(req).await;
     }
 

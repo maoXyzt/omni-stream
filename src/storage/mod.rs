@@ -55,10 +55,7 @@ pub struct ListResult {
 #[async_trait]
 pub trait StorageBackend: Send + Sync {
     async fn get_file(&self, path: &str, opts: GetOptions) -> Result<StorageResponse, AppError>;
-    async fn list_files(
-        &self,
-        prefix: &str,
-        token: Option<String>,
-    ) -> Result<ListResult, AppError>;
+    async fn list_files(&self, prefix: &str, token: Option<String>)
+    -> Result<ListResult, AppError>;
     async fn stat(&self, path: &str) -> Result<FileMeta, AppError>;
 }
