@@ -33,8 +33,8 @@ cargo install omni-stream    # requires Rust 1.91+
 
 Or download a pre-built binary from GitHub Releases: <https://github.com/maoXyzt/omni-stream/releases/latest>.
 Three targets are published — `x86_64-unknown-linux-gnu` / `x86_64-unknown-linux-musl` /
-`aarch64-apple-darwin` (Windows users can build from source). Extract, mark
-`omni-stream` executable, and put it on `$PATH` if you like.
+`aarch64-apple-darwin`. (Windows users can build from source). For pre-built binaries,
+extract, mark `omni-stream` executable, and put it on `$PATH` if you like.
 
 > Building from source, hacking on the frontend / backend, or contributing? See [docs/development_guide.md](docs/development_guide.md). The release process lives in [docs/how_to_release.md](docs/how_to_release.md).
 
