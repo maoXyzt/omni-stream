@@ -52,24 +52,24 @@ omni-stream/
 ### Task 2: 存储抽象层实现
 
 * **任务**:
-    1. 在 `storage/mod.rs` 中定义 `StorageBackend` trait。
-    2. 在 `storage/factory.rs` 提供后端工厂逻辑：优先选择 `active == true` 的存储配置，若不存在则回退到第一项。
-    3. 在 `storage/s3.rs` 实现 `S3Backend`，使用 `aws-sdk-s3` 处理 `get_object` (含 Range) 和 `list_objects_v2` (含分页)。
-    4. 在 `storage/local.rs` 实现 `LocalFsBackend`，使用 `tokio::fs` 处理文件读写。
+  1. 在 `storage/mod.rs` 中定义 `StorageBackend` trait。
+  2. 在 `storage/factory.rs` 提供后端工厂逻辑：优先选择 `active == true` 的存储配置，若不存在则回退到第一项。
+  3. 在 `storage/s3.rs` 实现 `S3Backend`，使用 `aws-sdk-s3` 处理 `get_object` (含 Range) 和 `list_objects_v2` (含分页)。
+  4. 在 `storage/local.rs` 实现 `LocalFsBackend`，使用 `tokio::fs` 处理文件读写。
 
 ### Task 3: 路由处理逻辑
 
 * **任务**:
-    1. 实现 `GET /api/list`：支持 `prefix` 和 `page_token` 参数。
-    2. 实现 `GET /api/proxy/:key`：转发 Range 头，调用 `get_file`，利用 `axum::body::Body::from_stream` 返回流。
-    3. 确保所有 IO 错误通过 `error.rs` 转换为正确的 HTTP 状态码。
+  1. 实现 `GET /api/list`：支持 `prefix` 和 `page_token` 参数。
+  2. 实现 `GET /api/proxy/:key`：转发 Range 头，调用 `get_file`，利用 `axum::body::Body::from_stream` 返回流。
+  3. 确保所有 IO 错误通过 `error.rs` 转换为正确的 HTTP 状态码。
 
 ### Task 4: 前端嵌入与主服务
 
 * **任务**:
-    1. 使用 `rust-embed` 嵌入前端 `dist` 目录。
-    2. 设置 fallback 路由，将所有非 `/api/` 的请求匹配到静态文件，实现 SPA 友好路由。
-    3. 将 `Arc<dyn StorageBackend>` 注入 `AppState`。
+  1. 使用 `rust-embed` 嵌入前端 `dist` 目录。
+  2. 设置 fallback 路由，将所有非 `/api/` 的请求匹配到静态文件，实现 SPA 友好路由。
+  3. 将 `Arc<dyn StorageBackend>` 注入 `AppState`。
 
 ## 6. 关键开发规范 (MUST FOLLOW)
 
