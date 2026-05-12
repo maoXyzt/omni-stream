@@ -1,3 +1,5 @@
+use std::cmp::Ordering;
+use std::collections::BinaryHeap;
 use std::io::SeekFrom;
 use std::path::{Component, Path, PathBuf};
 use std::time::SystemTime;
@@ -11,6 +13,31 @@ use super::{FileEntry, FileMeta, GetOptions, ListResult, StorageBackend, Storage
 use crate::error::AppError;
 
 const LIST_PAGE_SIZE: usize = 1000;
+
+/// Heap wrapper that orders `FileEntry` by `key` only, so a bounded max-heap
+/// can keep just the smallest `LIST_PAGE_SIZE + 1` keys greater than the
+/// cursor — memory stays O(page_size) instead of O(directory_size).
+struct ByKey(FileEntry);
+
+impl PartialEq for ByKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.key == other.0.key
+    }
+}
+
+impl Eq for ByKey {}
+
+impl PartialOrd for ByKey {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for ByKey {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.0.key.cmp(&other.0.key)
+    }
+}
 
 pub struct LocalFsBackend {
     root: PathBuf,
@@ -204,8 +231,17 @@ impl StorageBackend for LocalFsBackend {
             return Err(AppError::Unsupported(format!("not a directory: {prefix}")));
         }
 
+        // Keyset cursor: `token` is the last `key` from the previous page.
+        // We only admit entries whose key sorts strictly after it, then keep
+        // a bounded max-heap of the smallest LIST_PAGE_SIZE + 1 candidates.
+        // The +1 element tells us whether another page exists without a
+        // second scan. Tokens are opaque to clients, so changing the encoding
+        // (offset → key) is a backend-internal detail.
+        let cursor = token.as_deref().unwrap_or("");
+        let cap = LIST_PAGE_SIZE + 1;
+        let mut heap: BinaryHeap<ByKey> = BinaryHeap::with_capacity(cap);
+
         let mut read = fs::read_dir(&dir_path).await?;
-        let mut all: Vec<FileEntry> = Vec::new();
         while let Some(entry) = read.next_entry().await? {
             let entry_path = entry.path();
             // For each child resolve type with follow/no-follow semantics. On
@@ -221,6 +257,17 @@ impl StorageBackend for LocalFsBackend {
             };
             let is_dir = m.is_dir();
             let key = self.relative_key(&entry_path, is_dir);
+            if key.as_str() <= cursor {
+                continue;
+            }
+            // Skip work for entries the heap would immediately evict.
+            if heap.len() == cap {
+                if let Some(top) = heap.peek() {
+                    if key >= top.0.key {
+                        continue;
+                    }
+                }
+            }
             let (size, last_modified) = if is_dir {
                 (0u64, None)
             } else {
@@ -229,25 +276,26 @@ impl StorageBackend for LocalFsBackend {
                     m.modified().ok().and_then(system_time_to_unix_string),
                 )
             };
-            all.push(FileEntry {
+            heap.push(ByKey(FileEntry {
                 key,
                 size,
                 last_modified,
                 is_dir,
-            });
+            }));
+            if heap.len() > cap {
+                heap.pop();
+            }
         }
 
-        all.sort_by(|a, b| a.key.cmp(&b.key));
-
-        let offset: usize = token.as_deref().and_then(|t| t.parse().ok()).unwrap_or(0);
-        let end = (offset + LIST_PAGE_SIZE).min(all.len());
-        let entries: Vec<FileEntry> = if offset >= all.len() {
-            Vec::new()
-        } else {
-            all[offset..end].to_vec()
-        };
-        let next_token = if end < all.len() {
-            Some(end.to_string())
+        // into_sorted_vec yields ascending order by key.
+        let mut entries: Vec<FileEntry> =
+            heap.into_sorted_vec().into_iter().map(|w| w.0).collect();
+        let has_more = entries.len() > LIST_PAGE_SIZE;
+        if has_more {
+            entries.truncate(LIST_PAGE_SIZE);
+        }
+        let next_token = if has_more {
+            entries.last().map(|e| e.key.clone())
         } else {
             None
         };
@@ -286,5 +334,96 @@ impl StorageBackend for LocalFsBackend {
                 .and_then(system_time_to_unix_string),
             is_dir,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::UNIX_EPOCH;
+
+    fn tempdir() -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "omni-list-test-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn seed_files(root: &Path, names: &[&str]) {
+        for name in names {
+            std::fs::write(root.join(name), b"x").unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn list_files_returns_sorted_single_page() {
+        let dir = tempdir();
+        // Insertion order intentionally not sorted so we exercise ordering.
+        seed_files(&dir, &["c.txt", "a.txt", "b.txt"]);
+        let backend = LocalFsBackend::new(&dir, false);
+
+        let res = backend.list_files("", None).await.unwrap();
+        let keys: Vec<&str> = res.entries.iter().map(|e| e.key.as_str()).collect();
+        assert_eq!(keys, vec!["a.txt", "b.txt", "c.txt"]);
+        assert!(res.next_token.is_none());
+    }
+
+    #[tokio::test]
+    async fn list_files_cursor_returns_only_keys_after_token() {
+        let dir = tempdir();
+        seed_files(&dir, &["a.txt", "b.txt", "c.txt", "d.txt"]);
+        let backend = LocalFsBackend::new(&dir, false);
+
+        let res = backend
+            .list_files("", Some("b.txt".to_string()))
+            .await
+            .unwrap();
+        let keys: Vec<&str> = res.entries.iter().map(|e| e.key.as_str()).collect();
+        assert_eq!(keys, vec!["c.txt", "d.txt"]);
+        assert!(res.next_token.is_none());
+    }
+
+    #[tokio::test]
+    async fn list_files_paginates_with_keyset_cursor() {
+        // Force at least two full pages plus a partial tail to exercise the
+        // heap eviction, `+1` lookahead, and cursor handoff between calls.
+        let dir = tempdir();
+        let total = LIST_PAGE_SIZE + LIST_PAGE_SIZE / 2;
+        let names: Vec<String> = (0..total).map(|i| format!("f-{i:06}.bin")).collect();
+        for name in &names {
+            std::fs::write(dir.join(name), b"x").unwrap();
+        }
+        let backend = LocalFsBackend::new(&dir, false);
+
+        let mut seen: Vec<String> = Vec::with_capacity(total);
+        let mut token: Option<String> = None;
+        let mut pages = 0;
+        loop {
+            pages += 1;
+            assert!(pages <= 10, "pagination did not terminate");
+            let res = backend.list_files("", token.clone()).await.unwrap();
+            assert!(
+                res.entries.len() <= LIST_PAGE_SIZE,
+                "page exceeded LIST_PAGE_SIZE: {}",
+                res.entries.len()
+            );
+            for e in &res.entries {
+                seen.push(e.key.clone());
+            }
+            match res.next_token {
+                Some(t) => token = Some(t),
+                None => break,
+            }
+        }
+
+        let mut expected: Vec<String> = names.clone();
+        expected.sort();
+        assert_eq!(seen, expected, "all keys returned exactly once, in order");
     }
 }
