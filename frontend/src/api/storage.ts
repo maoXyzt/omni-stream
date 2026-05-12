@@ -41,6 +41,24 @@ export function proxyUrl(key: string, storage?: string): string {
   return `${base}?storage=${encodeURIComponent(storage)}`
 }
 
+export interface ThumbOptions {
+  storage?: string
+  width?: number
+  /// Passed as `v=…`; flips the backend to `Cache-Control: immutable`.
+  /// Typically `FileEntry.last_modified` from the list response.
+  version?: string | null
+}
+
+export function thumbUrl(key: string, opts: ThumbOptions = {}): string {
+  const params = new URLSearchParams()
+  if (opts.storage) params.set('storage', opts.storage)
+  if (opts.width) params.set('w', String(opts.width))
+  if (opts.version) params.set('v', opts.version)
+  const qs = params.toString()
+  const base = `/api/thumb/${encodeKey(key)}`
+  return qs ? `${base}?${qs}` : base
+}
+
 // Path segments are encoded individually so that `/` separators stay literal
 // (the backend route is `/api/proxy/{*key}` — a wildcard that wants raw slashes).
 function encodeKey(key: string): string {

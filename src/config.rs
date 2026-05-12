@@ -21,6 +21,8 @@ pub struct Config {
     pub storages: Vec<StorageConfig>,
     #[serde(default)]
     pub auth: AuthConfig,
+    #[serde(default)]
+    pub thumbnails: ThumbConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -157,6 +159,52 @@ fn expand_tilde(s: &str) -> PathBuf {
 fn deser_path_expand_tilde<'de, D: Deserializer<'de>>(d: D) -> Result<PathBuf, D::Error> {
     let s = String::deserialize(d)?;
     Ok(expand_tilde(&s))
+}
+
+/// On-demand JPEG thumbnail cache. Disabled by default — when off, the grid
+/// view falls back to `/api/proxy` (full-resolution originals).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct ThumbConfig {
+    pub enabled: bool,
+    /// Cache root; tilde expanded. Default: `~/.cache/omni-stream/thumbs`.
+    /// Absent when None and resolved at startup against `$XDG_CACHE_HOME` /
+    /// `directories::ProjectDirs`, so a single path string in TOML is enough.
+    pub cache_path: Option<String>,
+    /// JPEG quality 1-100. Copyparty uses Q=40-60 for max compression; Q=70 is
+    /// a safer default that keeps photo thumbnails artifact-free at ~15 KB.
+    pub quality: u8,
+    pub max_source_bytes: u64,
+    /// Allowed thumbnail widths in pixels. Requests outside this set snap to
+    /// the nearest larger value (clamped to the max). Bounding the set keeps
+    /// the cache enumerable and prevents attackers triggering arbitrary widths.
+    pub sizes: Vec<u32>,
+    pub default_size: u32,
+
+    /// Soft cap on total cache size. Background sweep deletes oldest entries
+    /// (by mtime, refreshed on cache hit) until the total drops below this.
+    pub max_cache_bytes: u64,
+    /// Hard age cap: entries older than this are deleted regardless of cap.
+    /// Zero disables the age check.
+    pub max_age_days: u32,
+    /// How often the background sweep runs. Floored to 60s at runtime.
+    pub sweep_interval_secs: u64,
+}
+
+impl Default for ThumbConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            cache_path: None,
+            quality: 70,
+            max_source_bytes: 50 * 1024 * 1024,
+            sizes: vec![160, 320, 640],
+            default_size: 320,
+            max_cache_bytes: 1024 * 1024 * 1024, // 1 GiB
+            max_age_days: 90,
+            sweep_interval_secs: 3600,
+        }
+    }
 }
 
 /// Optional bearer-token gate on `/api/*`. When `enabled = false` (default),

@@ -29,3 +29,10 @@ aws-config = { version = "1", features = ["behavior-version-latest"] }
 
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Thumbnail generation: decode common formats with `image`, resize with Lanczos,
+# encode lossy WebP via `webp` (statically-linked libwebp). Image format features
+# are kept minimal to skip AVIF/dav1d and other C deps.
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "bmp", "tiff", "webp", "rayon"] }
+webp = "0.3"
+sha2 = "0.10"

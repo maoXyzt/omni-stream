@@ -12,20 +12,23 @@ use serde::{Deserialize, Serialize};
 use crate::error::AppError;
 use crate::storage::factory::{BackendRegistry, NamedBackend};
 use crate::storage::{FileMeta, GetOptions, ListResult, StorageBackend};
+use crate::thumbs::ThumbState;
 
 #[derive(Clone)]
 pub struct AppState {
     backends: Arc<HashMap<String, NamedBackend>>,
     order: Arc<Vec<String>>,
     default_name: Arc<String>,
+    thumb: Option<Arc<ThumbState>>,
 }
 
 impl AppState {
-    pub fn from_registry(reg: BackendRegistry) -> Self {
+    pub fn new(reg: BackendRegistry, thumb: Option<Arc<ThumbState>>) -> Self {
         Self {
             backends: Arc::new(reg.backends),
             order: Arc::new(reg.order),
             default_name: Arc::new(reg.default_name),
+            thumb,
         }
     }
 
@@ -152,6 +155,62 @@ pub async fn proxy_handler(
     let body = Body::from_stream(resp.body);
     builder
         .body(body)
+        .map_err(|e| AppError::Backend(format!("response build: {e}")))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ThumbQuery {
+    pub storage: Option<String>,
+    pub w: Option<u32>,
+    /// Source version token (typically `last_modified` from the list response).
+    /// When provided, response gets `immutable` caching since the URL itself
+    /// rotates whenever the source changes.
+    pub v: Option<String>,
+}
+
+pub async fn thumb_handler(
+    State(state): State<AppState>,
+    Query(q): Query<ThumbQuery>,
+    Path(key): Path<String>,
+) -> Result<Response, AppError> {
+    let thumb = state
+        .thumb
+        .as_ref()
+        .ok_or_else(|| AppError::NotFound("thumbnails disabled".into()))?;
+    let backend = state.resolve(q.storage.as_deref())?;
+    let width = thumb.resolve_width(q.w);
+
+    let storage_label = q
+        .storage
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| state.default_name.as_str());
+
+    let cache_path = thumb
+        .ensure_thumb(&backend, storage_label, &key, width)
+        .await?;
+
+    let file = tokio::fs::File::open(&cache_path)
+        .await
+        .map_err(AppError::Io)?;
+    let meta = file.metadata().await.map_err(AppError::Io)?;
+    let stream = tokio_util::io::ReaderStream::new(file);
+
+    // URL is content-addressed when `v` is supplied → safe to mark immutable.
+    // Without `v` we fall back to a short max-age + revalidation.
+    let cache_ctl = if q.v.is_some() {
+        "public, max-age=31536000, immutable"
+    } else {
+        "public, max-age=3600"
+    };
+
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "image/webp")
+        .header(header::CONTENT_LENGTH, meta.len())
+        .header(header::CACHE_CONTROL, cache_ctl)
+        .body(Body::from_stream(stream))
         .map_err(|e| AppError::Backend(format!("response build: {e}")))
 }
 
