@@ -20,23 +20,34 @@
 
 ## 2. 构建
 
-```bash
-# 1) 前端：构建静态产物到 frontend/dist/，rust-embed 会在编译期把它打包进二进制
-cd frontend
-pnpm install
-pnpm build
-cd ..
+推荐使用仓库根目录的 `start.sh`（需已安装 **Rust**、**fnm** / **Node**，并在 `frontend/` 下执行过一次 `pnpm install`）。脚本默认导出 `OMNI_CONFIG=./config.toml`、`OMNI_BACKEND_URL=http://127.0.0.1:28080`（与 Vite 反代目标一致；若改了 `server.port` 请同步改环境变量）、`CARGO_TARGET_DIR`（默认可指向临时目录以减轻仓库内 `target/` 体积）。用法：
 
-# 2) 后端：debug 构建 + 运行测试
+```bash
+./start.sh build                 # 等同 ./start.sh build --all
+./start.sh build --all           # 或 -a：release 编后端 + 前端 pnpm build（嵌入 dist）
+./start.sh build --frontend      # 或 -f：仅前端静态产物
+./start.sh build --backend       # 或 -b：仅 cargo release 编 omni-stream
+./start.sh --help                # 打印完整子命令说明
+```
+
+发布产物为 `omni-stream` 可执行文件：若未设置 `CARGO_TARGET_DIR`，默认在 `./target/release/omni-stream`；脚本里若把 `CARGO_TARGET_DIR` 指到别处，则在对应目录的 `release/` 下。
+
+本地调试或 CI 若需要 **debug 构建** 或跑测试，可继续用手动命令：
+
+```bash
+# 首次前端依赖
+cd frontend && pnpm install && cd ..
+
+cd frontend && pnpm build && cd ..   # 或仅用 ./start.sh build --frontend
+
 cargo build --bin omni-stream
 cargo test --bin omni-stream
 ```
 
-发布构建：
+仅打 release 二进制、不用脚本时：
 
 ```bash
 cargo build --release --bin omni-stream
-# 产物 ./target/release/omni-stream，单文件可拷贝到目标机器
 ```
 
 ## 3. 配置
@@ -120,6 +131,8 @@ OMNI_AUTH_ENABLED=true OMNI_AUTH_TOKEN=$(openssl rand -hex 32) ./omni-stream
 
 ## 4. 启动
 
+生产或本地直接跑已编译二进制：
+
 ```bash
 # 用仓库根目录的 config.toml（如果有）
 ./target/release/omni-stream
@@ -131,31 +144,43 @@ OMNI_CONFIG=/etc/omni-stream/config.toml ./target/release/omni-stream
 RUST_LOG=info,tower_http=debug ./target/release/omni-stream
 ```
 
+开发时可在仓库根目录用 `start.sh` 起 `cargo run`（默认等价于 `./start.sh run`，使用 `./config.toml`）：
+
+```bash
+./start.sh        # 后端 cargo run
+```
+
 启动后浏览器打开 `http://<host>:<port>/` 即是嵌入的前端 SPA。`Ctrl-C` /
 SIGTERM 触发优雅关停（`axum::serve` + `with_graceful_shutdown`）。
 
 ## 5. 开发模式（前后端分跑）
 
-需要修前端代码 + HMR 时：
+需要改前端并要 HMR 时，开两个终端，均从仓库根目录执行 `start.sh`（脚本里已对 `frontend` 执行 `fnm use`）：
 
 ```bash
-# 终端 A：起后端（必要时剥代理 env）
-env -u HTTP_PROXY -u HTTPS_PROXY \
-  OMNI_CONFIG=/path/to/config.toml \
-  cargo run --bin omni-stream
+# 终端 A：后端 cargo run（必要时自行剥代理，例如 env -u HTTP_PROXY -u HTTPS_PROXY）
+./start.sh run
 
-# 终端 B：起 Vite dev server，5173 端口；/api/* 自动 proxy 到后端
-cd frontend
-OMNI_BACKEND_URL=http://127.0.0.1:8080 pnpm dev
+# 终端 B：仅起 Vite dev server（5173 默认端口）；/api/* 由 Vite 按 OMNI_BACKEND_URL 反代到后端
+./start.sh run --frontend
+# 等价简写
+./start.sh run -f
 ```
 
-浏览器打开 `http://127.0.0.1:5173/`。Vite 的 `vite.config.ts` 通过
-`OMNI_BACKEND_URL` 决定 proxy 目标，端口被占了改这个变量就行，无需改文件。
+`start.sh` 在进程环境里默认设置 `OMNI_BACKEND_URL=http://127.0.0.1:28080`，需与当前后端监听地址一致（一般对应 `config.toml` 里 `[server]` 的 `host` / `port`）。若端口不同，可在运行前导出覆盖，例如：
+
+```bash
+export OMNI_BACKEND_URL=http://127.0.0.1:8080
+./start.sh run -f
+```
+
+浏览器打开 `http://127.0.0.1:5173/`。具体行为见 `frontend/vite.config.ts` 中的 proxy 配置。
 
 ## 6. 项目结构
 
 ```text
 omni-stream/
+├── start.sh                  # 本地 build / run / run --frontend 入口脚本
 ├── src/
 │   ├── main.rs               # 入口：tracing、Config::load、AppState、路由
 │   ├── config.rs             # Config / StorageConfig / S3Config / LocalConfig

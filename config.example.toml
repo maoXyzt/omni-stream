@@ -4,7 +4,7 @@
 
 [server]
 host = "127.0.0.1"
-port = 8080
+port = 28080
 
 # Optional bearer-token gate on /api/*. When disabled (default), the API is
 # open to anyone who can reach the port. Enable for internal-tool deployment.

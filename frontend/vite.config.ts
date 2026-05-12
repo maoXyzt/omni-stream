@@ -21,7 +21,7 @@ export default defineConfig({
     // Override via OMNI_BACKEND_URL when the default port is taken.
     proxy: {
       '/api': {
-        target: process.env.OMNI_BACKEND_URL ?? 'http://127.0.0.1:8080',
+        target: process.env.OMNI_BACKEND_URL ?? 'http://127.0.0.1:28080',
         changeOrigin: true,
       },
     },
