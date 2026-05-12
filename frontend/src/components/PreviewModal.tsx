@@ -72,7 +72,15 @@ export function PreviewModal({
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="flex h-[95vh] w-[95vw] max-w-[95vw] flex-col sm:max-w-[95vw]">
+      <DialogContent
+        // Radix focuses the first focusable element when the dialog opens,
+        // which lands on TextPreview's language <select>. Browsers map arrow
+        // keys on a focused select to cycle options, blocking our prev/next
+        // navigation. Preventing the initial focus lets arrow keys bubble to
+        // the window listener; users can still Tab into the select.
+        onOpenAutoFocus={(e) => e.preventDefault()}
+        className="flex h-[95vh] w-[95vw] max-w-[95vw] flex-col sm:max-w-[95vw]"
+      >
         <DialogHeader>
           <DialogTitle className="break-all pr-8">{fileKey}</DialogTitle>
           <DialogDescription>

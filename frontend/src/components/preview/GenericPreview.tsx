@@ -6,40 +6,7 @@ import { cn } from '@/lib/utils'
 
 import type { PreviewerProps } from './types'
 
-/// Extensions that the browser can render directly inside an iframe (PDF
-/// viewer, etc.). We deliberately keep this list narrow: HTML or SVG files
-/// would execute scripts in our origin if iframed without a strict sandbox,
-/// and our backend serves arbitrary user content. PDF is safe because Chrome,
-/// Firefox, and Safari all rasterize PDFs via internal viewers that don't run
-/// embedded JavaScript by default.
-const IFRAME_FALLBACK_EXTS = new Set(['pdf'])
-
-export function GenericPreview({ fileKey, src, storage }: PreviewerProps) {
-  const ext = extensionOf(fileKey)
-  if (ext && IFRAME_FALLBACK_EXTS.has(ext)) {
-    return (
-      <iframe
-        src={src}
-        title={fileKey}
-        // sandbox="" disables scripts, forms, popups, and same-origin —
-        // strictest possible. PDF viewer is part of the browser shell, not
-        // the iframe document, so it still works.
-        sandbox=""
-        className="size-full border-0 bg-background"
-      />
-    )
-  }
-
-  return <UnsupportedFallback fileKey={fileKey} storage={storage} />
-}
-
-function UnsupportedFallback({
-  fileKey,
-  storage,
-}: {
-  fileKey: string
-  storage?: string
-}) {
+export function GenericPreview({ fileKey, storage }: PreviewerProps) {
   const Icon = iconForKey(fileKey)
   const color = colorForKey(fileKey)
   const name = basenameOf(fileKey)
@@ -112,11 +79,4 @@ function basenameOf(key: string): string {
   const stripped = key.replace(/\/+$/, '')
   const slash = stripped.lastIndexOf('/')
   return slash < 0 ? stripped : stripped.slice(slash + 1)
-}
-
-function extensionOf(key: string): string | null {
-  const stripped = key.replace(/\/+$/, '')
-  const dot = stripped.lastIndexOf('.')
-  if (dot < 0 || dot === stripped.length - 1) return null
-  return stripped.slice(dot + 1).toLowerCase()
 }
