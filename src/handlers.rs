@@ -130,7 +130,8 @@ pub async fn proxy_handler(
 
     let mut builder = Response::builder()
         .status(status)
-        .header(header::ACCEPT_RANGES, "bytes");
+        .header(header::ACCEPT_RANGES, "bytes")
+        .header(header::CACHE_CONTROL, "public, max-age=3600");
 
     if let Some(ct) = resp.content_type.as_deref() {
         builder = builder.header(header::CONTENT_TYPE, ct);

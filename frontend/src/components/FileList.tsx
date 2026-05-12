@@ -19,11 +19,14 @@ import {
 import { proxyUrl } from '@/api/storage'
 import { ApiError, getStoredToken, setStoredToken } from '@/api/client'
 import { useListFiles, useStorages } from '@/hooks/use-storage'
+import { useViewMode } from '@/hooks/use-view-mode'
+import { FileGrid } from '@/components/FileGrid'
 import { PathBreadcrumb } from '@/components/PathBreadcrumb'
 import { PreviewModal } from '@/components/PreviewModal'
 import { iconForKey, previewableKind } from '@/components/preview/registry'
 import { StorageSwitcher } from '@/components/StorageSwitcher'
 import { TokenPrompt } from '@/components/TokenPrompt'
+import { ViewToggle } from '@/components/ViewToggle'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -53,6 +56,7 @@ export function FileList() {
   const prefix = useMemo(() => normalizePrefix(rawSplat), [rawSplat])
 
   const storagesQuery = useStorages()
+  const [viewMode, setViewMode] = useViewMode()
   const [tokenStack, setTokenStack] = useState<Array<string | undefined>>([
     undefined,
   ])
@@ -223,6 +227,7 @@ export function FileList() {
           <PathBreadcrumb prefix={prefix} onNavigate={goToPath} />
         </div>
         <div className="flex items-center gap-2">
+          <ViewToggle mode={viewMode} onChange={setViewMode} />
           <ShareLinkButton />
           {hasToken && (
             <Button
@@ -243,38 +248,47 @@ export function FileList() {
       {listQuery.isError && <ErrorState error={listQuery.error} />}
 
       {listQuery.isPending ? (
-        <ListSkeleton />
+        viewMode === 'grid' ? <GridSkeleton /> : <ListSkeleton />
       ) : listQuery.data ? (
         <>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-1/2">Name</TableHead>
-                <TableHead className="w-32 text-right">Size</TableHead>
-                <TableHead>Modified</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {listQuery.data.entries.length === 0 && (
+          {viewMode === 'grid' ? (
+            <FileGrid
+              entries={listQuery.data.entries}
+              prefix={prefix}
+              storageName={storageName}
+              onSelect={handleEntry}
+            />
+          ) : (
+            <Table>
+              <TableHeader>
                 <TableRow>
-                  <TableCell
-                    colSpan={3}
-                    className="text-center text-muted-foreground py-10"
-                  >
-                    Empty directory.
-                  </TableCell>
+                  <TableHead className="w-1/2">Name</TableHead>
+                  <TableHead className="w-32 text-right">Size</TableHead>
+                  <TableHead>Modified</TableHead>
                 </TableRow>
-              )}
-              {listQuery.data.entries.map((entry) => (
-                <FileRow
-                  key={entry.key}
-                  entry={entry}
-                  prefix={prefix}
-                  onSelect={handleEntry}
-                />
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {listQuery.data.entries.length === 0 && (
+                  <TableRow>
+                    <TableCell
+                      colSpan={3}
+                      className="text-center text-muted-foreground py-10"
+                    >
+                      Empty directory.
+                    </TableCell>
+                  </TableRow>
+                )}
+                {listQuery.data.entries.map((entry) => (
+                  <FileRow
+                    key={entry.key}
+                    entry={entry}
+                    prefix={prefix}
+                    onSelect={handleEntry}
+                  />
+                ))}
+              </TableBody>
+            </Table>
+          )}
 
           <Pager
             hasPrev={tokenStack.length > 1}
@@ -414,6 +428,16 @@ function ListSkeleton() {
     <div className="flex flex-col gap-2">
       {Array.from({ length: 8 }).map((_, i) => (
         <Skeleton key={i} className="h-10 w-full" />
+      ))}
+    </div>
+  )
+}
+
+function GridSkeleton() {
+  return (
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
+      {Array.from({ length: 12 }).map((_, i) => (
+        <Skeleton key={i} className="aspect-square w-full rounded-md" />
       ))}
     </div>
   )
