@@ -1,5 +1,7 @@
 # OmniStream
 
+**中文** · [English](README-en.md)
+
 单二进制、流式存储代理服务。后端用 `axum + tokio + aws-sdk-s3` 写成，通过
 `StorageBackend` trait 同时支持本地文件系统与 S3 兼容对象存储（MinIO / OSS /
 Ceph / R2 等）。
