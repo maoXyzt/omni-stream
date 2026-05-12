@@ -113,7 +113,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # Quality gates pinned to MSRV (1.85). `release` and `publish` depend on this
+  # Quality gates pinned to MSRV (1.91). `release` and `publish` depend on this
   # so a broken lint / failing test cannot ship to GitHub Releases or crates.io.
   lint:
     name: Lint & Test
@@ -125,7 +125,7 @@ jobs:
       # `cargo fmt --check` only needs source — runs before any download/cache
       # so style violations fail fast.
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@1.85
+        uses: dtolnay/rust-toolchain@1.91
         with:
           components: rustfmt, clippy
 
@@ -171,7 +171,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y musl-tools
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@1.85
+        uses: dtolnay/rust-toolchain@1.91
         with:
           targets: ${{ matrix.target }}
 
@@ -252,7 +252,7 @@ jobs:
           name: frontend-dist
           path: frontend/dist
 
-      - uses: dtolnay/rust-toolchain@1.85
+      - uses: dtolnay/rust-toolchain@1.91
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -278,7 +278,7 @@ jobs:
           name: frontend-dist
           path: frontend/dist
 
-      - uses: dtolnay/rust-toolchain@1.85
+      - uses: dtolnay/rust-toolchain@1.91
 
       - uses: Swatinem/rust-cache@v2
         with:

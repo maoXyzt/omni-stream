@@ -28,7 +28,7 @@ HTTP API (the bundled SPA is built on top of these — `curl` or your own client
 **Recommended**: install via cargo. The binary lands in `~/.cargo/bin/` (already on `$PATH`), so you can invoke it directly as `omni-stream`:
 
 ```bash
-cargo install omni-stream    # requires Rust 1.85+
+cargo install omni-stream    # requires Rust 1.91+
 ```
 
 Or download a pre-built binary from GitHub Releases: <https://github.com/maoXyzt/omni-stream/releases/latest>.

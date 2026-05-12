@@ -4,7 +4,7 @@
 
 ## 1. 环境要求
 
-- **Rust 1.85+**（Cargo edition `2024`）
+- **Rust 1.91+**（Cargo edition `2024`；MSRV 跟随依赖逐步抬升，详见 `Cargo.toml` 的 `rust-version`）
 - **Node 24.15.0**（`frontend/.node-version` 已声明，建议用 `fnm` 自动切换）
 - **pnpm 10.x**（`frontend/package.json` 锁定 `pnpm@10.18.3`，corepack 或 `npm i -g pnpm@10` 都行）
 
