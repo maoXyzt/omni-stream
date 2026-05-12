@@ -58,3 +58,13 @@ hostname = "0.4"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "bmp", "tiff", "webp", "rayon"] }
 webp = "0.3"
 sha2 = "0.10"
+
+# Drives `cargo release <patch|minor|major|x.y.z> --execute`: bumps the
+# version in Cargo.toml + Cargo.lock, commits, tags `v<version>`, and pushes.
+# CI takes over after the tag lands and runs `cargo publish`, so the local
+# command must NOT publish.
+[package.metadata.release]
+tag-prefix = "v"
+publish = false
+pre-release-commit-message = "release: {{version}}"
+tag-message = "release {{version}}"
