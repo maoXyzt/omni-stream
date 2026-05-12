@@ -17,8 +17,8 @@
                             │
 GitHub Actions ←────────────┘
   ├─ frontend       (pnpm build)
-  ├─ backend (×4)   (linux-gnu / linux-musl / aarch64-darwin / windows-msvc)
-  ├─ release        (GitHub Release + tarball/zip + sha256)
+  ├─ backend (×3)   (linux-gnu / linux-musl / aarch64-darwin)
+  ├─ release        (GitHub Release + tarball + sha256)
   └─ publish        (cargo publish → crates.io)
 ```
 

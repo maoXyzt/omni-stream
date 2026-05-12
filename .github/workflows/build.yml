@@ -84,12 +84,11 @@ jobs:
             exit 1
           fi
 
-  # Decides which targets the backend matrix builds. The full 4-platform fan-out
+  # Decides which targets the backend matrix builds. The full 3-platform fan-out
   # is reserved for events that produce shippable artifacts (push to main, v*
   # tags, manual dispatch). PRs and pushes to dev only validate the cheapest
   # target (linux-gnu) — dev is a long-running integration branch, not a
-  # release source, so paying for macOS / windows runners on every push is
-  # wasted spend.
+  # release source, so paying for macOS runners on every push is wasted spend.
   matrix-config:
     name: Backend matrix config
     needs: preflight
@@ -111,7 +110,7 @@ jobs:
               full=true ;;
           esac
           if $full; then
-            matrix='{"include":[{"target":"x86_64-unknown-linux-gnu","runner":"ubuntu-latest"},{"target":"x86_64-unknown-linux-musl","runner":"ubuntu-latest"},{"target":"aarch64-apple-darwin","runner":"macos-latest"},{"target":"x86_64-pc-windows-msvc","runner":"windows-latest"}]}'
+            matrix='{"include":[{"target":"x86_64-unknown-linux-gnu","runner":"ubuntu-latest"},{"target":"x86_64-unknown-linux-musl","runner":"ubuntu-latest"},{"target":"aarch64-apple-darwin","runner":"macos-latest"}]}'
           else
             matrix='{"include":[{"target":"x86_64-unknown-linux-gnu","runner":"ubuntu-latest"}]}'
           fi
@@ -242,16 +241,10 @@ jobs:
           version="${GITHUB_REF_NAME//\//-}"
           name="omni-stream-${version}-${target}"
           mkdir -p dist
-          if [[ "$target" == *windows* ]]; then
-            bin="target/${target}/release/omni-stream.exe"
-            7z a "dist/${name}.zip" "$bin" >/dev/null
-            archive="${name}.zip"
-          else
-            bin="target/${target}/release/omni-stream"
-            strip "$bin" || true
-            tar -C "$(dirname "$bin")" -czf "dist/${name}.tar.gz" "$(basename "$bin")"
-            archive="${name}.tar.gz"
-          fi
+          bin="target/${target}/release/omni-stream"
+          strip "$bin" || true
+          tar -C "$(dirname "$bin")" -czf "dist/${name}.tar.gz" "$(basename "$bin")"
+          archive="${name}.tar.gz"
           (cd dist && shasum -a 256 "${archive}" >"${archive}.sha256")
           echo "artifact=${name}" >>"$GITHUB_OUTPUT"
 
