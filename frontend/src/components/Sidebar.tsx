@@ -3,6 +3,7 @@ import { ArrowDownAZ, ArrowDownZA, ChevronUp, Folder } from 'lucide-react'
 
 import { useListFiles } from '@/hooks/use-storage'
 import { SIDEBAR_SORT_KEY, useSortDir } from '@/hooks/use-sort-dir'
+import { EntryContextMenu } from '@/components/EntryContextMenu'
 import { FOLDER_COLOR } from '@/components/preview/registry'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -101,6 +102,7 @@ export function Sidebar({
                 key={entry.key}
                 entry={entry}
                 parent={parent}
+                storageName={storageName}
                 isCurrent={dirName(entry.key, parent) === currentName}
                 onNavigate={onNavigate}
               />
@@ -115,29 +117,38 @@ export function Sidebar({
 interface SidebarRowProps {
   entry: FileEntry
   parent: string
+  storageName: string
   isCurrent: boolean
   onNavigate: (prefix: string) => void
 }
 
-function SidebarRow({ entry, parent, isCurrent, onNavigate }: SidebarRowProps) {
+function SidebarRow({
+  entry,
+  parent,
+  storageName,
+  isCurrent,
+  onNavigate,
+}: SidebarRowProps) {
   const name = dirName(entry.key, parent)
   return (
     <li>
-      <button
-        type="button"
-        onClick={() => onNavigate(entry.key)}
-        aria-current={isCurrent ? 'true' : undefined}
-        className={cn(
-          'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors',
-          isCurrent
-            ? 'bg-muted font-medium text-foreground'
-            : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
-        )}
-        title={name}
-      >
-        <Folder className={cn('size-4 shrink-0', FOLDER_COLOR)} />
-        <span className="truncate">{name}</span>
-      </button>
+      <EntryContextMenu entry={entry} storageName={storageName}>
+        <button
+          type="button"
+          onClick={() => onNavigate(entry.key)}
+          aria-current={isCurrent ? 'true' : undefined}
+          className={cn(
+            'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors',
+            isCurrent
+              ? 'bg-muted font-medium text-foreground'
+              : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
+          )}
+          title={name}
+        >
+          <Folder className={cn('size-4 shrink-0', FOLDER_COLOR)} />
+          <span className="truncate">{name}</span>
+        </button>
+      </EntryContextMenu>
     </li>
   )
 }

@@ -10,6 +10,7 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 
+import { GenericPreview } from './GenericPreview'
 import { ImagePreview } from './ImagePreview'
 import { TextPreview } from './TextPreview'
 import { VideoPreview } from './VideoPreview'
@@ -49,6 +50,15 @@ export const PREVIEW_TYPES: readonly PreviewType[] = [
     icon: FileText,
     Component: TextPreview,
   },
+  // Fallback for any file the browser can't preview inline — shows the file
+  // icon + metadata, plus an iframe for PDF/similar. Has no `extensions` of
+  // its own because `previewableKind` returns 'generic' as the catch-all.
+  {
+    kind: 'generic',
+    extensions: [],
+    icon: FileIcon,
+    Component: GenericPreview,
+  },
 ]
 
 const EXT_TO_TYPE = new Map<string, PreviewType>()
@@ -62,8 +72,13 @@ export function previewTypeForKey(key: string): PreviewType | null {
   return EXT_TO_TYPE.get(ext) ?? null
 }
 
+/// Returns the preview kind for any non-empty file key. Known extensions
+/// route to image / video / text; everything else falls back to 'generic'
+/// (file icon + metadata + optional iframe). Returns null only for the empty
+/// string, which never represents a real entry.
 export function previewableKind(key: string): PreviewKind | null {
-  return previewTypeForKey(key)?.kind ?? null
+  if (!key) return null
+  return previewTypeForKey(key)?.kind ?? 'generic'
 }
 
 export function getPreviewType(kind: PreviewKind): PreviewType | null {

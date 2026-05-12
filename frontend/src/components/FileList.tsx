@@ -19,14 +19,16 @@ import {
   Share2,
 } from 'lucide-react'
 
-import { proxyUrl } from '@/api/storage'
 import { ApiError, getStoredToken, setStoredToken } from '@/api/client'
 import { useListFiles, useServerInfo, useStorages } from '@/hooks/use-storage'
 import { useSortDir } from '@/hooks/use-sort-dir'
 import { useViewMode } from '@/hooks/use-view-mode'
+import { formatBytes, formatTime } from '@/lib/format'
 import { sortEntries } from '@/lib/sort'
+import { EntryContextMenu } from '@/components/EntryContextMenu'
 import { FileGrid } from '@/components/FileGrid'
 import { PathBreadcrumb } from '@/components/PathBreadcrumb'
+import { PathNavigator } from '@/components/PathNavigator'
 import { PreviewModal } from '@/components/PreviewModal'
 import { Sidebar } from '@/components/Sidebar'
 import {
@@ -41,6 +43,11 @@ import { ViewToggle } from '@/components/ViewToggle'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import {
   Table,
   TableBody,
@@ -214,15 +221,11 @@ export function FileList() {
       goToPath(entry.key)
       return
     }
-    if (previewableKind(entry.key)) {
-      openPreview(entry)
-      return
-    }
-    window.open(
-      proxyUrl(entry.key, storageName || undefined),
-      '_blank',
-      'noreferrer',
-    )
+    // Every file is previewable — known types via their dedicated previewer,
+    // unknown types via GenericPreview (icon + metadata + iframe fallback for
+    // PDFs). The preview modal's footer still exposes Open/Download for
+    // formats the user'd rather just grab.
+    openPreview(entry)
   }
 
   // Keep sidebar visible even at the storage root so the main pane's width
@@ -239,13 +242,13 @@ export function FileList() {
 
   // Scroll-to-top: the shell's main element is the scroll container (sidebar
   // and main scroll independently), so we listen on the ref rather than on
-  // window. Threshold 200px = roughly "user has scrolled past the toolbar".
+  // window. Threshold 100px = roughly "user has scrolled past the toolbar".
   const mainRef = useRef<HTMLElement>(null)
   const [scrolled, setScrolled] = useState(false)
   const handleMainScroll = useCallback(() => {
     const el = mainRef.current
     if (!el) return
-    setScrolled(el.scrollTop > 200)
+    setScrolled(el.scrollTop > 100)
   }, [])
   const scrollToTop = useCallback(() => {
     mainRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
@@ -288,42 +291,53 @@ export function FileList() {
           className="flex w-full min-w-0 flex-col gap-4 overflow-y-auto px-6 py-4"
         >
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="min-w-0 flex-1">
+            <div className="flex min-w-0 flex-1 items-center gap-1">
               <PathBreadcrumb prefix={prefix} onNavigate={goToPath} />
+              <PathNavigator prefix={prefix} onNavigate={goToPath} />
             </div>
             <div className="flex shrink-0 items-center gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                aria-label={sortDir === 'asc' ? 'Sort descending' : 'Sort ascending'}
-                aria-pressed={sortDir === 'desc'}
-                title={
-                  sortDir === 'asc'
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    aria-label={sortDir === 'asc' ? 'Sort descending' : 'Sort ascending'}
+                    aria-pressed={sortDir === 'desc'}
+                    onClick={toggleMainSort}
+                  >
+                    {sortDir === 'asc' ? (
+                      <ArrowDownAZ className="size-4" />
+                    ) : (
+                      <ArrowDownZA className="size-4" />
+                    )}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {sortDir === 'asc'
                     ? 'Sort A→Z (click to flip to Z→A)'
-                    : 'Sort Z→A (click to flip to A→Z)'
-                }
-                onClick={toggleMainSort}
-              >
-                {sortDir === 'asc' ? (
-                  <ArrowDownAZ className="size-4" />
-                ) : (
-                  <ArrowDownZA className="size-4" />
-                )}
-              </Button>
+                    : 'Sort Z→A (click to flip to A→Z)'}
+                </TooltipContent>
+              </Tooltip>
               <ViewToggle mode={viewMode} onChange={setViewMode} />
               <ShareLinkButton />
               {hasToken && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    setStoredToken(null)
-                    queryClient.invalidateQueries()
-                  }}
-                >
-                  <LogOut className="size-4" />
-                  Sign out
-                </Button>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      aria-label="Sign out"
+                      onClick={() => {
+                        setStoredToken(null)
+                        queryClient.invalidateQueries()
+                      }}
+                    >
+                      <LogOut className="size-4" />
+                      Sign out
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Clear the stored bearer token</TooltipContent>
+                </Tooltip>
               )}
             </div>
           </div>
@@ -374,6 +388,7 @@ export function FileList() {
                     key={entry.key}
                     entry={entry}
                     prefix={prefix}
+                    storageName={storageName}
                     onSelect={handleEntry}
                   />
                 ))}
@@ -388,12 +403,12 @@ export function FileList() {
 
       {scrolled && (
         <Button
-          variant="secondary"
+          variant="default"
           size="icon"
           aria-label="Back to top"
           title="Back to top"
           onClick={scrollToTop}
-          className="fixed bottom-6 right-6 size-11 rounded-full shadow-lg"
+          className="fixed bottom-6 right-6 z-50 size-12 rounded-full shadow-xl"
         >
           <ArrowUp className="size-5" />
         </Button>
@@ -436,56 +451,61 @@ function ShareLinkButton() {
   }
 
   return (
-    <Button
-      variant="outline"
-      size="sm"
-      onClick={onClick}
-      title="Copy a shareable link to this view"
-    >
-      {copied ? (
-        <>
-          <Check className="size-4" />
-          Copied
-        </>
-      ) : (
-        <>
-          <Share2 className="size-4" />
-          Share link
-        </>
-      )}
-    </Button>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button variant="outline" size="sm" onClick={onClick}>
+          {copied ? (
+            <>
+              <Check className="size-4" />
+              Copied
+            </>
+          ) : (
+            <>
+              <Share2 className="size-4" />
+              Share link
+            </>
+          )}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>
+        {copied ? 'Link copied to clipboard' : 'Copy a shareable link to this view'}
+      </TooltipContent>
+    </Tooltip>
   )
 }
 
 interface FileRowProps {
   entry: FileEntry
   prefix: string
+  storageName: string
   onSelect: (entry: FileEntry) => void
 }
 
-function FileRow({ entry, prefix, onSelect }: FileRowProps) {
+function FileRow({ entry, prefix, storageName, onSelect }: FileRowProps) {
   const Icon = entry.is_dir ? Folder : iconForKey(entry.key)
   const color = entry.is_dir ? FOLDER_COLOR : colorForKey(entry.key)
   const name = displayName(entry.key, prefix)
 
   return (
-    <TableRow
-      className="cursor-pointer hover:bg-muted/50"
-      onClick={() => onSelect(entry)}
-    >
-      <TableCell className="flex items-center gap-2 truncate">
-        <Icon className={`size-4 shrink-0 ${color}`} />
-        <span className="truncate" title={name}>
-          {name}
-        </span>
-      </TableCell>
-      <TableCell className="text-right tabular-nums text-muted-foreground">
-        {entry.is_dir ? '—' : formatBytes(entry.size)}
-      </TableCell>
-      <TableCell className="text-muted-foreground">
-        {formatTime(entry.last_modified)}
-      </TableCell>
-    </TableRow>
+    <EntryContextMenu entry={entry} storageName={storageName}>
+      <TableRow
+        className="cursor-pointer hover:bg-muted/50"
+        onClick={() => onSelect(entry)}
+      >
+        <TableCell className="flex items-center gap-2 truncate">
+          <Icon className={`size-4 shrink-0 ${color}`} />
+          <span className="truncate" title={name}>
+            {name}
+          </span>
+        </TableCell>
+        <TableCell className="text-right tabular-nums text-muted-foreground">
+          {entry.is_dir ? '—' : formatBytes(entry.size)}
+        </TableCell>
+        <TableCell className="text-muted-foreground">
+          {formatTime(entry.last_modified)}
+        </TableCell>
+      </TableRow>
+    </EntryContextMenu>
   )
 }
 
@@ -589,25 +609,3 @@ function displayName(key: string, prefix: string): string {
   return rel.replace(/\/+$/, '') || key
 }
 
-function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`
-  const units = ['KB', 'MB', 'GB', 'TB']
-  let v = n / 1024
-  let i = 0
-  while (v >= 1024 && i < units.length - 1) {
-    v /= 1024
-    i += 1
-  }
-  return `${v.toFixed(v >= 10 ? 0 : 1)} ${units[i]}`
-}
-
-function formatTime(value: string | null): string {
-  if (!value) return '—'
-  // Backend may emit either an HTTP-date (S3) or unix seconds (local FS).
-  const asNumber = Number(value)
-  const date = Number.isFinite(asNumber) && /^\d+$/.test(value)
-    ? new Date(asNumber * 1000)
-    : new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleString()
-}
