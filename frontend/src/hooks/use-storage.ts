@@ -1,12 +1,22 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 
-import { listFiles, listStorages, statFile } from '@/api/storage'
+import { getServerInfo, listFiles, listStorages, statFile } from '@/api/storage'
 
 export function useStorages() {
   return useQuery({
     queryKey: ['storages'] as const,
     queryFn: listStorages,
     // Storage roster is configured on the server and only changes on restart.
+    staleTime: Infinity,
+  })
+}
+
+export function useServerInfo() {
+  return useQuery({
+    queryKey: ['server'] as const,
+    queryFn: getServerInfo,
+    // Hostname is read from the kernel once at server boot; it doesn't change
+    // for the lifetime of the page, so we cache it forever.
     staleTime: Infinity,
   })
 }

@@ -2,11 +2,17 @@ import { apiClient } from '@/api/client'
 import type {
   FileMeta,
   ListResult,
+  ServerInfo,
   StoragesResponse,
 } from '@/types/storage'
 
 export async function listStorages(): Promise<StoragesResponse> {
   const { data } = await apiClient.get<StoragesResponse>('/api/storages')
+  return data
+}
+
+export async function getServerInfo(): Promise<ServerInfo> {
+  const { data } = await apiClient.get<ServerInfo>('/api/server')
   return data
 }
 

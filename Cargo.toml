@@ -29,6 +29,7 @@ aws-config = { version = "1", features = ["behavior-version-latest"] }
 
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+hostname = "0.4"
 
 # Thumbnail generation: decode common formats with `image`, resize with Lanczos,
 # encode lossy WebP via `webp` (statically-linked libwebp). Image format features

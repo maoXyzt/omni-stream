@@ -20,15 +20,21 @@ pub struct AppState {
     order: Arc<Vec<String>>,
     default_name: Arc<String>,
     thumb: Option<Arc<ThumbState>>,
+    hostname: Arc<String>,
 }
 
 impl AppState {
-    pub fn new(reg: BackendRegistry, thumb: Option<Arc<ThumbState>>) -> Self {
+    pub fn new(
+        reg: BackendRegistry,
+        thumb: Option<Arc<ThumbState>>,
+        hostname: Arc<String>,
+    ) -> Self {
         Self {
             backends: Arc::new(reg.backends),
             order: Arc::new(reg.order),
             default_name: Arc::new(reg.default_name),
             thumb,
+            hostname,
         }
     }
 
@@ -69,6 +75,17 @@ pub struct StorageDescriptor {
 pub struct StoragesResponse {
     pub storages: Vec<StorageDescriptor>,
     pub default: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ServerInfo {
+    pub hostname: String,
+}
+
+pub async fn server_info_handler(State(state): State<AppState>) -> Json<ServerInfo> {
+    Json(ServerInfo {
+        hostname: state.hostname.as_str().to_string(),
+    })
 }
 
 pub async fn list_storages_handler(State(state): State<AppState>) -> Json<StoragesResponse> {

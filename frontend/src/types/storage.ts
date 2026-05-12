@@ -33,3 +33,7 @@ export interface StoragesResponse {
   storages: StorageDescriptor[]
   default: string
 }
+
+export interface ServerInfo {
+  hostname: string
+}

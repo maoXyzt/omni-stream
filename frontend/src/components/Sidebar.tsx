@@ -2,7 +2,7 @@ import { useMemo } from 'react'
 import { ArrowDownAZ, ArrowDownZA, ChevronUp, Folder } from 'lucide-react'
 
 import { useListFiles } from '@/hooks/use-storage'
-import type { SortDir } from '@/hooks/use-sort-dir'
+import { SIDEBAR_SORT_KEY, useSortDir } from '@/hooks/use-sort-dir'
 import { FOLDER_COLOR } from '@/components/preview/registry'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -18,8 +18,6 @@ interface SidebarProps {
   currentName: string
   storageName: string
   onNavigate: (prefix: string) => void
-  sortDir: SortDir
-  onToggleSort: () => void
 }
 
 export function Sidebar({
@@ -27,9 +25,11 @@ export function Sidebar({
   currentName,
   storageName,
   onNavigate,
-  sortDir,
-  onToggleSort,
 }: SidebarProps) {
+  // Sidebar owns its sort axis — independent from the main view so users can
+  // e.g. browse the parent dir A→Z while keeping the main panel reverse-sorted.
+  const [sortDir, setSortDir] = useSortDir(SIDEBAR_SORT_KEY)
+  const onToggleSort = () => setSortDir(sortDir === 'asc' ? 'desc' : 'asc')
   // The hook is keyed on (storage, prefix, token); navigating into a sibling
   // dir promotes its cached version to the main pane and the prior parent
   // listing here stays in cache for the back trip. staleTime is bumped to 5m

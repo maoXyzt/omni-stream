@@ -8,6 +8,8 @@ import {
 } from 'react-router-dom'
 import {
   AlertCircle,
+  ArrowDownAZ,
+  ArrowDownZA,
   Check,
   ChevronLeft,
   ChevronRight,
@@ -18,7 +20,7 @@ import {
 
 import { proxyUrl } from '@/api/storage'
 import { ApiError, getStoredToken, setStoredToken } from '@/api/client'
-import { useListFiles, useStorages } from '@/hooks/use-storage'
+import { useListFiles, useServerInfo, useStorages } from '@/hooks/use-storage'
 import { useSortDir } from '@/hooks/use-sort-dir'
 import { useViewMode } from '@/hooks/use-view-mode'
 import { sortEntries } from '@/lib/sort'
@@ -65,6 +67,7 @@ export function FileList() {
   const parentInfo = useMemo(() => parentOf(prefix), [prefix])
 
   const storagesQuery = useStorages()
+  const serverInfo = useServerInfo()
   const [viewMode, setViewMode] = useViewMode()
   const [sortDir, setSortDir] = useSortDir()
   const [tokenStack, setTokenStack] = useState<Array<string | undefined>>([
@@ -226,7 +229,7 @@ export function FileList() {
   // panel still shows root-level folders for quick jumps.
   const sidebarParent = parentInfo?.parent ?? ''
   const sidebarCurrent = parentInfo?.currentName ?? ''
-  const toggleSort = () => setSortDir(sortDir === 'asc' ? 'desc' : 'asc')
+  const toggleMainSort = () => setSortDir(sortDir === 'asc' ? 'desc' : 'asc')
 
   const sortedEntries = useMemo(
     () => (listQuery.data ? sortEntries(listQuery.data.entries, sortDir) : []),
@@ -234,54 +237,79 @@ export function FileList() {
   )
 
   return (
-    <div className="flex w-full">
-      {storageName && (
-        <aside className="hidden md:flex md:w-64 md:shrink-0 md:flex-col md:border-r md:border-border">
-          <Sidebar
-            parent={sidebarParent}
-            currentName={sidebarCurrent}
-            storageName={storageName}
-            onNavigate={goToPath}
-            sortDir={sortDir}
-            onToggleSort={toggleSort}
-          />
-        </aside>
-      )}
-      <div className="flex w-full min-w-0 flex-col gap-4 px-6 py-4">
-        <header className="flex flex-wrap items-start justify-between gap-2">
-        <div className="flex flex-col gap-2">
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-semibold">OmniStream</h1>
-            {storagesQuery.data && (
-              <StorageSwitcher
-                storages={storagesQuery.data.storages}
-                active={storageName}
-                onChange={switchStorage}
-              />
-            )}
-          </div>
-          <PathBreadcrumb prefix={prefix} onNavigate={goToPath} />
-        </div>
-        <div className="flex items-center gap-2">
-          <ViewToggle mode={viewMode} onChange={setViewMode} />
-          <ShareLinkButton />
-          {hasToken && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                setStoredToken(null)
-                queryClient.invalidateQueries()
-              }}
-            >
-              <LogOut className="size-4" />
-              Sign out
-            </Button>
+    <div className="flex h-screen w-full flex-col">
+      <header className="flex shrink-0 flex-wrap items-center gap-3 border-b border-border bg-background px-6 py-3">
+        <h1 className="text-2xl font-semibold">
+          OmniStream
+          {serverInfo.data?.hostname && (
+            <span className="ml-2 text-base font-normal text-muted-foreground">
+              {serverInfo.data.hostname}
+            </span>
           )}
-        </div>
+        </h1>
+        {storagesQuery.data && (
+          <StorageSwitcher
+            storages={storagesQuery.data.storages}
+            active={storageName}
+            onChange={switchStorage}
+          />
+        )}
       </header>
 
-      {listQuery.isError && <ErrorState error={listQuery.error} />}
+      <div className="flex min-h-0 flex-1">
+        {storageName && (
+          <aside className="hidden md:flex md:w-64 md:shrink-0 md:flex-col md:overflow-y-auto md:border-r md:border-border">
+            <Sidebar
+              parent={sidebarParent}
+              currentName={sidebarCurrent}
+              storageName={storageName}
+              onNavigate={goToPath}
+            />
+          </aside>
+        )}
+        <main className="flex w-full min-w-0 flex-col gap-4 overflow-y-auto px-6 py-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <PathBreadcrumb prefix={prefix} onNavigate={goToPath} />
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                aria-label={sortDir === 'asc' ? 'Sort descending' : 'Sort ascending'}
+                aria-pressed={sortDir === 'desc'}
+                title={
+                  sortDir === 'asc'
+                    ? 'Sort A→Z (click to flip to Z→A)'
+                    : 'Sort Z→A (click to flip to A→Z)'
+                }
+                onClick={toggleMainSort}
+              >
+                {sortDir === 'asc' ? (
+                  <ArrowDownAZ className="size-4" />
+                ) : (
+                  <ArrowDownZA className="size-4" />
+                )}
+              </Button>
+              <ViewToggle mode={viewMode} onChange={setViewMode} />
+              <ShareLinkButton />
+              {hasToken && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setStoredToken(null)
+                    queryClient.invalidateQueries()
+                  }}
+                >
+                  <LogOut className="size-4" />
+                  Sign out
+                </Button>
+              )}
+            </div>
+          </div>
+
+          {listQuery.isError && <ErrorState error={listQuery.error} />}
 
       {listQuery.isPending ? (
         viewMode === 'grid' ? <GridSkeleton /> : <ListSkeleton />
@@ -336,16 +364,18 @@ export function FileList() {
         </>
       ) : null}
 
-        {previewState && (
-          <PreviewModal
-            fileKey={previewState.key}
-            kind={previewState.kind}
-            storage={storageName || undefined}
-            onClose={closePreview}
-            onNavigate={navigatePreview}
-          />
-        )}
+        </main>
       </div>
+
+      {previewState && (
+        <PreviewModal
+          fileKey={previewState.key}
+          kind={previewState.kind}
+          storage={storageName || undefined}
+          onClose={closePreview}
+          onNavigate={navigatePreview}
+        />
+      )}
     </div>
   )
 }
@@ -413,7 +443,9 @@ function FileRow({ entry, prefix, onSelect }: FileRowProps) {
     >
       <TableCell className="flex items-center gap-2 truncate">
         <Icon className={`size-4 shrink-0 ${color}`} />
-        <span className="truncate">{name}</span>
+        <span className="truncate" title={name}>
+          {name}
+        </span>
       </TableCell>
       <TableCell className="text-right tabular-nums text-muted-foreground">
         {entry.is_dir ? '—' : formatBytes(entry.size)}

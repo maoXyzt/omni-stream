@@ -22,8 +22,8 @@ use tracing_subscriber::util::SubscriberInitExt;
 use crate::auth::{AuthState, auth_middleware};
 use crate::config::Config;
 use crate::handlers::{
-    AppState, list_handler, list_storages_handler, proxy_handler, stat_handler, static_handler,
-    thumb_handler,
+    AppState, list_handler, list_storages_handler, proxy_handler, server_info_handler,
+    stat_handler, static_handler, thumb_handler,
 };
 use crate::storage::factory::create_registry;
 use crate::thumbs::ThumbState;
@@ -60,7 +60,15 @@ async fn main() -> anyhow::Result<()> {
     if let Some(t) = thumb.as_ref() {
         spawn_thumb_sweep(t.clone());
     }
-    let state = AppState::new(registry, thumb);
+    // gethostname() syscall once at startup; the value is immutable for the
+    // process lifetime so it's safe to share via Arc.
+    let hostname = Arc::new(
+        hostname::get()
+            .ok()
+            .and_then(|s| s.into_string().ok())
+            .unwrap_or_else(|| "unknown".into()),
+    );
+    let state = AppState::new(registry, thumb, hostname);
     let auth_state = AuthState::from_config(&cfg.auth).context("init auth gate")?;
     if auth_state.enabled {
         tracing::info!("auth gate enabled: /api/* requires Bearer token");
@@ -69,6 +77,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let app = Router::new()
+        .route("/api/server", get(server_info_handler))
         .route("/api/storages", get(list_storages_handler))
         .route("/api/list", get(list_handler))
         .route("/api/stat/{*key}", get(stat_handler))
