@@ -15,9 +15,15 @@ on:
     paths-ignore: ['**/*.md', 'docs/**']
   workflow_dispatch:
 
+# Group by source branch (head_ref on PR events, ref_name on push / tag /
+# dispatch). Push to a branch with an open PR fires both `push` and
+# `pull_request` events; this collapses them into one effective run, and
+# also cancels stale in-flight runs when commits land in quick succession.
+# Tag and main pushes land in their own groups (`build-v0.1.0`, `build-main`),
+# so they're never cancelled by activity on feature branches.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
