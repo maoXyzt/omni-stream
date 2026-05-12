@@ -20,15 +20,68 @@ permissions:
   contents: read
 
 jobs:
+  # Cheap preflight that gates `release` and `publish`. Failing here costs ~30s
+  # instead of ~20min of backend / publish work on a mistyped tag.
+  verify-tag:
+    name: Verify tag ↔ Cargo.toml version
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Compare tag with manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME#v}"
+          manifest=$(awk -F\" '/^version *=/ { print $2; exit }' Cargo.toml)
+          if [[ "$tag" != "$manifest" ]]; then
+            echo "::error::tag v$tag does not match Cargo.toml version $manifest"
+            exit 1
+          fi
+
+  # Decides which targets the backend matrix builds. The full 4-platform fan-out
+  # is reserved for events that produce shippable artifacts (push to main, v*
+  # tags, manual dispatch). PRs and pushes to dev only validate the cheapest
+  # target (linux-gnu) — dev is a long-running integration branch, not a
+  # release source, so paying for macOS / windows runners on every push is
+  # wasted spend.
+  matrix-config:
+    name: Backend matrix config
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set.outputs.matrix }}
+    steps:
+      - id: set
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          full=false
+          case "$EVENT:$REF" in
+            push:refs/heads/main|push:refs/tags/v*|workflow_dispatch:*)
+              full=true ;;
+          esac
+          if $full; then
+            matrix='{"include":[{"target":"x86_64-unknown-linux-gnu","runner":"ubuntu-latest"},{"target":"x86_64-unknown-linux-musl","runner":"ubuntu-latest"},{"target":"aarch64-apple-darwin","runner":"macos-latest"},{"target":"x86_64-pc-windows-msvc","runner":"windows-latest"}]}'
+          else
+            matrix='{"include":[{"target":"x86_64-unknown-linux-gnu","runner":"ubuntu-latest"}]}'
+          fi
+          echo "matrix=$matrix" >>"$GITHUB_OUTPUT"
+
   frontend:
     name: Frontend
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
 
+      # Version is read from `frontend/package.json` "packageManager" field —
+      # don't duplicate it here, otherwise it drifts from what `pnpm install`
+      # actually uses locally.
       - uses: pnpm/action-setup@v4
         with:
-          version: 10.18.3
           run_install: false
 
       - uses: actions/setup-node@v5
@@ -96,20 +149,11 @@ jobs:
 
   backend:
     name: ${{ matrix.target }}
-    needs: frontend
+    needs: [frontend, matrix-config]
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - target: x86_64-unknown-linux-gnu
-            runner: ubuntu-latest
-          - target: x86_64-unknown-linux-musl
-            runner: ubuntu-latest
-          - target: aarch64-apple-darwin
-            runner: macos-latest
-          - target: x86_64-pc-windows-msvc
-            runner: windows-latest
+      matrix: ${{ fromJSON(needs.matrix-config.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v5
 
@@ -170,7 +214,7 @@ jobs:
 
   release:
     name: Release
-    needs: [backend, lint]
+    needs: [verify-tag, backend, lint]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
@@ -191,7 +235,10 @@ jobs:
   publish-dry-run:
     name: cargo publish --dry-run
     needs: frontend
-    if: github.event_name == 'pull_request'
+    # Run on every event that isn't already pushing the real release —
+    # PRs, push to dev / main, manual dispatch — so metadata regressions
+    # are caught even if someone bypasses PR review and pushes directly.
+    if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -212,22 +259,11 @@ jobs:
 
   publish:
     name: cargo publish
-    needs: [frontend, backend, lint]
+    needs: [verify-tag, frontend, backend, lint]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-
-      - name: Verify tag matches Cargo.toml version
-        shell: bash
-        run: |
-          set -euo pipefail
-          tag="${GITHUB_REF_NAME#v}"
-          manifest=$(awk -F\" '/^version *=/ { print $2; exit }' Cargo.toml)
-          if [[ "$tag" != "$manifest" ]]; then
-            echo "::error::tag v$tag does not match Cargo.toml version $manifest"
-            exit 1
-          fi
 
       - name: Pull frontend dist
         uses: actions/download-artifact@v5
