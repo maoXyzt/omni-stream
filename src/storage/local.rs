@@ -257,12 +257,11 @@ impl StorageBackend for LocalFsBackend {
         continue;
       }
       // Skip work for entries the heap would immediately evict.
-      if heap.len() == cap {
-        if let Some(top) = heap.peek() {
-          if key >= top.0.key {
-            continue;
-          }
-        }
+      if heap.len() == cap
+        && let Some(top) = heap.peek()
+        && key >= top.0.key
+      {
+        continue;
       }
       let (size, last_modified) = if is_dir {
         (0u64, None)

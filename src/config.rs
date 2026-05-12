@@ -141,17 +141,16 @@ fn default_follow_symlinks() -> bool {
 }
 
 fn expand_tilde(s: &str) -> PathBuf {
-  if let Some(rest) = s.strip_prefix('~') {
-    if rest.is_empty() || rest.starts_with('/') {
-      if let Some(home) = env::var_os("HOME") {
-        let mut p = PathBuf::from(home);
-        let trimmed = rest.strip_prefix('/').unwrap_or(rest);
-        if !trimmed.is_empty() {
-          p.push(trimmed);
-        }
-        return p;
-      }
+  if let Some(rest) = s.strip_prefix('~')
+    && (rest.is_empty() || rest.starts_with('/'))
+    && let Some(home) = env::var_os("HOME")
+  {
+    let mut p = PathBuf::from(home);
+    let trimmed = rest.strip_prefix('/').unwrap_or(rest);
+    if !trimmed.is_empty() {
+      p.push(trimmed);
     }
+    return p;
   }
   PathBuf::from(s)
 }
