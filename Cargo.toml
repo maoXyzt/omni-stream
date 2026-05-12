@@ -2,7 +2,28 @@
 name = "omni-stream"
 version = "0.1.0"
 edition = "2024"
-publish = ["mirror"]
+rust-version = "1.85"
+description = "Single-binary streaming storage proxy: axum + tokio + aws-sdk-s3 backend with an embedded React SPA, serving local FS or S3-compatible object storage behind one port."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/maoXyzt/omni-stream"
+homepage = "https://github.com/maoXyzt/omni-stream"
+documentation = "https://docs.rs/omni-stream"
+readme = "README.md"
+keywords = ["s3", "proxy", "streaming", "axum", "storage"]
+categories = ["web-programming::http-server", "command-line-utilities"]
+# `frontend/dist/` is git-ignored but must ship in the tarball so the embedded
+# SPA compiles on docs.rs / downstream builds. Run `pnpm build` in `frontend/`
+# before `cargo publish`.
+include = [
+    "/src/**/*",
+    "/frontend/dist/**/*",
+    "/Cargo.toml",
+    "/Cargo.lock",
+    "/README.md",
+    "/LICENSE-MIT",
+    "/LICENSE-APACHE",
+    "/config.example.toml",
+]
 
 [dependencies]
 tokio = { version = "1", features = ["fs", "io-util", "macros", "rt-multi-thread", "sync", "net", "signal"] }
