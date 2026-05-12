@@ -79,10 +79,13 @@ jobs:
 
       # Version is read from `frontend/package.json` "packageManager" field —
       # don't duplicate it here, otherwise it drifts from what `pnpm install`
-      # actually uses locally.
+      # actually uses locally. The default `package_json_file: package.json`
+      # is the repo root, which has no package.json in this project, so we
+      # have to point at `frontend/`.
       - uses: pnpm/action-setup@v4
         with:
           run_install: false
+          package_json_file: frontend/package.json
 
       - uses: actions/setup-node@v5
         with:
