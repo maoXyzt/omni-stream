@@ -2,6 +2,69 @@
 name = "omni-stream"
 version = "0.1.0"
 edition = "2024"
-publish = ["mirror"]
+rust-version = "1.91"
+description = "Single-binary streaming storage proxy: axum + tokio + aws-sdk-s3 backend with an embedded React SPA, serving local FS or S3-compatible object storage behind one port."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/maoXyzt/omni-stream"
+homepage = "https://github.com/maoXyzt/omni-stream"
+documentation = "https://docs.rs/omni-stream"
+readme = "README.md"
+keywords = ["s3", "proxy", "streaming", "axum", "storage"]
+categories = ["web-programming::http-server", "command-line-utilities"]
+# `frontend/dist/` is git-ignored but must ship in the tarball so the embedded
+# SPA compiles on docs.rs / downstream builds. Run `pnpm build` in `frontend/`
+# before `cargo publish`.
+include = [
+    "/src/**/*",
+    "/frontend/dist/**/*",
+    "/Cargo.toml",
+    "/Cargo.lock",
+    "/README.md",
+    "/LICENSE-MIT",
+    "/LICENSE-APACHE",
+    "/config.example.toml",
+]
 
 [dependencies]
+tokio = { version = "1", features = ["fs", "io-util", "macros", "rt-multi-thread", "sync", "net", "signal"] }
+async-trait = "0.1"
+bytes = "1"
+futures = "0.3"
+thiserror = "2"
+anyhow = "1"
+tokio-util = { version = "0.7", features = ["io"] }
+mime_guess = "2"
+
+axum = { version = "0.8", features = ["macros"] }
+tower-http = { version = "0.6", features = ["trace"] }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+config = { version = "0.15", default-features = false, features = ["toml"] }
+directories = "5"
+rust-embed = { version = "8", features = ["interpolate-folder-path"] }
+
+aws-sdk-s3 = "1"
+aws-config = { version = "1", features = ["behavior-version-latest"] }
+
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+hostname = "0.4"
+
+# Thumbnail generation: decode common formats with `image`, resize with Lanczos,
+# encode lossy WebP via `webp` (statically-linked libwebp). Image format features
+# are kept minimal to skip AVIF/dav1d and other C deps.
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "bmp", "tiff", "webp", "rayon"] }
+webp = "0.3"
+sha2 = "0.10"
+
+# Drives `cargo release <patch|minor|major|x.y.z> --execute`: bumps the
+# version in Cargo.toml + Cargo.lock, commits, tags `v<version>`, and pushes.
+# CI takes over after the tag lands and runs `cargo publish`, so the local
+# command must NOT publish.
+[package.metadata.release]
+tag-prefix = "v"
+publish = false
+pre-release-commit-message = "release: {{version}}"
+tag-message = "release {{version}}"

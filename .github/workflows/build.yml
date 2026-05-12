@@ -1,0 +1,305 @@
+name: build
+
+on:
+  # `paths-ignore` skips the entire workflow when a push / PR touches only
+  # documentation. Tag pushes share this filter (GitHub has no per-trigger
+  # `paths-ignore`), but in practice tags created via `cargo release` always
+  # commit a Cargo.toml + Cargo.lock version bump, so a md-only release commit
+  # never happens. If you ever hand-tag a doc-only commit, prefix with
+  # `git commit --allow-empty -m "release prep"` to force the workflow to fire.
+  push:
+    branches: [main, dev]
+    tags: ['v*']
+    paths-ignore: ['**/*.md', 'docs/**']
+  pull_request:
+    paths-ignore: ['**/*.md', 'docs/**']
+  workflow_dispatch:
+
+# Group by source branch (head_ref on PR events, ref_name on push / tag /
+# dispatch). Push to a branch with an open PR fires both `push` and
+# `pull_request` events; this collapses them into one effective run, and
+# also cancels stale in-flight runs when commits land in quick succession.
+# Tag and main pushes land in their own groups (`build-v0.1.0`, `build-main`),
+# so they're never cancelled by activity on feature branches.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+# Default minimal scope; only the `release` job widens to `contents: write`
+# to publish GitHub Releases.
+permissions:
+  contents: read
+
+jobs:
+  # Cheap preflight that gates `release` and `publish`. Failing here costs ~30s
+  # instead of ~20min of backend / publish work on a mistyped tag.
+  verify-tag:
+    name: Verify tag ↔ Cargo.toml version
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Compare tag with manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME#v}"
+          manifest=$(awk -F\" '/^version *=/ { print $2; exit }' Cargo.toml)
+          if [[ "$tag" != "$manifest" ]]; then
+            echo "::error::tag v$tag does not match Cargo.toml version $manifest"
+            exit 1
+          fi
+
+  # Decides which targets the backend matrix builds. The full 4-platform fan-out
+  # is reserved for events that produce shippable artifacts (push to main, v*
+  # tags, manual dispatch). PRs and pushes to dev only validate the cheapest
+  # target (linux-gnu) — dev is a long-running integration branch, not a
+  # release source, so paying for macOS / windows runners on every push is
+  # wasted spend.
+  matrix-config:
+    name: Backend matrix config
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set.outputs.matrix }}
+    steps:
+      - id: set
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          full=false
+          case "$EVENT:$REF" in
+            push:refs/heads/main|push:refs/tags/v*|workflow_dispatch:*)
+              full=true ;;
+          esac
+          if $full; then
+            matrix='{"include":[{"target":"x86_64-unknown-linux-gnu","runner":"ubuntu-latest"},{"target":"x86_64-unknown-linux-musl","runner":"ubuntu-latest"},{"target":"aarch64-apple-darwin","runner":"macos-latest"},{"target":"x86_64-pc-windows-msvc","runner":"windows-latest"}]}'
+          else
+            matrix='{"include":[{"target":"x86_64-unknown-linux-gnu","runner":"ubuntu-latest"}]}'
+          fi
+          echo "matrix=$matrix" >>"$GITHUB_OUTPUT"
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # Version is read from `frontend/package.json` "packageManager" field —
+      # don't duplicate it here, otherwise it drifts from what `pnpm install`
+      # actually uses locally. The default `package_json_file: package.json`
+      # is the repo root, which has no package.json in this project, so we
+      # have to point at `frontend/`.
+      - uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+          package_json_file: frontend/package.json
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: frontend/.node-version
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        working-directory: frontend
+        run: pnpm lint
+
+      - name: Build SPA
+        working-directory: frontend
+        run: pnpm build
+
+      - name: Upload dist
+        uses: actions/upload-artifact@v5
+        with:
+          name: frontend-dist
+          path: frontend/dist
+          if-no-files-found: error
+          retention-days: 7
+
+  # Quality gates pinned to MSRV (1.91). `release` and `publish` depend on this
+  # so a broken lint / failing test cannot ship to GitHub Releases or crates.io.
+  lint:
+    name: Lint & Test
+    needs: frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # `cargo fmt --check` only needs source — runs before any download/cache
+      # so style violations fail fast.
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@1.91
+        with:
+          components: rustfmt, clippy
+
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+
+      # clippy & test compile the crate, which requires `frontend/dist/` to
+      # exist (rust-embed reads it at compile time).
+      - name: Pull frontend dist
+        uses: actions/download-artifact@v5
+        with:
+          name: frontend-dist
+          path: frontend/dist
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: lint
+
+      - name: cargo clippy
+        run: cargo clippy --all-targets --locked -- -D warnings
+
+      - name: cargo test
+        run: cargo test --locked
+
+  backend:
+    name: ${{ matrix.target }}
+    needs: [frontend, matrix-config]
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.matrix-config.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Pull frontend dist
+        uses: actions/download-artifact@v5
+        with:
+          name: frontend-dist
+          path: frontend/dist
+
+      - name: Install musl toolchain
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@1.91
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Build release binary
+        env:
+          CC_x86_64_unknown_linux_musl: musl-gcc
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
+        run: cargo build --release --locked --target ${{ matrix.target }} --bin omni-stream
+
+      - name: Package archive
+        id: pkg
+        shell: bash
+        run: |
+          set -euo pipefail
+          target="${{ matrix.target }}"
+          version="${GITHUB_REF_NAME//\//-}"
+          name="omni-stream-${version}-${target}"
+          mkdir -p dist
+          if [[ "$target" == *windows* ]]; then
+            bin="target/${target}/release/omni-stream.exe"
+            7z a "dist/${name}.zip" "$bin" >/dev/null
+            archive="${name}.zip"
+          else
+            bin="target/${target}/release/omni-stream"
+            strip "$bin" || true
+            tar -C "$(dirname "$bin")" -czf "dist/${name}.tar.gz" "$(basename "$bin")"
+            archive="${name}.tar.gz"
+          fi
+          (cd dist && shasum -a 256 "${archive}" >"${archive}.sha256")
+          echo "artifact=${name}" >>"$GITHUB_OUTPUT"
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v5
+        with:
+          name: ${{ steps.pkg.outputs.artifact }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Release
+    needs: [verify-tag, backend, lint]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: omni-stream-*
+          path: artifacts
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+
+  publish-dry-run:
+    name: cargo publish --dry-run
+    needs: frontend
+    # Run on every event that isn't already pushing the real release —
+    # PRs, push to dev / main, manual dispatch — so metadata regressions
+    # are caught even if someone bypasses PR review and pushes directly.
+    if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Pull frontend dist
+        uses: actions/download-artifact@v5
+        with:
+          name: frontend-dist
+          path: frontend/dist
+
+      - uses: dtolnay/rust-toolchain@1.91
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: publish-dry-run
+
+      # `--allow-dirty`: `frontend/dist/` is gitignored but pulled from the
+      # `frontend` artifact at runtime; cargo otherwise refuses to package
+      # with uncommitted files in the tree. The `include` field in Cargo.toml
+      # is what actually ships dist into the tarball.
+      - run: cargo publish --dry-run --locked --allow-dirty --registry crates-io
+
+  publish:
+    name: cargo publish
+    needs: [verify-tag, frontend, backend, lint]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Pull frontend dist
+        uses: actions/download-artifact@v5
+        with:
+          name: frontend-dist
+          path: frontend/dist
+
+      - uses: dtolnay/rust-toolchain@1.91
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: publish
+
+      # See `publish-dry-run` for why `--allow-dirty` is required.
+      - name: cargo publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish --locked --allow-dirty --registry crates-io
