@@ -64,6 +64,7 @@ cargo release 0.5.0          # 指定版本
 ```
 
 确认输出包含：
+
 - `Cargo.toml` 与 `Cargo.lock` 的 `version` 改写
 - commit message: `release: <new-version>`
 - tag: `v<new-version>`
@@ -76,6 +77,7 @@ cargo release patch --execute
 ```
 
 执行后 `cargo-release` 会自动：
+
 1. 改写 `Cargo.toml` + `Cargo.lock` 的 `version`
 2. `git commit -m "release: <new-version>"`
 3. `git tag -a v<new-version> -m "release <new-version>"`
