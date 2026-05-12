@@ -6,7 +6,7 @@
 
 ## 1. 总览
 
-发版分两段：**本地** 用 `cargo release` 同时 bump 版本号 + 打 tag + 推送；**CI** 监听 `v*` tag，自动编译四个平台二进制、创建 GitHub Release、并发布到 crates.io。
+发版分两段：**本地** 用 `cargo release` 同时 bump 版本号 + 打 tag + 推送；**CI** 监听 `v*` tag，自动编译三个平台二进制、创建 GitHub Release、并发布到 crates.io。
 
 ```
 本地: cargo release patch --execute
@@ -17,8 +17,8 @@
                             │
 GitHub Actions ←────────────┘
   ├─ frontend       (pnpm build)
-  ├─ backend (×4)   (linux-gnu / linux-musl / aarch64-darwin / windows-msvc)
-  ├─ release        (GitHub Release + tarball/zip + sha256)
+  ├─ backend (×3)   (linux-gnu / linux-musl / aarch64-darwin)
+  ├─ release        (GitHub Release + tarball + sha256)
   └─ publish        (cargo publish → crates.io)
 ```
 
@@ -86,9 +86,9 @@ cargo release patch --execute
 ### 3.4 等 CI 跑完
 
 1. <https://github.com/maoXyzt/omni-stream/actions> 观察 `build` workflow
-2. 顺序：`frontend` → `backend (×4)` → `release` + `publish` 并行
+2. 顺序：`frontend` → `backend (×3)` → `release` + `publish` 并行
 3. 全绿后：
-   - GitHub Releases 出现 `v<new-version>`，挂着 4 份压缩包 + `.sha256`
+   - GitHub Releases 出现 `v<new-version>`，挂着 3 份压缩包 + `.sha256`
    - <https://crates.io/crates/omni-stream> 出现新版本
 
 ## 4. 防呆机制
