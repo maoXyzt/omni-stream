@@ -341,7 +341,7 @@ mod tests {
     fn parses_example_file() {
         let raw = std::fs::read_to_string("config.example.toml").expect("read example");
         let cfg = parse(&raw);
-        assert_eq!(cfg.server.port, 8080);
+        assert_eq!(cfg.server.port, 28080);
         assert!(!cfg.storages.is_empty());
         let active = cfg.active_storage().expect("active");
         assert_eq!(active.r#type, StorageType::S3);

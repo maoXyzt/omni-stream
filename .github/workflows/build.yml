@@ -14,19 +14,24 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
 
+# Default minimal scope; only the `release` job widens to `contents: write`
+# to publish GitHub Releases.
+permissions:
+  contents: read
+
 jobs:
   frontend:
     name: Frontend
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: pnpm/action-setup@v4
         with:
           version: 10.18.3
           run_install: false
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version-file: frontend/.node-version
           cache: pnpm
@@ -36,17 +41,58 @@ jobs:
         working-directory: frontend
         run: pnpm install --frozen-lockfile
 
+      - name: Lint
+        working-directory: frontend
+        run: pnpm lint
+
       - name: Build SPA
         working-directory: frontend
         run: pnpm build
 
       - name: Upload dist
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: frontend-dist
           path: frontend/dist
           if-no-files-found: error
           retention-days: 7
+
+  # Quality gates pinned to MSRV (1.85). `release` and `publish` depend on this
+  # so a broken lint / failing test cannot ship to GitHub Releases or crates.io.
+  lint:
+    name: Lint & Test
+    needs: frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # `cargo fmt --check` only needs source — runs before any download/cache
+      # so style violations fail fast.
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@1.85
+        with:
+          components: rustfmt, clippy
+
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+
+      # clippy & test compile the crate, which requires `frontend/dist/` to
+      # exist (rust-embed reads it at compile time).
+      - name: Pull frontend dist
+        uses: actions/download-artifact@v5
+        with:
+          name: frontend-dist
+          path: frontend/dist
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: lint
+
+      - name: cargo clippy
+        run: cargo clippy --all-targets --locked -- -D warnings
+
+      - name: cargo test
+        run: cargo test --locked
 
   backend:
     name: ${{ matrix.target }}
@@ -65,10 +111,10 @@ jobs:
           - target: x86_64-pc-windows-msvc
             runner: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Pull frontend dist
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: frontend-dist
           path: frontend/dist
@@ -78,7 +124,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y musl-tools
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.85
         with:
           targets: ${{ matrix.target }}
 
@@ -115,7 +161,7 @@ jobs:
           echo "artifact=${name}" >>"$GITHUB_OUTPUT"
 
       - name: Upload binary
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: ${{ steps.pkg.outputs.artifact }}
           path: dist/*
@@ -124,13 +170,13 @@ jobs:
 
   release:
     name: Release
-    needs: backend
+    needs: [backend, lint]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v5
         with:
           pattern: omni-stream-*
           path: artifacts
@@ -148,15 +194,15 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Pull frontend dist
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: frontend-dist
           path: frontend/dist
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.85
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -166,11 +212,11 @@ jobs:
 
   publish:
     name: cargo publish
-    needs: [frontend, backend]
+    needs: [frontend, backend, lint]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Verify tag matches Cargo.toml version
         shell: bash
@@ -184,12 +230,12 @@ jobs:
           fi
 
       - name: Pull frontend dist
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: frontend-dist
           path: frontend/dist
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.85
 
       - uses: Swatinem/rust-cache@v2
         with:
