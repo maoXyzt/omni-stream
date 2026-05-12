@@ -2,7 +2,7 @@
 
 [中文](README.md) · **English**
 
-A single-binary, streaming storage proxy. The backend is built on `axum + tokio + aws-sdk-s3` and serves both the local filesystem and S3-compatible object storage (MinIO / OSS / Ceph / R2 / …) behind one `StorageBackend` trait.
+**A single-binary, streaming file browser and previewer** — point it at any local directory or S3-compatible object storage (MinIO / OSS / Ceph / R2 / …) and it instantly exposes them as a browsable, previewable HTTP service. Open it in a browser to walk directories, view images, stream video, and read code — no client to install, no extra frontend or reverse proxy to wire up. The backend is built on `axum + tokio + aws-sdk-s3`, with one `StorageBackend` trait abstracting over every supported backend.
 
 **A ready-to-use React SPA is bundled into the binary.** Once started, opening `http://<host>:<port>/` in a browser lets you walk directories, lazy-load thumbnails, and preview files in place — no extra static-file server or object browser required. Preview supports:
 
