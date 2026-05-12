@@ -41,7 +41,7 @@ cargo install omni-stream    # 需 Rust 1.91+
 
 或从 GitHub Releases 下载已编译二进制：<https://github.com/maoXyzt/omni-stream/releases/latest>。
 覆盖 3 个平台 —— `x86_64-unknown-linux-gnu` / `x86_64-unknown-linux-musl` /
-`aarch64-apple-darwin` (Windows 用户可自行编译)。解压后给 `omni-stream` 加可执行权限即可，自行决定
+`aarch64-apple-darwin` (Windows 用户可自行编译)。对于预编译二进制，解压后给 `omni-stream` 加可执行权限即可，自行决定
 要不要把它放进 `$PATH`。
 
 > 想从源码构建、修改前后端、参与开发，见 [docs/development_guide.md](docs/development_guide.md)；
