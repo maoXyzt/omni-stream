@@ -27,6 +27,14 @@ export interface ApiErrorBody {
 export interface StorageDescriptor {
   name: string
   type: 'local' | 's3'
+  /// `false` for storages declared in the config that failed to initialise
+  /// at server startup (e.g. local.root_path missing). The switcher renders
+  /// these with an `[invalid]` tag and refuses selection; targeting one via
+  /// `?storage=…` makes the API return 503 with the underlying reason.
+  valid: boolean
+  /// Init-failure message when `valid` is false. Used as the tooltip on the
+  /// disabled switcher entry so operators know what to fix.
+  error?: string | null
 }
 
 export interface StoragesResponse {

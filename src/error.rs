@@ -26,6 +26,14 @@ pub enum AppError {
   #[error("storage backend error: {0}")]
   Backend(String),
 
+  /// Returned when a request targets a storage that exists in config but
+  /// failed to initialize at startup. Distinct from `Backend` because it's
+  /// a deterministic config-time failure (retrying won't help) rather than
+  /// a transient backend error; 503 + a clear message lets the UI mark the
+  /// storage as invalid and the operator know to fix the config.
+  #[error("storage unavailable: {0}")]
+  StorageInvalid(String),
+
   #[error("unsupported operation: {0}")]
   Unsupported(String),
 }
@@ -38,6 +46,7 @@ impl AppError {
       AppError::InvalidRange(_) => StatusCode::RANGE_NOT_SATISFIABLE,
       AppError::InvalidPath(_) | AppError::Unsupported(_) => StatusCode::BAD_REQUEST,
       AppError::Io(e) if e.kind() == io::ErrorKind::NotFound => StatusCode::NOT_FOUND,
+      AppError::StorageInvalid(_) => StatusCode::SERVICE_UNAVAILABLE,
       AppError::Io(_) | AppError::Backend(_) => StatusCode::INTERNAL_SERVER_ERROR,
     }
   }

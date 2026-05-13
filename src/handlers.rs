@@ -10,13 +10,18 @@ use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
 
 use crate::error::AppError;
-use crate::storage::factory::{BackendRegistry, NamedBackend};
+use crate::storage::factory::{BackendRegistry, InvalidStorageEntry, NamedBackend};
 use crate::storage::{FileMeta, GetOptions, ListResult, StorageBackend};
 use crate::thumbs::ThumbState;
 
 #[derive(Clone)]
 pub struct AppState {
   backends: Arc<HashMap<String, NamedBackend>>,
+  /// Storages that exist in the config but failed to initialize at startup.
+  /// Looked up after `backends` misses so requests targeting them return
+  /// 503 (`StorageInvalid`) rather than 404 (which would imply "no such
+  /// storage was ever configured").
+  invalid: Arc<HashMap<String, InvalidStorageEntry>>,
   order: Arc<Vec<String>>,
   default_name: Arc<String>,
   thumb: Option<Arc<ThumbState>>,
@@ -27,6 +32,7 @@ impl AppState {
   pub fn new(reg: BackendRegistry, thumb: Option<Arc<ThumbState>>, hostname: Arc<String>) -> Self {
     Self {
       backends: Arc::new(reg.backends),
+      invalid: Arc::new(reg.invalid),
       order: Arc::new(reg.order),
       default_name: Arc::new(reg.default_name),
       thumb,
@@ -39,11 +45,19 @@ impl AppState {
       .map(str::trim)
       .filter(|s| !s.is_empty())
       .unwrap_or_else(|| self.default_name.as_str());
-    self
-      .backends
-      .get(key)
-      .map(|nb| nb.backend.clone())
-      .ok_or_else(|| AppError::NotFound(format!("storage '{key}'")))
+    if let Some(nb) = self.backends.get(key) {
+      return Ok(nb.backend.clone());
+    }
+    // Invalid (configured but failed to init) — distinct from "never
+    // configured", so callers get a 503 with the init failure reason
+    // rather than a 404 they'd interpret as a typo.
+    if let Some(inv) = self.invalid.get(key) {
+      return Err(AppError::StorageInvalid(format!(
+        "storage '{key}' is invalid: {}",
+        inv.reason
+      )));
+    }
+    Err(AppError::NotFound(format!("storage '{key}'")))
   }
 }
 
@@ -66,6 +80,15 @@ pub struct StorageSelector {
 pub struct StorageDescriptor {
   pub name: String,
   pub r#type: &'static str,
+  /// `false` for storages that exist in the config but failed to initialize
+  /// at startup. The UI uses this to render an "[invalid]" tag and disable
+  /// selection; requests targeting an invalid storage return 503.
+  pub valid: bool,
+  /// Human-readable init-failure reason when `valid == false`. Useful as a
+  /// tooltip in the switcher so the operator sees what to fix without
+  /// digging through server logs.
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub error: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -89,19 +112,44 @@ pub async fn list_storages_handler(State(state): State<AppState>) -> Json<Storag
   let storages = state
     .order
     .iter()
-    .filter_map(|name| state.backends.get(name))
-    .map(|nb| StorageDescriptor {
-      name: nb.name.clone(),
-      r#type: match nb.r#type {
-        crate::config::StorageType::S3 => "s3",
-        crate::config::StorageType::Local => "local",
-      },
+    .filter_map(|name| {
+      // Each name in `order` belongs to exactly one of {backends, invalid}.
+      // Look in backends first (the hot path) so valid entries pay just one
+      // hash lookup; invalid is the slower fall-through.
+      if let Some(nb) = state.backends.get(name) {
+        Some(StorageDescriptor {
+          name: nb.name.clone(),
+          r#type: type_label(nb.r#type),
+          valid: true,
+          error: None,
+        })
+      } else if let Some(inv) = state.invalid.get(name) {
+        Some(StorageDescriptor {
+          name: inv.name.clone(),
+          r#type: type_label(inv.r#type),
+          valid: false,
+          error: Some(inv.reason.clone()),
+        })
+      } else {
+        // Shouldn't happen: every name in `order` must be in one of the
+        // maps by construction in factory.rs. Drop silently rather than
+        // crash a request path on what is essentially an internal invariant
+        // violation.
+        None
+      }
     })
     .collect();
   Json(StoragesResponse {
     storages,
     default: state.default_name.as_str().to_string(),
   })
+}
+
+fn type_label(t: crate::config::StorageType) -> &'static str {
+  match t {
+    crate::config::StorageType::S3 => "s3",
+    crate::config::StorageType::Local => "local",
+  }
 }
 
 pub async fn stat_handler(
