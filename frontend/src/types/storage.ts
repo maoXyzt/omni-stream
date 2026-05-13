@@ -32,9 +32,21 @@ export interface StorageDescriptor {
   /// these with an `[invalid]` tag and refuses selection; targeting one via
   /// `?storage=…` makes the API return 503 with the underlying reason.
   valid: boolean
-  /// Init-failure message when `valid` is false. Used as the tooltip on the
-  /// disabled switcher entry so operators know what to fix.
+  /// Init-failure message when `valid` is false. Displayed inside the
+  /// storage card so operators know what to fix.
   error?: string | null
+  /// S3-specific identifying details. Set when `type === 's3'`. Excludes
+  /// credentials — only fields a human would use to disambiguate one
+  /// storage from another.
+  s3?: {
+    bucket: string
+    endpoint?: string | null
+    region?: string | null
+  } | null
+  /// Local-fs identifying details. Set when `type === 'local'`.
+  local?: {
+    root_path: string
+  } | null
 }
 
 export interface StoragesResponse {

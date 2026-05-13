@@ -10,7 +10,9 @@ use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
 
 use crate::error::AppError;
-use crate::storage::factory::{BackendRegistry, InvalidStorageEntry, NamedBackend};
+use crate::storage::factory::{
+  BackendRegistry, InvalidStorageEntry, NamedBackend, StorageDetails,
+};
 use crate::storage::{FileMeta, GetOptions, ListResult, StorageBackend};
 use crate::thumbs::ThumbState;
 
@@ -89,6 +91,27 @@ pub struct StorageDescriptor {
   /// digging through server logs.
   #[serde(skip_serializing_if = "Option::is_none")]
   pub error: Option<String>,
+  /// Type-specific identifying details for the storage-selection dialog.
+  /// Exactly one of `s3` / `local` is populated based on `type`. Secrets
+  /// (`access_key`, `secret_key`) are never serialized here.
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub s3: Option<S3Descriptor>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub local: Option<LocalDescriptor>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct S3Descriptor {
+  pub bucket: String,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub endpoint: Option<String>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub region: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct LocalDescriptor {
+  pub root_path: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -122,22 +145,30 @@ pub async fn list_storages_handler(State(state): State<AppState>) -> Json<Storag
       // Look in backends first (the hot path) so valid entries pay just one
       // hash lookup; invalid is the slower fall-through.
       if let Some(nb) = state.backends.get(name) {
+        let (s3, local) = split_details(&nb.details);
         Some(StorageDescriptor {
           name: nb.name.clone(),
           r#type: type_label(nb.r#type),
           valid: true,
           error: None,
+          s3,
+          local,
         })
       } else {
         // Falls through to `invalid` on miss; if it's in neither map the
         // name is an internal-invariant violation (every entry in `order`
         // is placed in exactly one map by factory.rs) — drop silently
         // rather than crash a request path.
-        state.invalid.get(name).map(|inv| StorageDescriptor {
-          name: inv.name.clone(),
-          r#type: type_label(inv.r#type),
-          valid: false,
-          error: Some(inv.reason.clone()),
+        state.invalid.get(name).map(|inv| {
+          let (s3, local) = split_details(&inv.details);
+          StorageDescriptor {
+            name: inv.name.clone(),
+            r#type: type_label(inv.r#type),
+            valid: false,
+            error: Some(inv.reason.clone()),
+            s3,
+            local,
+          }
         })
       }
     })
@@ -152,6 +183,32 @@ fn type_label(t: crate::config::StorageType) -> &'static str {
   match t {
     crate::config::StorageType::S3 => "s3",
     crate::config::StorageType::Local => "local",
+  }
+}
+
+/// Unpack a `StorageDetails` enum into the two flat `Option` fields the JSON
+/// response uses. Returning a tuple keeps the call site simple — exactly one
+/// of the two is `Some` by construction.
+fn split_details(d: &StorageDetails) -> (Option<S3Descriptor>, Option<LocalDescriptor>) {
+  match d {
+    StorageDetails::S3 {
+      bucket,
+      endpoint,
+      region,
+    } => (
+      Some(S3Descriptor {
+        bucket: bucket.clone(),
+        endpoint: endpoint.clone(),
+        region: region.clone(),
+      }),
+      None,
+    ),
+    StorageDetails::Local { root_path } => (
+      None,
+      Some(LocalDescriptor {
+        root_path: root_path.clone(),
+      }),
+    ),
   }
 }
 

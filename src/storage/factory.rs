@@ -9,6 +9,24 @@ use super::local::LocalFsBackend;
 use super::s3::S3Backend;
 use crate::config::{Config, StorageConfig, StorageType};
 
+/// Identifying details we expose to the SPA for the storage-selection dialog.
+/// Excludes credentials and other secrets — only the fields a human would use
+/// to disambiguate one configured storage from another. Stored on both
+/// successful and invalid entries so the dialog can still render context for
+/// a storage whose backend init failed (e.g. show the bad `root_path` so the
+/// operator can spot the typo).
+#[derive(Clone, Debug)]
+pub enum StorageDetails {
+  S3 {
+    bucket: String,
+    endpoint: Option<String>,
+    region: Option<String>,
+  },
+  Local {
+    root_path: String,
+  },
+}
+
 /// A storage backend together with its declared name and type — used by handlers
 /// to expose `/api/storages` without holding on to the full `Config`.
 #[derive(Clone)]
@@ -16,6 +34,7 @@ pub struct NamedBackend {
   pub name: String,
   pub r#type: StorageType,
   pub backend: Arc<dyn StorageBackend>,
+  pub details: StorageDetails,
 }
 
 /// A configured storage entry whose backend failed to initialize. We keep
@@ -28,6 +47,38 @@ pub struct InvalidStorageEntry {
   pub name: String,
   pub r#type: StorageType,
   pub reason: String,
+  pub details: StorageDetails,
+}
+
+/// Pluck identifying details out of the parsed config. Missing sub-tables
+/// (e.g. `type=s3` with no `[storage.s3]`) yield empty placeholders — the
+/// init step below will still bail with a clear error, and the dialog renders
+/// "—" for any field we couldn't pull.
+fn extract_details(entry: &StorageConfig) -> StorageDetails {
+  match entry.r#type {
+    StorageType::S3 => entry
+      .s3
+      .as_ref()
+      .map(|s3| StorageDetails::S3 {
+        bucket: s3.bucket.clone(),
+        endpoint: s3.endpoint.clone(),
+        region: s3.region.clone(),
+      })
+      .unwrap_or(StorageDetails::S3 {
+        bucket: String::new(),
+        endpoint: None,
+        region: None,
+      }),
+    StorageType::Local => entry
+      .local
+      .as_ref()
+      .map(|local| StorageDetails::Local {
+        root_path: local.root_path.display().to_string(),
+      })
+      .unwrap_or(StorageDetails::Local {
+        root_path: String::new(),
+      }),
+  }
 }
 
 /// Container of all configured backends with a designated default. Lenient:
@@ -87,6 +138,10 @@ pub async fn create_registry(cfg: &Config) -> anyhow::Result<BackendRegistry> {
         "registering storage backend"
     );
 
+    // Extract once — details are independent of whether the backend init
+    // succeeds, and both NamedBackend and InvalidStorageEntry carry them.
+    let details = extract_details(entry);
+
     match build_one(entry).await {
       Ok(backend) => {
         backends.insert(
@@ -95,6 +150,7 @@ pub async fn create_registry(cfg: &Config) -> anyhow::Result<BackendRegistry> {
             name: entry.name.clone(),
             r#type: entry.r#type,
             backend,
+            details,
           },
         );
       }
@@ -120,6 +176,7 @@ pub async fn create_registry(cfg: &Config) -> anyhow::Result<BackendRegistry> {
             name: entry.name.clone(),
             r#type: entry.r#type,
             reason,
+            details,
           },
         );
       }
