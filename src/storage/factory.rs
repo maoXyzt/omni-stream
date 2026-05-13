@@ -102,9 +102,8 @@ pub async fn create_registry(cfg: &Config) -> anyhow::Result<BackendRegistry> {
         if is_default {
           // Adding context here matches the previous strict-mode error so
           // downstream tooling that grepped the message still works.
-          return Err(e).with_context(|| {
-            format!("default storage '{}' failed to initialize", entry.name)
-          });
+          return Err(e)
+            .with_context(|| format!("default storage '{}' failed to initialize", entry.name));
         }
         // anyhow's Display walks the chain, which we want here so the warn
         // log captures both the top-level summary and the root cause.

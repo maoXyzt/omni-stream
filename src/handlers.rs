@@ -123,19 +123,17 @@ pub async fn list_storages_handler(State(state): State<AppState>) -> Json<Storag
           valid: true,
           error: None,
         })
-      } else if let Some(inv) = state.invalid.get(name) {
-        Some(StorageDescriptor {
+      } else {
+        // Falls through to `invalid` on miss; if it's in neither map the
+        // name is an internal-invariant violation (every entry in `order`
+        // is placed in exactly one map by factory.rs) — drop silently
+        // rather than crash a request path.
+        state.invalid.get(name).map(|inv| StorageDescriptor {
           name: inv.name.clone(),
           r#type: type_label(inv.r#type),
           valid: false,
           error: Some(inv.reason.clone()),
         })
-      } else {
-        // Shouldn't happen: every name in `order` must be in one of the
-        // maps by construction in factory.rs. Drop silently rather than
-        // crash a request path on what is essentially an internal invariant
-        // violation.
-        None
       }
     })
     .collect();

@@ -321,9 +321,9 @@ impl Config {
       // Unreachable in practice — validate() bails on "no storages configured"
       // before we get here — but kept defensive in case a future env-only
       // config (e.g. via OMNI_STORAGES_*) becomes viable.
-      None => tracing::warn!(
-        "started without a config file — running on env vars + defaults only",
-      ),
+      None => {
+        tracing::warn!("started without a config file — running on env vars + defaults only",)
+      }
     }
     Ok(cfg)
   }
@@ -711,8 +711,8 @@ local = { root_path = "~/data/foo" }
 
   #[test]
   fn check_reports_missing_file() {
-    let err = Config::check(Path::new("/nonexistent/omni-stream/config.toml"))
-      .expect_err("should fail");
+    let err =
+      Config::check(Path::new("/nonexistent/omni-stream/config.toml")).expect_err("should fail");
     assert!(err.to_string().contains("config file not found"), "{err}");
   }
 
@@ -786,7 +786,7 @@ local = { root_path = "~/data/foo" }
     let cands = Config::candidates();
     assert!(!cands.is_empty(), "candidates must never be empty");
     assert!(
-      cands.iter().any(|c| c.path == PathBuf::from("config.toml")),
+      cands.iter().any(|c| c.path == Path::new("config.toml")),
       "cwd fallback ./config.toml must be present: {cands:?}",
     );
   }

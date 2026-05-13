@@ -175,10 +175,9 @@ fn print_top_help() {
 
 fn print_config_help() {
   println!(
-    "{} {} {}",
+    "{} {}",
     cli_style::bold("Usage: omni-stream config"),
     cli_style::cyan("<list|init|check>"),
-    "",
   );
   println!();
   println!(
@@ -528,7 +527,10 @@ fn cmd_cache_info(cfg: &Config) -> anyhow::Result<()> {
     cli_style::dim("total:     "),
     cli_style::cyan(&human_bytes(inv.bytes)),
     cli_style::dim("/"),
-    cli_style::dim(&format!("{} cap", human_bytes(cfg.thumbnails.max_cache_bytes))),
+    cli_style::dim(&format!(
+      "{} cap",
+      human_bytes(cfg.thumbnails.max_cache_bytes)
+    )),
   );
   println!(
     "  {} {} {}",

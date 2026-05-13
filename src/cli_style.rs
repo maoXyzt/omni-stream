@@ -191,7 +191,10 @@ mod tests {
 
   #[test]
   fn force_color_overrides_non_tty() {
-    assert!(evaluate(false, true, false), "FORCE_COLOR must enable when piped");
+    assert!(
+      evaluate(false, true, false),
+      "FORCE_COLOR must enable when piped"
+    );
     assert!(evaluate(false, true, true));
   }
 
