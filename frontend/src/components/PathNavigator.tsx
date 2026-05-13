@@ -51,7 +51,7 @@ export function PathNavigator({ prefix, onNavigate }: PathNavigatorProps) {
             size="sm"
             className="size-7 shrink-0 p-0"
             aria-label="Go to path"
-            onClick={() => setOpen(true)}
+            onClick={() => handleOpenChange(true)}
           >
             <FolderInput className="size-4" />
           </Button>
