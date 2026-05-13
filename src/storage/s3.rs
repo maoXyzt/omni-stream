@@ -332,7 +332,12 @@ mod tests {
   fn fallback_uses_lex_greatest_entry_across_files_and_prefixes() {
     // Common prefixes are pushed before files in list_files; the helper must
     // still pick the lex-greatest key, not the last-pushed one.
-    let entries = vec![dir("a-dir/"), dir("b-dir/"), file("c-file.txt"), file("a-file.txt")];
+    let entries = vec![
+      dir("a-dir/"),
+      dir("b-dir/"),
+      file("c-file.txt"),
+      file("a-file.txt"),
+    ];
     let got = compute_next_token(None, Some(true), &entries).expect("expected fallback token");
     assert_eq!(got, format!("{FALLBACK_TOKEN_PREFIX}c-file.txt"));
   }
