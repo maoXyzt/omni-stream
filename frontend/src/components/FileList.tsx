@@ -20,6 +20,7 @@ import {
   PanelLeft,
   PanelLeftClose,
   Share2,
+  X,
 } from 'lucide-react'
 
 import { ApiError, getStoredToken, setStoredToken } from '@/api/client'
@@ -100,18 +101,16 @@ export function FileList() {
   const storagesQuery = useStorages()
   const serverInfo = useServerInfo()
   const [viewMode, setViewMode] = useViewMode()
-  // Gallery view needs horizontal room for both the file list and the inline
-  // preview. Below `md` we fall back to plain list rendering even if the
-  // stored preference is gallery — the toggle button is also hidden there.
+  // Inline split layout (narrow file list + preview pane) needs horizontal
+  // room. Below `md` we keep the full-width list and fall back to the modal.
   const isDesktop = useMediaQuery('(min-width: 768px)')
-  const effectiveMode = viewMode === 'gallery' && !isDesktop ? 'list' : viewMode
   const [sortDir, setSortDir] = useSortDir()
   const [sidebarCollapsed, setSidebarCollapsed] = useSidebarCollapsed()
-  // Gallery left-column width is draggable; persisted per-user in
-  // localStorage. Bounds chosen to keep both columns usable on a 1280-wide
-  // viewport: never less than ~200 px (enough for a short filename + icon)
-  // and never more than ~600 px (otherwise the preview column collapses).
-  const galleryResize = useResizableWidth({
+  // Left-column width for the split layout — draggable, persisted per-user.
+  // Bounds chosen to keep both columns usable on a 1280-wide viewport: never
+  // less than ~200 px (enough for a short filename + icon) and never more
+  // than ~600 px (otherwise the preview column collapses).
+  const splitResize = useResizableWidth({
     key: 'gallery-file-list',
     defaultPx: 288,
     minPx: 200,
@@ -210,12 +209,16 @@ export function FileList() {
     [previewState, previewableEntries, openPreview],
   )
 
-  // Arrow-key nav for gallery mode mirrors `PreviewModal`'s handler, but
-  // there's no modal to scope the listener — we attach to window and gate on
-  // the gallery + previewState combo. Skip when focus is in a control where
-  // arrow keys are meaningful.
+  // Split layout = list view on desktop with a preview open. Grid + mobile
+  // continue to use the modal preview path.
+  const splitView =
+    viewMode === 'list' && isDesktop && previewState !== null
+
+  // Arrow-key nav + Esc-to-close for the split layout. The modal handles its
+  // own keys via Radix Dialog; this only fires when the inline preview is
+  // active. Skip when focus is in a control where keys are meaningful.
   useEffect(() => {
-    if (effectiveMode !== 'gallery' || !previewState) return
+    if (!splitView) return
     const handler = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null
       if (target) {
@@ -237,11 +240,14 @@ export function FileList() {
       } else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
         e.preventDefault()
         navigatePreview('prev')
+      } else if (e.key === 'Escape') {
+        e.preventDefault()
+        closePreview()
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [effectiveMode, previewState, navigatePreview])
+  }, [splitView, navigatePreview, closePreview])
 
   const sortedEntries = useMemo(
     () => (listQuery.data ? sortEntries(listQuery.data.entries, sortDir) : []),
@@ -459,18 +465,18 @@ export function FileList() {
           {listQuery.isError && <ErrorState error={listQuery.error} />}
 
       {listQuery.isPending ? (
-        effectiveMode === 'grid' ? (
+        viewMode === 'grid' ? (
           <GridSkeleton />
-        ) : effectiveMode === 'gallery' ? (
+        ) : splitView ? (
           <GallerySkeleton />
         ) : (
           <ListSkeleton />
         )
       ) : listQuery.data ? (
-        effectiveMode === 'gallery' ? (
+        splitView ? (
           <div className="flex min-h-0 flex-1">
             <div
-              style={{ width: galleryResize.width }}
+              style={{ width: splitResize.width }}
               className="flex shrink-0 flex-col gap-2 overflow-hidden pr-3"
             >
               <Pager
@@ -480,7 +486,16 @@ export function FileList() {
                 onPrev={prevPage}
                 onNext={nextPage}
               />
-              <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+              {/* Clicking the column's empty area (below the rows or in the
+                  gap between Pager and rows) closes the preview. Row clicks
+                  bubble up but `e.target !== currentTarget` so they don't
+                  trigger the close. */}
+              <div
+                onClick={(e) => {
+                  if (e.target === e.currentTarget) closePreview()
+                }}
+                className="flex min-h-0 flex-1 flex-col overflow-y-auto"
+              >
                 {sortedEntries.length === 0 ? (
                   <div className="py-10 text-center text-sm text-muted-foreground">
                     Empty directory.
@@ -499,19 +514,34 @@ export function FileList() {
                 )}
               </div>
             </div>
-            <ResizeHandle onPointerDown={galleryResize.startResize} />
+            <ResizeHandle onPointerDown={splitResize.startResize} />
             <div className="flex min-w-0 flex-1 flex-col pl-3">
-              {previewState ? (
-                <InlinePreview
-                  fileKey={previewState.key}
-                  kind={previewState.kind}
-                  storage={storageName || undefined}
-                />
-              ) : (
-                <div className="flex h-full w-full items-center justify-center text-sm text-muted-foreground">
-                  Select a file on the left to preview.
-                </div>
-              )}
+              <div className="mb-2 flex items-center gap-2">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label="Close preview"
+                      onClick={closePreview}
+                    >
+                      <X className="size-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Close preview (Esc)</TooltipContent>
+                </Tooltip>
+                <span
+                  className="truncate text-sm text-muted-foreground"
+                  title={previewState!.key}
+                >
+                  {previewState!.key}
+                </span>
+              </div>
+              <InlinePreview
+                fileKey={previewState!.key}
+                kind={previewState!.kind}
+                storage={storageName || undefined}
+              />
             </div>
           </div>
         ) : (
@@ -524,7 +554,7 @@ export function FileList() {
               onNext={nextPage}
             />
 
-            {effectiveMode === 'grid' ? (
+            {viewMode === 'grid' ? (
               <FileGrid
                 entries={sortedEntries}
                 prefix={prefix}
@@ -593,7 +623,7 @@ export function FileList() {
         </div>
       )}
 
-      {previewState && effectiveMode !== 'gallery' && (
+      {previewState && !splitView && (
         <PreviewModal
           fileKey={previewState.key}
           kind={previewState.kind}
