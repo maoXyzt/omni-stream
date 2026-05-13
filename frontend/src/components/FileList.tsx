@@ -249,6 +249,34 @@ export function FileList() {
     return () => window.removeEventListener('keydown', handler)
   }, [splitView, navigatePreview, closePreview])
 
+  // Backspace = up one directory. No-op at storage root. Skipped while a
+  // preview is open so Esc-to-close keeps priority, and skipped when focus is
+  // in an editable control where Backspace deletes characters.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== 'Backspace') return
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+      const target = e.target as HTMLElement | null
+      if (target) {
+        const tag = target.tagName
+        if (
+          tag === 'INPUT' ||
+          tag === 'TEXTAREA' ||
+          tag === 'SELECT' ||
+          target.isContentEditable
+        ) {
+          return
+        }
+      }
+      if (previewState) return
+      if (!parentInfo) return
+      e.preventDefault()
+      goToPath(parentInfo.parent)
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [previewState, parentInfo, goToPath])
+
   const sortedEntries = useMemo(
     () => (listQuery.data ? sortEntries(listQuery.data.entries, sortDir) : []),
     [listQuery.data, sortDir],
