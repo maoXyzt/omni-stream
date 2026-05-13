@@ -12,7 +12,6 @@ import {
 
 import { GenericPreview } from './GenericPreview'
 import { ImagePreview } from './ImagePreview'
-import { NdjsonPreview } from './NdjsonPreview'
 import { TextPreview } from './TextPreview'
 import { VideoPreview } from './VideoPreview'
 import type { PreviewKind, PreviewType } from './types'
@@ -39,10 +38,10 @@ export const PREVIEW_TYPES: readonly PreviewType[] = [
     kind: 'text',
     extensions: [
       'txt', 'md', 'markdown', 'rst', 'log', 'csv', 'tsv',
-      // `jsonl` / `ndjson` are intentionally NOT here — they route to the
-      // dedicated NdjsonPreview below, which does Range-based chunked
-      // loading + a table view instead of full-file text fetch.
-      'json', 'xml', 'yml', 'yaml', 'toml', 'ini', 'conf', 'cfg', 'env',
+      // `jsonl` / `ndjson` route through TextPreview too — its Range-based
+      // chunked loader kicks in above 1 MiB so large log dumps don't pull
+      // the whole file before anything renders.
+      'json', 'jsonl', 'ndjson', 'xml', 'yml', 'yaml', 'toml', 'ini', 'conf', 'cfg', 'env',
       'sh', 'bash', 'zsh', 'fish', 'ps1',
       'py', 'rb', 'pl', 'lua', 'r',
       'js', 'mjs', 'cjs', 'ts', 'tsx', 'jsx', 'vue', 'svelte',
@@ -53,13 +52,6 @@ export const PREVIEW_TYPES: readonly PreviewType[] = [
     ],
     icon: FileText,
     Component: TextPreview,
-  },
-  {
-    kind: 'ndjson',
-    extensions: ['jsonl', 'ndjson'],
-    // Spreadsheet glyph because the previewer renders a tabular view.
-    icon: FileSpreadsheet,
-    Component: NdjsonPreview,
   },
   // Fallback for any file the browser can't preview inline — shows the file
   // icon + metadata, plus an iframe for PDF/similar. Has no `extensions` of
