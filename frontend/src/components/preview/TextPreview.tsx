@@ -1,10 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AlertCircle, Loader2 } from 'lucide-react'
+import { AlertCircle, ListOrdered, Loader2 } from 'lucide-react'
 
 import { apiClient, ApiError } from '@/api/client'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
+import { useLineNumbers } from '@/hooks/use-line-numbers'
 import {
   SUPPORTED_LANGUAGES,
   detectLanguage,
@@ -12,6 +18,7 @@ import {
   highlight,
   isLanguageBundled,
 } from '@/lib/highlight'
+import { cn } from '@/lib/utils'
 
 import type { PreviewerProps } from './types'
 
@@ -248,6 +255,10 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
     return `${lineLabel} · ${bytes}${eof}`
   })()
 
+  // Persistent UI preference — the gutter is on by default (matches every
+  // editor), and the toggle survives modal close + reload via localStorage.
+  const [showLineNumbers, setShowLineNumbers] = useLineNumbers()
+
   // One spinner covers both in-flight fetches and grammar loads — both mean
   // "wait a moment".
   const showSpinner = loading || (!ready && lang !== 'plaintext')
@@ -260,6 +271,28 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
           {showSpinner && (
             <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
           )}
+          {/* Persistent across modal opens via localStorage. Variant swap
+              (`default` filled when pressed, `outline` bordered when off)
+              gives the toggle a louder visual state than a colour change
+              alone; the radix Tooltip provides a real hover hint with a 200ms
+              delay so it's discoverable but not intrusive. */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                size="icon-sm"
+                variant={showLineNumbers ? 'default' : 'outline'}
+                aria-pressed={showLineNumbers}
+                aria-label="Toggle line numbers"
+                onClick={() => setShowLineNumbers(!showLineNumbers)}
+              >
+                <ListOrdered />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              {showLineNumbers ? 'Hide line numbers' : 'Show line numbers'}
+            </TooltipContent>
+          </Tooltip>
           <select
             value={lang}
             onChange={(e) => setLang(e.target.value)}
@@ -308,14 +341,16 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
             {lines.map((line, i) => {
               const html = highlightedLines?.[i] ?? null
               return (
-                <div key={i} className="flex gap-3">
-                  <span
-                    aria-hidden="true"
-                    className="shrink-0 select-none text-right text-muted-foreground/60 tabular-nums"
-                    style={{ width: `${gutterChars}ch` }}
-                  >
-                    {i + 1}
-                  </span>
+                <div key={i} className={cn('flex', showLineNumbers && 'gap-3')}>
+                  {showLineNumbers && (
+                    <span
+                      aria-hidden="true"
+                      className="shrink-0 select-none text-right text-muted-foreground/60 tabular-nums"
+                      style={{ width: `${gutterChars}ch` }}
+                    >
+                      {i + 1}
+                    </span>
+                  )}
                   <span className="min-w-0 flex-1 whitespace-pre-wrap break-words">
                     {html !== null ? (
                       <span dangerouslySetInnerHTML={{ __html: html }} />
