@@ -262,10 +262,13 @@ export function NdjsonPreview({ fileKey, src, storage }: PreviewerProps) {
             once EOF is reached (rather than disabled — at EOF there's nothing
             to advance to). Disabled mid-fetch to suppress duplicate clicks. */}
         {!state.done && state.text.length > 0 && !error && (
+          // Solid primary fill (instead of `outline`) so the button reads
+          // clearly over `hljs`-highlighted code; `shadow-lg` adds elevation
+          // so it looks like it floats over the buffer rather than sitting
+          // in-flow.
           <Button
             size="sm"
-            variant="outline"
-            className="absolute right-4 bottom-4 h-7 px-2 text-xs shadow-md"
+            className="absolute right-4 bottom-4 h-8 px-3 text-xs shadow-lg hover:shadow-xl"
             disabled={loading}
             onClick={() => fetchNext(cacheKey, state.bytesLoaded)}
           >
