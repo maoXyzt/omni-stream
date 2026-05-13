@@ -3,6 +3,8 @@
 # or set OMNI_CONFIG=/path/to/config.toml.
 
 [server]
+# Use host = "0.0.0.0" to allow external access. Default is "127.0.0.1", which
+# only allows access from localhost.
 host = "127.0.0.1"
 port = 28080
 
