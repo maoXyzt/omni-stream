@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   AlertCircle,
   Check,
   ChevronLeft,
   ChevronRight,
   Copy,
+  LayoutList,
   Loader2,
 } from 'lucide-react'
 
@@ -50,16 +52,34 @@ import {
   totalRowCount,
 } from '@/lib/parquet'
 
+import { RowsView } from './RowsView'
 import type { PreviewerProps } from './types'
 
 const PAGE_SIZE = 100
 
-type ParquetTab = 'schema' | 'data'
+const TAB_PARAM = 'tab'
+const ROWS_PARAM = 'rows'
+
+type ParquetTab = 'schema' | 'data' | 'rows'
 
 // Session-only cache of the last-active tab. Module-level so it survives
 // switching between parquet files in the same page load but resets on
-// reload — intentionally not persisted to localStorage.
+// reload — intentionally not persisted to localStorage. Acts as a soft
+// fallback when neither `?tab=` nor `?rows=` is present in the URL.
 let lastActiveTab: ParquetTab = 'schema'
+
+function resolveActiveTab(searchParams: URLSearchParams): ParquetTab {
+  // Explicit `?tab=…` wins — that's what makes a shared link land exactly
+  // where the sender was.
+  const explicit = searchParams.get(TAB_PARAM)
+  if (explicit === 'schema' || explicit === 'data' || explicit === 'rows') {
+    return explicit
+  }
+  // Back-compat: links shared before `?tab=` existed only carried `?rows=`.
+  // Treat the presence of a rules config as an implicit "open Rows tab".
+  if (searchParams.has(ROWS_PARAM)) return 'rows'
+  return lastActiveTab
+}
 
 interface RowsState {
   rows: Record<string, unknown>[]
@@ -74,6 +94,35 @@ export function ParquetPreview({ fileKey, src, storage }: PreviewerProps) {
   const [rowsError, setRowsError] = useState<string | null>(null)
   const [pageIndex, setPageIndex] = useState(0)
   const { data: stat } = useFileStat(fileKey, storage)
+  const [searchParams, setSearchParams] = useSearchParams()
+  // URL is the source of truth for the active tab so shared links land on
+  // the right view and browser Back actually walks tab history. Falls back
+  // to session memory / 'schema' when no URL hint is present.
+  const activeTab = resolveActiveTab(searchParams)
+
+  const setActiveTab = (next: ParquetTab) => {
+    lastActiveTab = next
+    setSearchParams(
+      (sp) => {
+        const params = new URLSearchParams(sp)
+        if (next === 'schema') {
+          // Schema is the natural default — usually omit the param so URLs
+          // stay clean. Exception: if `?rows=` is present, omitting `?tab=`
+          // would let the back-compat branch in `resolveActiveTab` snap
+          // straight back to the Rows tab, so write it explicitly.
+          if (params.has(ROWS_PARAM)) {
+            params.set(TAB_PARAM, 'schema')
+          } else {
+            params.delete(TAB_PARAM)
+          }
+        } else {
+          params.set(TAB_PARAM, next)
+        }
+        return params
+      },
+      { replace: true },
+    )
+  }
 
   // Each `src` change starts a fresh load — track a token so a stale async
   // result from a previous file can't overwrite the current state.
@@ -169,16 +218,32 @@ export function ParquetPreview({ fileKey, src, storage }: PreviewerProps) {
       />
 
       <Tabs
-        defaultValue={lastActiveTab}
+        value={activeTab}
         onValueChange={(v) => {
-          if (v === 'schema' || v === 'data') lastActiveTab = v
+          if (v === 'schema' || v === 'data' || v === 'rows') setActiveTab(v)
         }}
         className="flex flex-1 flex-col overflow-hidden"
       >
-        <TabsList className="self-start">
-          <TabsTrigger value="schema">Schema</TabsTrigger>
-          <TabsTrigger value="data">Data</TabsTrigger>
-        </TabsList>
+        <div className="flex items-center justify-between gap-3">
+          <TabsList>
+            <TabsTrigger value="schema">Schema</TabsTrigger>
+            <TabsTrigger value="data">Data</TabsTrigger>
+            <TabsTrigger value="rows">Rows</TabsTrigger>
+          </TabsList>
+          {activeTab !== 'rows' && (
+            // A second, more prominent way into the Rows view than the tab
+            // itself — surfaced because the Rows view is the only tab with
+            // a real "configure once, share the link" workflow attached.
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setActiveTab('rows')}
+            >
+              <LayoutList className="size-4" />
+              Browse as cards
+            </Button>
+          )}
+        </div>
 
         <TabsContent
           value="schema"
@@ -214,6 +279,18 @@ export function ParquetPreview({ fileKey, src, storage }: PreviewerProps) {
               loading={rowsLoading && !rowsState}
             />
           )}
+        </TabsContent>
+
+        <TabsContent
+          value="rows"
+          className="flex min-h-0 flex-1 flex-col overflow-hidden"
+        >
+          <RowsView
+            source={source}
+            columns={columns}
+            numRows={numRows}
+            storage={storage}
+          />
         </TabsContent>
       </Tabs>
     </div>
