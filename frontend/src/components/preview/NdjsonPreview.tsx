@@ -221,21 +221,12 @@ export function NdjsonPreview({ fileKey, src, storage }: PreviewerProps) {
     <div className="flex h-full w-full flex-col overflow-hidden rounded-md bg-muted/30">
       <div className="flex items-center justify-between gap-3 border-b border-border bg-background/50 px-3 py-2 text-xs text-muted-foreground">
         <span className="truncate">{statusLine}</span>
-        <div className="flex items-center gap-2">
-          {loading && <Loader2 className="size-3.5 animate-spin" />}
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-7 px-2 text-xs"
-            disabled={loading || state.done}
-            onClick={() => fetchNext(cacheKey, state.bytesLoaded)}
-          >
-            Load more
-          </Button>
-        </div>
+        {loading && <Loader2 className="size-3.5 shrink-0 animate-spin" />}
       </div>
 
-      <div className="flex-1 overflow-hidden">
+      {/* `relative` anchors the floating "Load more" button below; `overflow-hidden`
+          still clips the inner `<pre>`'s own scrollbar inside this region. */}
+      <div className="relative flex-1 overflow-hidden">
         {error && (
           <div className="p-3">
             <Alert variant="destructive">
@@ -265,6 +256,22 @@ export function NdjsonPreview({ fileKey, src, storage }: PreviewerProps) {
               <code>{state.text}</code>
             )}
           </pre>
+        )}
+        {/* Floating "Load more" overlays the bottom-right of the preview so the
+            user can advance without scrolling to the end of the buffer. Hidden
+            once EOF is reached (rather than disabled — at EOF there's nothing
+            to advance to). Disabled mid-fetch to suppress duplicate clicks. */}
+        {!state.done && state.text.length > 0 && !error && (
+          <Button
+            size="sm"
+            variant="outline"
+            className="absolute right-4 bottom-4 h-7 px-2 text-xs shadow-md"
+            disabled={loading}
+            onClick={() => fetchNext(cacheKey, state.bytesLoaded)}
+          >
+            {loading && <Loader2 className="mr-1 size-3 animate-spin" />}
+            Load more
+          </Button>
         )}
       </div>
     </div>
