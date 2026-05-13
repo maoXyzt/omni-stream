@@ -15,6 +15,46 @@ use crate::error::AppError;
 const LIST_PAGE_SIZE: i32 = 100;
 const CREDENTIAL_PROVIDER_NAME: &str = "omni-stream-config";
 
+// Prefix marking a synthesized keyset cursor in `next_token`. Used when an
+// S3-compatible service truncates the response at MaxKeys but omits a real
+// NextContinuationToken — we encode the last key from the page so the next
+// request can resume via `start_after`.
+const FALLBACK_TOKEN_PREFIX: &str = "sa:";
+
+/// Decide the `next_token` for a list response.
+///
+/// Honors the server-issued continuation token when present. Falls back to a
+/// `start_after` cursor synthesized from the last entry only when the server
+/// looks truncated (either the flag is set, or the page is full).
+fn compute_next_token(
+  server_token: Option<&str>,
+  is_truncated: Option<bool>,
+  entries: &[FileEntry],
+) -> Option<String> {
+  if let Some(t) = server_token {
+    return Some(t.to_string());
+  }
+
+  let truncated = is_truncated.unwrap_or(false);
+  let full_page = entries.len() >= LIST_PAGE_SIZE as usize;
+  if !truncated && !full_page {
+    return None;
+  }
+
+  let last_entry = entries.iter().max_by(|a, b| a.key.cmp(&b.key))?;
+
+  // If the boundary lands on a CommonPrefix ("dir/"), start_after="dir/"
+  // would still match keys inside it (since "dir/" < "dir/foo"), causing
+  // the same directory to re-emit. Append max-codepoint to step past the
+  // entire subtree.
+  let cursor = if last_entry.is_dir {
+    format!("{}\u{10FFFF}", last_entry.key)
+  } else {
+    last_entry.key.clone()
+  };
+  Some(format!("{FALLBACK_TOKEN_PREFIX}{cursor}"))
+}
+
 /// Map raw S3 HTTP status / error-code combos to AppError variants.
 /// `op` ("get" | "head" | "list") is purely for the diagnostic message.
 fn classify_s3_status(status: u16, code: &str, op: &str, raw: impl std::fmt::Display) -> AppError {
@@ -160,7 +200,11 @@ impl StorageBackend for S3Backend {
       req = req.prefix(prefix);
     }
     if let Some(t) = token {
-      req = req.continuation_token(t);
+      if let Some(after) = t.strip_prefix(FALLBACK_TOKEN_PREFIX) {
+        req = req.start_after(after.to_string());
+      } else {
+        req = req.continuation_token(t);
+      }
     }
 
     let resp = req.send().await.map_err(Self::map_list_err)?;
@@ -188,11 +232,11 @@ impl StorageBackend for S3Backend {
       });
     }
 
-    let next_token = if resp.is_truncated().unwrap_or(false) {
-      resp.next_continuation_token().map(str::to_string)
-    } else {
-      None
-    };
+    let next_token = compute_next_token(
+      resp.next_continuation_token(),
+      resp.is_truncated(),
+      &entries,
+    );
 
     Ok(ListResult {
       entries,
@@ -218,5 +262,83 @@ impl StorageBackend for S3Backend {
       last_modified: resp.last_modified().map(|t| t.to_string()),
       is_dir: false,
     })
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  fn file(key: &str) -> FileEntry {
+    FileEntry {
+      key: key.to_string(),
+      size: 0,
+      last_modified: None,
+      is_dir: false,
+    }
+  }
+
+  fn dir(key: &str) -> FileEntry {
+    FileEntry {
+      key: key.to_string(),
+      size: 0,
+      last_modified: None,
+      is_dir: true,
+    }
+  }
+
+  fn n_files(n: usize) -> Vec<FileEntry> {
+    (0..n).map(|i| file(&format!("k{i:04}.bin"))).collect()
+  }
+
+  #[test]
+  fn server_token_wins_even_on_full_page() {
+    let entries = n_files(LIST_PAGE_SIZE as usize);
+    let got = compute_next_token(Some("svr-abc"), Some(true), &entries);
+    assert_eq!(got.as_deref(), Some("svr-abc"));
+  }
+
+  #[test]
+  fn short_page_without_truncated_returns_none() {
+    let entries = n_files(30);
+    assert_eq!(compute_next_token(None, Some(false), &entries), None);
+    assert_eq!(compute_next_token(None, None, &entries), None);
+  }
+
+  #[test]
+  fn full_page_without_server_signal_falls_back() {
+    let entries = n_files(LIST_PAGE_SIZE as usize);
+    let got = compute_next_token(None, None, &entries).expect("expected fallback token");
+    assert!(got.starts_with(FALLBACK_TOKEN_PREFIX));
+    let cursor = got.strip_prefix(FALLBACK_TOKEN_PREFIX).unwrap();
+    assert_eq!(cursor, "k0099.bin");
+  }
+
+  #[test]
+  fn truncated_flag_without_token_falls_back_even_on_short_page() {
+    let entries = n_files(30);
+    let got = compute_next_token(None, Some(true), &entries).expect("expected fallback token");
+    assert_eq!(got, format!("{FALLBACK_TOKEN_PREFIX}k0029.bin"));
+  }
+
+  #[test]
+  fn boundary_on_common_prefix_appends_sentinel() {
+    let entries = vec![dir("dir1/"), dir("dir2/"), dir("dir3/")];
+    let got = compute_next_token(None, Some(true), &entries).expect("expected fallback token");
+    assert_eq!(got, format!("{FALLBACK_TOKEN_PREFIX}dir3/\u{10FFFF}"));
+  }
+
+  #[test]
+  fn fallback_uses_lex_greatest_entry_across_files_and_prefixes() {
+    // Common prefixes are pushed before files in list_files; the helper must
+    // still pick the lex-greatest key, not the last-pushed one.
+    let entries = vec![dir("a-dir/"), dir("b-dir/"), file("c-file.txt"), file("a-file.txt")];
+    let got = compute_next_token(None, Some(true), &entries).expect("expected fallback token");
+    assert_eq!(got, format!("{FALLBACK_TOKEN_PREFIX}c-file.txt"));
+  }
+
+  #[test]
+  fn empty_response_returns_none_even_if_truncated_flag_set() {
+    assert_eq!(compute_next_token(None, Some(true), &[]), None);
   }
 }
