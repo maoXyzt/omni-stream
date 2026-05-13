@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AlertCircle, ListOrdered, Loader2 } from 'lucide-react'
+import { AlertCircle, Check, Copy, ListOrdered, Loader2 } from 'lucide-react'
 
 import { apiClient, ApiError } from '@/api/client'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
@@ -259,6 +259,29 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
   // editor), and the toggle survives modal close + reload via localStorage.
   const [showLineNumbers, setShowLineNumbers] = useLineNumbers()
 
+  // Copy the lines currently visible (excludes the trailing partial line while
+  // more bytes are pending — see `lines` memo above).
+  const [copied, setCopied] = useState(false)
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(
+    () => () => {
+      if (copyTimer.current) clearTimeout(copyTimer.current)
+    },
+    [],
+  )
+  const handleCopy = useCallback(async () => {
+    if (lines.length === 0) return
+    try {
+      await navigator.clipboard.writeText(lines.join('\n'))
+      setCopied(true)
+      if (copyTimer.current) clearTimeout(copyTimer.current)
+      copyTimer.current = setTimeout(() => setCopied(false), 1500)
+    } catch {
+      // Clipboard can fail under insecure contexts or denied permissions; a
+      // silent no-op is fine here — the tooltip stays in its default state.
+    }
+  }, [lines])
+
   // One spinner covers both in-flight fetches and grammar loads — both mean
   // "wait a moment".
   const showSpinner = loading || (!ready && lang !== 'plaintext')
@@ -291,6 +314,27 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
             </TooltipTrigger>
             <TooltipContent>
               {showLineNumbers ? 'Hide line numbers' : 'Show line numbers'}
+            </TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                size="icon-sm"
+                variant="outline"
+                aria-label="Copy text"
+                disabled={lines.length === 0}
+                onClick={handleCopy}
+              >
+                {copied ? <Check /> : <Copy />}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              {copied
+                ? 'Copied'
+                : state.done
+                  ? 'Copy text'
+                  : 'Copy loaded text'}
             </TooltipContent>
           </Tooltip>
           <select

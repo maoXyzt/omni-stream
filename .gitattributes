@@ -1,0 +1,17 @@
+# frontend codes
+frontend/* linguist-vendored
+*.{js,ts,tsx,js,jsx} text eol=lf encoding=utf-8
+*.{css,scss,sass} text eol=lf encoding=utf-8
+*.html text eol=lf encoding=utf-8
+
+# scripts
+*.sh text eol=lf encoding=utf-8
+
+# config
+*.{yml,yaml} text eol=lf encoding=utf-8
+*.toml text eol=lf encoding=utf-8
+*.json text eol=lf encoding=utf-8
+
+*.rs text eol=lf encoding=utf-8
+
+*.{md,markdown} text eol=lf encoding=utf-8
