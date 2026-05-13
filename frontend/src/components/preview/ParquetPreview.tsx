@@ -286,6 +286,7 @@ export function ParquetPreview({ fileKey, src, storage }: PreviewerProps) {
           className="flex min-h-0 flex-1 flex-col overflow-hidden"
         >
           <RowsView
+            fileKey={fileKey}
             source={source}
             columns={columns}
             numRows={numRows}

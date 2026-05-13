@@ -34,18 +34,19 @@ const ROWS_PAGE = 20
 
 const EXAMPLE_RULES = `[
   { "column": "prompt", "kind": "text" },
-  { "column": "image", "kind": "image", "pathPrefix": "" },
-  { "column": "image_edit", "kind": "image", "pathPrefix": "" }
+  { "column": "image", "kind": "image", "pathPrefix": "./" },
+  { "column": "image_edit", "kind": "image", "pathPrefix": "../edits/" }
 ]`
 
 interface RowsViewProps {
+  fileKey: string
   source: ParquetSource
   columns: ParquetColumnInfo[]
   numRows: number
   storage?: string
 }
 
-export function RowsView({ source, columns, numRows, storage }: RowsViewProps) {
+export function RowsView({ fileKey, source, columns, numRows, storage }: RowsViewProps) {
   const { rules, decodeError, setRules } = useRowsViewConfig()
 
   const [rows, setRows] = useState<Record<string, unknown>[]>([])
@@ -157,6 +158,7 @@ export function RowsView({ source, columns, numRows, storage }: RowsViewProps) {
                   row={row}
                   rules={rules}
                   columnSet={columnSet}
+                  fileKey={fileKey}
                   storage={storage}
                 />
               ))
@@ -234,10 +236,11 @@ interface RowCardProps {
   row: Record<string, unknown>
   rules: Rule[]
   columnSet: Set<string>
+  fileKey: string
   storage?: string
 }
 
-function RowCard({ index, row, rules, columnSet, storage }: RowCardProps) {
+function RowCard({ index, row, rules, columnSet, fileKey, storage }: RowCardProps) {
   return (
     <div className="rounded-md border bg-card">
       <div className="border-b bg-muted/40 px-3 py-1.5 font-mono text-xs text-muted-foreground tabular-nums">
@@ -265,7 +268,8 @@ function RowCard({ index, row, rules, columnSet, storage }: RowCardProps) {
               ) : (
                 <ImageWidget
                   value={row[rule.column]}
-                  pathPrefix={rule.pathPrefix ?? ''}
+                  pathPrefix={rule.pathPrefix ?? './'}
+                  fileKey={fileKey}
                   storage={storage}
                 />
               )}
@@ -304,36 +308,55 @@ function TextWidget({ value }: { value: unknown }) {
 interface ImageWidgetProps {
   value: unknown
   pathPrefix: string
+  fileKey: string
   storage?: string
 }
 
-function ImageWidget({ value, pathPrefix, storage }: ImageWidgetProps) {
+function ImageWidget({ value, pathPrefix, fileKey, storage }: ImageWidgetProps) {
   const [failed, setFailed] = useState(false)
   const path = imagePathFromValue(value)
 
+  // Resolution treats `pathPrefix + value` as a path relative to the parquet
+  // file's own directory: `./` keeps the parquet's dir, `../` walks up. Going
+  // above storage root surfaces an error here instead of an opaque 404 from
+  // the proxy. See `resolveStorageKey` for the rules.
+  const resolved = useMemo(() => {
+    if (!path) return null
+    return resolveStorageKey(fileKey, pathPrefix, path)
+  }, [fileKey, pathPrefix, path])
+
+  const url =
+    resolved && resolved.ok ? proxyUrl(resolved.key, storage) : null
+
   // Reset the error flag whenever the resolved URL changes — otherwise a row
   // that recycled a previously-failed cell would stay stuck on the fallback.
-  const url = useMemo(() => {
-    if (!path) return null
-    return proxyUrl(pathPrefix + path, storage)
-  }, [path, pathPrefix, storage])
-
   useEffect(() => {
     setFailed(false)
   }, [url])
 
-  if (!url) {
+  if (!path) {
     return (
       <div className="rounded-md border border-dashed bg-muted/20 px-3 py-2 text-xs italic text-muted-foreground">
         no image path
       </div>
     )
   }
+  if (resolved && !resolved.ok) {
+    return (
+      <div className="flex items-start gap-2 rounded-md border border-dashed border-destructive/40 bg-destructive/5 px-3 py-2 text-xs italic text-destructive">
+        <AlertCircle className="mt-0.5 size-4 shrink-0" />
+        <span>
+          {resolved.error}: <span className="font-mono not-italic">{pathPrefix + path}</span>
+        </span>
+      </div>
+    )
+  }
+  if (!url) return null
   if (failed) {
     return (
       <div className="flex items-center gap-2 rounded-md border border-dashed bg-muted/20 px-3 py-2 text-xs italic text-muted-foreground">
         <ImageOff className="size-4" />
-        failed to load <span className="font-mono not-italic">{pathPrefix + path}</span>
+        failed to load <span className="font-mono not-italic">{resolved!.key}</span>
       </div>
     )
   }
@@ -341,13 +364,65 @@ function ImageWidget({ value, pathPrefix, storage }: ImageWidgetProps) {
     <div className="overflow-hidden rounded-md border bg-muted/30">
       <img
         src={url}
-        alt={pathPrefix + path}
+        alt={resolved!.key}
         onError={() => setFailed(true)}
         className="max-h-96 w-auto max-w-full object-contain"
         loading="lazy"
       />
     </div>
   )
+}
+
+type ResolveResult =
+  | { ok: true; key: string }
+  | { ok: false; error: string }
+
+/// Resolve `prefix + value` into an absolute storage key, anchored at the
+/// parquet file's own directory.
+///
+/// Rules:
+/// * The combined `prefix + value` is treated as a single path string.
+/// * Leading `/` ⇒ absolute from storage root. Otherwise relative to the
+///   parquet file's parent directory.
+/// * `.` segments are dropped, `..` segments pop one directory off the stack.
+/// * Popping past the storage root is rejected — we never want a rendered
+///   parquet to be able to coerce the proxy into reading paths outside the
+///   storage's wildcard scope. The backend would refuse anyway, but failing
+///   early gives the user a meaningful error in place of an opaque 404.
+function resolveStorageKey(
+  parquetKey: string,
+  prefix: string,
+  value: string,
+): ResolveResult {
+  const combined = (prefix ?? '') + value
+  if (combined.length === 0) {
+    return { ok: false, error: 'empty image path' }
+  }
+  const isAbsolute = combined.startsWith('/')
+  let stack: string[]
+  if (isAbsolute) {
+    stack = []
+  } else {
+    // Parent directory of the parquet file: drop the last slash-segment.
+    const parts = parquetKey.split('/').filter((s) => s.length > 0)
+    parts.pop()
+    stack = parts
+  }
+  for (const seg of combined.split('/')) {
+    if (seg === '' || seg === '.') continue
+    if (seg === '..') {
+      if (stack.length === 0) {
+        return { ok: false, error: 'path escapes storage root' }
+      }
+      stack.pop()
+      continue
+    }
+    stack.push(seg)
+  }
+  if (stack.length === 0) {
+    return { ok: false, error: 'path resolves to storage root with no file' }
+  }
+  return { ok: true, key: stack.join('/') }
 }
 
 // Pull a usable path out of whatever the cell holds. Parquet image columns
@@ -440,7 +515,8 @@ function RulesDialog({ open, rules, columns, onClose, onSave }: RulesDialogProps
 
         <p className="text-xs text-muted-foreground">
           JSON array of rules. Each rule: <span className="font-mono">{'{"column": "...", "kind": "text" | "image", "label"?: "...", "pathPrefix"?: "..."}'}</span>.
-          Image cells resolve to <span className="font-mono">pathPrefix + value</span> via the storage proxy.
+          Image cells resolve <span className="font-mono">pathPrefix + value</span> relative to this parquet file's directory
+          (<span className="font-mono">./</span> by default, <span className="font-mono">../</span> walks up one level; leading <span className="font-mono">/</span> is absolute from storage root).
         </p>
 
         <textarea

@@ -91,7 +91,7 @@ type RulesConfig = Rule[]
 * `text`：使用 `formatCell(value)` 转字符串后放进多行 `<pre>`（保留换行、限高滚动）。
   `formatCell` 复用自 `src/lib/parquet.ts`，已经处理 bigint / `Uint8Array` / `Date` /
   STRUCT / LIST 的展示。
-* `image`：将 `pathPrefix + value` 作为存储 key，通过
+* `image`：把 `pathPrefix + value` 经 §3.2 的相对路径解析后得到的存储 key，通过
   `proxyUrl(key, storage)`（`src/api/storage.ts`）拼出 `/api/proxy/{key}?storage=…` 作为
   `<img src>`。`<img onError>` 触发后切换为"failed to load"提示，**不**回退到浏览器
   默认的破图图标。
@@ -100,6 +100,33 @@ type RulesConfig = Rule[]
 * 规则引用的列在当前文件中**不存在**时，渲染一条虚线占位的
   `column "foo" not in this file` 提示，而不是留空。这样跨文件复用同一份 URL 不会让
   视图静默"消失"。
+
+### 3.2 图片路径解析
+
+`pathPrefix` 的语义是 **相对于当前 parquet 文件所在的目录** —— 数据集惯例本来就
+是"图片散落在 parquet 旁边的目录里"，让规则不必每次都重复整个 dataset 前缀。
+
+| `pathPrefix` 写法 | 含义 |
+| --- | --- |
+| 缺省 / `""` / `"./"` | 与 parquet 同目录 |
+| `"../"` | parquet 的上级目录 |
+| `"../edits/"` | parquet 的上级目录下的 `edits/` |
+| `"sub/"` | 相对路径 = 同目录下的 `sub/` |
+| `"/datasets/foo/"` | 以 `/` 开头 = 从存储根开始的绝对路径 |
+
+解析函数 `resolveStorageKey(parquetKey, prefix, value)` 内部：
+
+1. 把 `prefix + value` 当成一个完整路径串；
+2. 若以 `/` 开头：从空 stack 开始（绝对）；否则把 `parquetKey` 的父目录拆成 stack
+   起点（相对）；
+3. 按 `/` 切片遍历：`""` 与 `"."` 跳过，`".."` 弹一层；
+4. **`..` 弹到空 stack 时** 直接报错 `path escapes storage root`，**不**继续静默
+   解析。比起让 proxy 返回 404，前端就告诉用户"这条规则越界了"更直观，也避免出现把
+   bug 误以为是缺图的情况。
+
+错误形态会被渲染成红色虚线占位卡（`AlertCircle` 图标），把违规路径以 monospace
+展示出来，便于排错。这样**前端层就拒绝了路径穿越**，后端的 wildcard 校验只是兜底
+而非主防线。
 
 ### 3.2 校验
 
@@ -305,6 +332,15 @@ function useRowsViewConfig(): {
 * **跨文件**：切到另一个 schema 不同的 parquet：
   * 规则保留；命中的列渲染正常，缺失的列显示 `column "foo" not in this file`；
   * Tab 选择保留。
+* **路径解析**（§3.2）：
+  * 打开 `dataset/train.parquet`，规则 `pathPrefix: "./"` + 值 `"img/001.png"` →
+    实际加载 `dataset/img/001.png`；
+  * 改 `pathPrefix: "../"` + 值 `"shared/cover.png"` → 实际加载 `shared/cover.png`
+    （走到 parquet 的上级目录）；
+  * 改 `pathPrefix: "../../../"` → image 占位变为红色 `path escapes storage root` 提示，
+    `<img>` 根本不会发起请求；
+  * 改 `pathPrefix: "/other/foo/"` + 值 `"a.png"` → 加载 `/other/foo/a.png`（绝对路径
+    从存储根）。
 * **错误兜底**：故意把 `pathPrefix` 指到不存在的目录 → image 占位变为 `failed to load
   <key>`，不出现破图图标；手工把 `?rows=` 改成乱码 → 顶部出现红色 "Couldn't read
   rules from URL" Alert，规则按空处理。
