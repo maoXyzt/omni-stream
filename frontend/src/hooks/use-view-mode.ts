@@ -1,17 +1,17 @@
 import { useCallback, useState } from 'react'
 
-export type ViewMode = 'list' | 'grid'
+export type ViewMode = 'list' | 'grid' | 'gallery'
 
 const STORAGE_KEY = 'omni-stream:view-mode'
 
 function readStored(): ViewMode {
   try {
     const v = window.localStorage.getItem(STORAGE_KEY)
-    if (v === 'list' || v === 'grid') return v
+    if (v === 'list' || v === 'grid' || v === 'gallery') return v
   } catch {
     // localStorage may throw in privacy mode / sandboxed iframes — fall through.
   }
-  return 'list'
+  return 'gallery'
 }
 
 export function useViewMode(): [ViewMode, (mode: ViewMode) => void] {
