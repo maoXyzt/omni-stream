@@ -18,7 +18,16 @@ export function FileGrid({ entries, prefix, storageName, onSelect }: FileGridPro
   }
 
   return (
-    <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 xl:grid-cols-10">
+    // `minmax(min(180px, 100%), 1fr)` is the canonical "min size N, but shrink
+    // to fit when N > viewport" pattern. The inner `min()` resolves to 180px
+    // on any container at least that wide, and to 100% on a narrower one —
+    // collapsing the grid to a single full-width column so we never trigger
+    // horizontal scroll. No breakpoints needed.
+    //
+    // `auto-fill` (vs `auto-fit`) keeps empty tracks reserved at their min
+    // size, so a folder containing two files renders two ~180px tiles with
+    // empty space to their right instead of stretching each to half the row.
+    <div className="grid grid-cols-[repeat(auto-fill,minmax(min(180px,100%),1fr))] gap-3">
       {entries.map((entry) => (
         <FileTile
           key={entry.key}
