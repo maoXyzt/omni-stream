@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   AlertCircle,
   Check,
@@ -52,7 +52,6 @@ import {
   totalRowCount,
 } from '@/lib/parquet'
 
-import { RowsView } from './RowsView'
 import type { PreviewerProps } from './types'
 
 const PAGE_SIZE = 100
@@ -60,24 +59,21 @@ const PAGE_SIZE = 100
 const TAB_PARAM = 'tab'
 const ROWS_PARAM = 'rows'
 
-type ParquetTab = 'schema' | 'data' | 'rows'
+type ParquetTab = 'schema' | 'data'
 
 // Session-only cache of the last-active tab. Module-level so it survives
 // switching between parquet files in the same page load but resets on
 // reload — intentionally not persisted to localStorage. Acts as a soft
-// fallback when neither `?tab=` nor `?rows=` is present in the URL.
+// fallback when `?tab=` is absent from the URL.
 let lastActiveTab: ParquetTab = 'schema'
 
 function resolveActiveTab(searchParams: URLSearchParams): ParquetTab {
   // Explicit `?tab=…` wins — that's what makes a shared link land exactly
-  // where the sender was.
+  // where the sender was. Rows view used to be a third tab; legacy links
+  // with `?tab=rows` are silently downgraded to schema since the Rows view
+  // now lives on its own `/r/...` route entered via the toolbar button.
   const explicit = searchParams.get(TAB_PARAM)
-  if (explicit === 'schema' || explicit === 'data' || explicit === 'rows') {
-    return explicit
-  }
-  // Back-compat: links shared before `?tab=` existed only carried `?rows=`.
-  // Treat the presence of a rules config as an implicit "open Rows tab".
-  if (searchParams.has(ROWS_PARAM)) return 'rows'
+  if (explicit === 'schema' || explicit === 'data') return explicit
   return lastActiveTab
 }
 
@@ -95,6 +91,7 @@ export function ParquetPreview({ fileKey, src, storage }: PreviewerProps) {
   const [pageIndex, setPageIndex] = useState(0)
   const { data: stat } = useFileStat(fileKey, storage)
   const [searchParams, setSearchParams] = useSearchParams()
+  const navigate = useNavigate()
   // URL is the source of truth for the active tab so shared links land on
   // the right view and browser Back actually walks tab history. Falls back
   // to session memory / 'schema' when no URL hint is present.
@@ -106,15 +103,8 @@ export function ParquetPreview({ fileKey, src, storage }: PreviewerProps) {
       (sp) => {
         const params = new URLSearchParams(sp)
         if (next === 'schema') {
-          // Schema is the natural default — usually omit the param so URLs
-          // stay clean. Exception: if `?rows=` is present, omitting `?tab=`
-          // would let the back-compat branch in `resolveActiveTab` snap
-          // straight back to the Rows tab, so write it explicitly.
-          if (params.has(ROWS_PARAM)) {
-            params.set(TAB_PARAM, 'schema')
-          } else {
-            params.delete(TAB_PARAM)
-          }
+          // Schema is the natural default — omit so plain URLs stay clean.
+          params.delete(TAB_PARAM)
         } else {
           params.set(TAB_PARAM, next)
         }
@@ -122,6 +112,22 @@ export function ParquetPreview({ fileKey, src, storage }: PreviewerProps) {
       },
       { replace: true },
     )
+  }
+
+  // Jump to the standalone Rows page. Pass through any `?rows=` rules the
+  // user already has in the URL so the destination opens with the same
+  // ruleset and the modal-to-page transition stays seamless. The file key
+  // is encoded segment-by-segment so slashes stay literal in the path.
+  const openRowsPage = () => {
+    if (!storage) return
+    const rules = searchParams.get(ROWS_PARAM)
+    const trail = fileKey
+      .split('/')
+      .filter((s) => s.length > 0)
+      .map(encodeURIComponent)
+      .join('/')
+    const query = rules ? `?${ROWS_PARAM}=${rules}` : ''
+    navigate(`/r/${encodeURIComponent(storage)}/${trail}${query}`)
   }
 
   // Each `src` change starts a fresh load — track a token so a stale async
@@ -220,7 +226,7 @@ export function ParquetPreview({ fileKey, src, storage }: PreviewerProps) {
       <Tabs
         value={activeTab}
         onValueChange={(v) => {
-          if (v === 'schema' || v === 'data' || v === 'rows') setActiveTab(v)
+          if (v === 'schema' || v === 'data') setActiveTab(v)
         }}
         className="flex flex-1 flex-col overflow-hidden"
       >
@@ -228,21 +234,20 @@ export function ParquetPreview({ fileKey, src, storage }: PreviewerProps) {
           <TabsList>
             <TabsTrigger value="schema">Schema</TabsTrigger>
             <TabsTrigger value="data">Data</TabsTrigger>
-            <TabsTrigger value="rows">Rows</TabsTrigger>
           </TabsList>
-          {activeTab !== 'rows' && (
-            // A second, more prominent way into the Rows view than the tab
-            // itself — surfaced because the Rows view is the only tab with
-            // a real "configure once, share the link" workflow attached.
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setActiveTab('rows')}
-            >
-              <LayoutList className="size-4" />
-              Browse as cards
-            </Button>
-          )}
+          {/* Rows view used to be a third tab; it's now a top-level page at
+              `/r/<storage>/<file>`. The button takes the user there while
+              forwarding any `?rows=` rules already in the URL so the
+              transition is seamless. */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={openRowsPage}
+            disabled={!storage}
+          >
+            <LayoutList className="size-4" />
+            Browse as cards
+          </Button>
         </div>
 
         <TabsContent
@@ -279,19 +284,6 @@ export function ParquetPreview({ fileKey, src, storage }: PreviewerProps) {
               loading={rowsLoading && !rowsState}
             />
           )}
-        </TabsContent>
-
-        <TabsContent
-          value="rows"
-          className="flex min-h-0 flex-1 flex-col overflow-hidden"
-        >
-          <RowsView
-            fileKey={fileKey}
-            source={source}
-            columns={columns}
-            numRows={numRows}
-            storage={storage}
-          />
         </TabsContent>
       </Tabs>
     </div>

@@ -2,62 +2,72 @@
 
 ## 1. 概述
 
-`ParquetPreview` 原先只有两个 Tab：
+OmniStream 的 `ParquetPreview` 模态有两个 Tab：
 
 * **Schema** — 展示列类型；
 * **Data** — 100 行 / 页的紧凑表格。
 
-对 ML/数据集场景（一行里同时包含长 prompt、原图、编辑图）来说，表格视图把每一行都
-压成一条 line-clamp 的窄行，看起来非常吃力。**Rows 视图**新增第三个 Tab，把
-**每一行渲染成卡片**，并允许用户通过一份 **JSON 规则**自定义"哪列应当以什么形式
-显示"。
+对 ML/数据集场景（一行里同时包含长 prompt、原图、编辑图）来说，表格视图把每一行
+都压成一条 line-clamp 的窄行，看起来非常吃力。**Rows 视图**作为一个**与文件浏览器
+同级的顶层页面**（路由 `/r/:storage/*`，平行于文件列表的 `/s/:storage/*`），把每一行
+渲染成卡片，并允许用户通过一份 **JSON 规则**自定义"哪列应当以什么形式显示"。
 
-规则不存 localStorage，而是 **lz-string 压缩后写入 URL 查询参数 `?rows=…`**：
-一份链接即可分享同一份视图，无需手动同步配置。
+设计要点：
+
+* 进入 Rows 视图是一次完整的页面切换 —— 浏览器 Back 把你送回文件列表 + 模态预览；
+* URL 是 **路径** 而不是 **查询参数**：`/r/mybucket/data/train.parquet`，分享更直观；
+* 规则通过 lz-string 压缩后挂在 `?rows=…`，与所在文件路径耦合，避免跨文件配置漂移。
 
 ## 2. 用户视角
 
+### 2.1 顶层布局
+
 ```
-┌─ Schema ─ Data ─ Rows ─┐         [ ▣ Browse as cards ]
-└────────────────────────┘            ↑ 仅在非 Rows Tab 时显示
-
-[Rules ▢]   3 of 1,234 rows loaded
-
-┌─ row 1 ───────────────────────────────────────────────┐
-│ prompt                                                │
-│   ┌───────────────────────────────────────────────┐   │
-│   │ A cat sitting on a windowsill at sunset…      │   │
-│   └───────────────────────────────────────────────┘   │
-│ image                                                 │
-│   ┌─────────────┐                                     │
-│   │   <img>     │                                     │
-│   └─────────────┘                                     │
-│ image_edit                                            │
-│   ┌─────────────┐                                     │
-│   │   <img>     │                                     │
-│   └─────────────┘                                     │
-└───────────────────────────────────────────────────────┘
-                ┌─ row 2 ─ … ─┐
-                [  Load 20 more  ]
+/r/mybucket/datasets/train.parquet?rows=N4Igz…
+┌──────────────────────────────────────────────────────────────────────┐
+│ [← Files]  train.parquet                            ┌── Rows view ──┐│
+│            mybucket · datasets/train.parquet        └──────────────-─┘│
+├──────────────────────────────────────────────────────────────────────┤
+│                                                                      │
+│ [Rules ▢]   3 of 1,234 rows loaded                                   │
+│                                                                      │
+│ ┌─ row 1 ─────────────────────────────────────────────────────┐      │
+│ │ prompt                                                       │      │
+│ │   ┌────────────────────────────────────────────────────────┐ │      │
+│ │   │ A cat sitting on a windowsill at sunset…               │ │      │
+│ │   └────────────────────────────────────────────────────────┘ │      │
+│ │ image            image_edit                                  │      │
+│ │   ┌─────────┐      ┌─────────┐                               │      │
+│ │   │ <img>   │      │ <img>   │                               │      │
+│ │   └─────────┘      └─────────┘                               │      │
+│ └──────────────────────────────────────────────────────────────┘      │
+│                  ┌─ row 2 ─ … ─┐                                     │
+│                  [  Load 20 more  ]                                  │
+└──────────────────────────────────────────────────────────────────────┘
 ```
 
-### 2.1 进入 Rows 视图的两条路径
+### 2.2 进入 Rows 视图
 
-1. **点击 `Rows` Tab** —— 与 Schema / Data 并列，是规范的入口。
-2. **点击 `Browse as cards` 按钮** —— 位于 TabsList 右侧，仅当当前不在 Rows Tab
-   时显示。Rows 视图是当前唯一带"配置一次、分享链接"工作流的 Tab，需要比一个标签
-   稍微更显眼的入口来宣告它的存在。
+唯一的"入门按钮"在 parquet 预览模态里：
 
-两条路径都通过同一个 `setActiveTab('rows')`，并最终落到下面要讲的 URL 写入。
+* 在文件列表里点 `*.parquet` → 打开 `PreviewModal` → 顶部 TabsList 右侧有一个
+  **`Browse as cards`** 按钮，点击它调用 `navigate(/r/<storage>/<file>)`，
+  把当前 URL 里的 `?rows=…`（如果有）一并 forward 到新路由。
 
-### 2.2 其它
+直接打开 / 分享的 URL 同样有效：
 
-* 卡片之间垂直堆叠，外层容器原生滚动。
+* `/r/<storage>/<file>` — 空规则的 Rows 页面；
+* `/r/<storage>/<file>?rows=<lz-string>` — 完整视图（分享他人时用的形态）。
+
+页面顶部的 **`← Files`** 按钮回到 parquet 所在目录的文件列表；浏览器 Back 同样可用。
+
+### 2.3 其它
+
+* 卡片之间垂直堆叠，`main` 容器原生滚动。
 * 底部 `Load N more` 按钮按 **20 行 / 批** 增量加载；到达文件末尾后显示 `End of file`。
-* 右上角 `Rules` 按钮打开 **JSON 编辑器对话框**，保存即写入 URL。
-* URL 中带 `?tab=rows`（或老链接里只有 `?rows=…`）时，打开 ParquetPreview 会自动
-  落在 Rows Tab。
-* 无规则时，Rows Tab 显示 "No rules configured" 空态卡 + CTA。
+* 右上角 `Rules` 按钮打开 **JSON 编辑器对话框**，Save 即写入 URL。
+* 无规则时，主区显示 "No rules configured" 空态卡 + CTA，用户必然要打开 Rules 对话框
+  才能看到任何内容。
 
 ## 3. 规则 Schema
 
@@ -81,8 +91,8 @@ type RulesConfig = Rule[]
 ```json
 [
   { "column": "prompt", "kind": "text" },
-  { "column": "image", "kind": "image", "pathPrefix": "datasets/train/" },
-  { "column": "image_edit", "kind": "image", "pathPrefix": "datasets/edits/" }
+  { "column": "image", "kind": "image", "pathPrefix": "./" },
+  { "column": "image_edit", "kind": "image", "pathPrefix": "../edits/" }
 ]
 ```
 
@@ -128,65 +138,55 @@ type RulesConfig = Rule[]
 展示出来，便于排错。这样**前端层就拒绝了路径穿越**，后端的 wildcard 校验只是兜底
 而非主防线。
 
-### 3.2 校验
+### 3.3 校验
 
 `validateRules(input: unknown)` 同时承担两类校验：
 
-* URL 解码后 — 损坏的链接 / 越权的字段都会落到 `decodeError`，在 Rows Tab 顶部展示
-  一条 `destructive` Alert，便于诊断而非静默回退到空规则。
+* URL 解码后 — 损坏的链接 / 越权的字段都会落到 `decodeError`，在 Rows 页面顶部
+  展示一条 `destructive` Alert，便于诊断而非静默回退到空规则。
 * 用户在编辑器里 Save 时 — 错误以行号 / 字段名形式弹出（`rule #2: "kind" must be
   "text" or "image"`），编辑器不会关闭也不会写 URL。
 
 ## 4. URL 设计
 
-### 4.1 整体契约
+### 4.1 路由总览
 
-ParquetPreview 在地址栏使用 **4 个正交的查询参数**，加上 FileList 已有的两个：
+应用一共有四个路由（`src/App.tsx`）：
 
-| 参数 | 谁拥有 | 取值 | 含义 |
-| --- | --- | --- | --- |
-| `preview` | `FileList` | 相对 key | 当前被预览的文件路径（已存在） |
-| `storage` | `FileList` | 存储名 | 当前的存储后端（已存在） |
-| `tab` | `ParquetPreview` | `schema` \| `data` \| `rows` | 当前 Tab；默认 Tab `schema` 不写入 |
-| `rows` | `RowsView` | lz-string 压缩字符串 | 规则配置；空数组会从 URL 中删除而不是写入 |
+| 路由 | 组件 | 用途 |
+| --- | --- | --- |
+| `/` | `StorageRedirect` | 重定向到默认存储的根目录 |
+| `/s/:storage/*` | `FileList` | 文件浏览器（splat = 目录前缀） |
+| `/r/:storage/*` | `RowsPage` | **Rows 视图**（splat = parquet 文件 key） |
+| `*` | — | fallback 到 `/` |
 
-完整的一个 "分享链接" 形态：
+`/r/...` 与 `/s/...` 完全平行 —— 都是一级页面，存储名是路径段而不是查询参数。
+这也是这个文档里反复提到 "**与 FileList 同级**" 的字面意思。
+
+### 4.2 完整 URL 形态
 
 ```
-/?preview=datasets/train.parquet
- &storage=mybucket
- &tab=rows
- &rows=N4IgzghgTgrgsgFwgFwgGYHsBOBLABBLAA…
+/r/<storage>/<encoded-file-key>
+  ?rows=<lz-string-compressed JSON rules>
 ```
 
-四个参数互相独立：删掉 `?rows=` 仍是 Rows Tab + 空规则；删掉 `?tab=rows` 仍可以
-通过老链接的 `?rows=` 兜底回到 Rows。
+具体例子：
 
-### 4.2 Tab 解析优先级
+```
+/r/mybucket/datasets/train.parquet
+   ?rows=N4IgzghgTgrgsgFwgFwgGYHsBOBLABBLAA…
+```
 
-`resolveActiveTab(searchParams: URLSearchParams): ParquetTab` 按如下顺序短路：
+或者无规则（直接打开会落在空态 CTA）：
 
-1. **`?tab=schema|data|rows`** —— 显式指定，胜出。"分享链接精确落点"靠这一条。
-2. **`?rows=…` 存在** —— 老链接兜底，隐式解读为 `'rows'`。Tab 参数加进项目之前
-   生成的链接（包括我自己测试时的链接）只有这个信号。
-3. **`lastActiveTab`** —— 模块级会话缓存。切到另一个 parquet 文件时，URL 一般已
-   被 FileList 清空到只剩 `?preview=`，这条让用户回到上一次看过的 Tab。
-4. **`'schema'`** —— 最终默认。
+```
+/r/mybucket/datasets/train.parquet
+```
 
-### 4.3 Tab 写入策略
+路径段编码遵守 `proxyUrl()` 的做法：对每个 `/` 切片单独 `encodeURIComponent`，
+保留 `/` 字面以便后端的 wildcard `:storage/*` 能正确切分。
 
-`setActiveTab(next)` 总是 `replace: true`：Tab 切换属于"视图状态"而不是"导航
-事件"，Back 按钮的语义应当保持为"回到上一个文件 / 页面"而非"反向逐步走完所有 Tab"。
-
-| `next` | URL 表现 |
-| --- | --- |
-| `schema`，且 URL **无** `?rows=` | 删除 `?tab=`（默认 Tab 不入参） |
-| `schema`，但 URL **有** `?rows=` | 显式写入 `?tab=schema`，否则下一帧
-  `resolveActiveTab` 会因为 `?rows=` 兜底立刻反弹到 Rows |
-| `data` | `?tab=data` |
-| `rows` | `?tab=rows` |
-
-### 4.4 Rules 压缩
+### 4.3 `?rows=` Rules 压缩
 
 ```
 ?rows=<LZString.compressToEncodedURIComponent(JSON.stringify(rules))>
@@ -195,36 +195,67 @@ ParquetPreview 在地址栏使用 **4 个正交的查询参数**，加上 FileLi
 * **库**：`lz-string@1.5`（~3kB gzipped）。
   `compressToEncodedURIComponent` / `decompressFromEncodedURIComponent` 直接产生
   URL-safe 字符串，无需再做 `encodeURIComponent`。
-* **写入策略**：仅在用户点击 `Save` 时写入，同样 `replace: true`。
+* **写入策略**：仅在用户点击 Rules 对话框的 `Save` 时写入，`replace: true`，
+  不污染浏览器历史栈。
 * **空规则**：`setRules([])` 会把 `?rows=` 从 URL 中**删除**而非写入空数组的压缩
   字符串，URL 初态保持干净。
 
-### 4.5 跨文件行为
+### 4.4 从 ParquetPreview 跳转到 Rows 页面
 
-`?tab=` 与 `?rows=` 都与具体的 `preview` key 解耦：切到另一个 parquet 时，规则
-和 Tab 选择**保留**。
+`ParquetPreview` 里 `Browse as cards` 按钮的核心逻辑：
 
-* 列对不上由 3.1 的 "column not in this file" 占位提示兜底；
-* 不同 schema 的 parquet 在同一份规则下还能复用（这是 URL-only 持久化的副产物——
-  跨文件复用反而比"每个文件记一份"更常见）；
-* 真的不想复用 Rows 视图，切到 Schema Tab 即可。
+```ts
+const openRowsPage = () => {
+  if (!storage) return
+  const rules = searchParams.get(ROWS_PARAM)
+  const trail = fileKey.split('/')
+    .filter(s => s.length > 0)
+    .map(encodeURIComponent)
+    .join('/')
+  const query = rules ? `?${ROWS_PARAM}=${rules}` : ''
+  navigate(`/r/${encodeURIComponent(storage)}/${trail}${query}`)
+}
+```
+
+* `fileKey` 已经是完整的存储 key（来自 `PreviewerProps`），不再依赖 `prefix` 拼接；
+* `?rows=` 是 forward 而不是 replicate：用户如果之前没设过规则，目标 URL 也不会
+  无意义地塞一个空参数；
+* 由于切的是路由而不是 query，浏览器 history 会留一条 entry，Back 自然回到模态预览。
+
+### 4.5 ParquetPreview 自己的 Tab URL
+
+预览模态用 `?tab=` 在 Schema / Data 之间分享状态：
+
+* `?tab=data` → Data Tab；
+* 缺省 / `?tab=schema` → Schema Tab（默认值不写入 URL）；
+* 任何不被识别的 `?tab=` 值（包括 `?tab=rows`，因为 Rows 不再是模态内的 Tab）静默
+  降级到 Schema，不报错也不跳转。
 
 ### 4.6 为何不用 localStorage
 
 * **链接即视图**：可被分享 / 收藏 / 嵌入文档 / 进 PR description；
 * **多 Tab 隔离**：浏览器多个 Tab 各自独立，不会互相覆盖；
-* **状态可见**：清空只需删 `?rows=` / `?tab=`，没有"残留在 storage 里"的隐藏状态。
+* **状态可见**：清空只需删 `?rows=` 即可，没有"残留在 storage 里"的隐藏状态。
 
 ## 5. 模块布局
 
 ```
 frontend/
-├── src/components/preview/
-│   ├── ParquetPreview.tsx        # +Rows Tab (TabsTrigger / TabsContent)
-│   └── RowsView.tsx              # 新增：整个 Rows Tab + 规则编辑对话框
+├── src/App.tsx                       # 路由表
+├── src/components/
+│   ├── RowsPage.tsx                  # 顶层页面：路由 + parquet 加载 + 错误处理
+│   │                                 #   与 FileList.tsx 同级
+│   └── preview/
+│       ├── ParquetPreview.tsx        # Schema / Data Tab + Browse as cards 按钮
+│       └── RowsView.tsx              # 卡片 feed + Rules 对话框
+│                                     #   被 RowsPage 用作正文
 └── src/hooks/
-    └── use-rows-view-config.ts   # 新增：URL ⇄ Rule[] 双向绑定 + 校验
+    └── use-rows-view-config.ts       # URL ⇄ Rule[] 双向绑定 + 校验
 ```
+
+`RowsPage` 是路由承接组件，`RowsView` 是把已加载好的 `ParquetSource` 翻译成
+卡片视图的纯渲染组件 —— 这条边界让前者管"获取数据 + 页面 chrome"，后者管"
+渲染 + 用户交互"，两者职责清晰可分别测试。
 
 ### 5.1 `useRowsViewConfig`
 
@@ -243,7 +274,27 @@ function useRowsViewConfig(): {
 * `setRules` 是写入入口，封装压缩 + URL 写入；
 * 同时导出 `validateRules`，供对话框 Save 校验复用。
 
-### 5.2 `RowsView`
+### 5.2 `RowsPage`
+
+```ts
+function RowsPage(): JSX.Element
+```
+
+* **路由解析**：`useParams()` 读取 `storage` 与 splat（`params['*']`），把后者
+  去掉前导 `/` 后即是完整的 parquet `fileKey`。
+* **加载**：用 `proxyUrl(fileKey, storage)` 拼出 `src`，调 `loadParquetSource`
+  把 footer 拉下来；同时用 `loadTokenRef` 防止 `src` 变化时的竞态。
+* **错误兜底**：
+  * 存储名不在 `useStorages()` 返回的列表里 → `<Navigate to="/" replace />`；
+  * `fileKey` 为空（用户访问 `/r/<storage>/`）→ 重定向到对应的文件列表；
+  * Parquet 加载 401 → 渲染 `<TokenPrompt>`，与 `FileList` 同一交互；
+  * 其它加载错误 → 红色 Alert，message 直接显示后端原因。
+* **页面 chrome**：
+  * 顶栏：`← Files` 按钮（`navigate('/s/<storage>/<parent dir>/')`）+ 文件名 +
+    存储名/完整 key + `Rows view` 徽标；
+  * 主区：`<RowsView>` 承担全部内容渲染，铺满剩余高度。
+
+### 5.3 `RowsView`
 
 组件树：
 
@@ -265,73 +316,77 @@ function useRowsViewConfig(): {
 ```
 
 * 数据是 `useState<Record<string, unknown>[]>`，按需 append；
-* 使用与 `ParquetPreview` 相同的 **`loadTokenRef` 模式**：每次 `source` 变更都生成
-  新 token，旧的异步结果无法覆盖新状态。这也是项目内"在 React 里取消异步请求"的
-  既有约定。
-* **重要**：`RowsView` **不**自己调用 `loadParquetSource`，而是从父组件 `ParquetPreview`
-  接收已经构造好的 `ParquetSource`（`{ file: AsyncBuffer, metadata }`），保证整个
-  preview 只有一次 footer 读取。每次 `Load more` 只通过 `readParquetRows` 走
-  Range 请求拉取所需 row group 的页面。
+* `loadTokenRef` 模式：每次 `source` 变更都生成新 token，旧的异步结果无法覆盖新
+  状态。这也是项目内"在 React 里取消异步请求"的既有约定（`ParquetPreview` 用法
+  一致）。
+* **重要**：`RowsView` 不自己调用 `loadParquetSource`，而是从 `RowsPage` 接收
+  已经构造好的 `ParquetSource`（`{ file: AsyncBuffer, metadata }`），保证整个
+  页面只有一次 footer 读取。每次 `Load more` 只通过 `readParquetRows` 走 Range
+  请求拉取所需 row group 的页面。
+* `RowsView` 是纯粹的"已加载 parquet → 卡片视图"的渲染层，可单独复用 —— 比如未来
+  需要在另一个上下文里展示卡片视图（评论 / 嵌入 iframe / 报告等），不用搬整个
+  `RowsPage`。
 
-### 5.3 `ParquetPreview` 的改动
+### 5.4 `ParquetPreview` 内的 Rows 入口
 
-1. **类型扩展**：`type ParquetTab = 'schema' | 'data' | 'rows'`。
-2. **URL ⇄ Tab 同步**：把 `<Tabs>` 从 `defaultValue`（非受控）改成
-   `value` / `onValueChange`（受控）：
-   * 读：每次渲染都用 `resolveActiveTab(searchParams)`（§4.2）算 active Tab；
-   * 写：`onValueChange` 调用 `setActiveTab(next)`（§4.3），`{ replace: true }`。
-   * `lastActiveTab` 仍是模块级 `let`，但角色降级为"无 URL 提示时的会话兜底"，
-     不再作为唯一来源。
-3. **入口 UI**：
-   * `<TabsTrigger value="rows">Rows</TabsTrigger>` 与 `<TabsContent value="rows">`；
-   * 在 `TabsList` 右侧放一个 `Browse as cards` 按钮（`LayoutList` 图标），
-     仅当 `activeTab !== 'rows'` 时显示。两者共用同一个 `setActiveTab('rows')`，
-     用户在 Schema/Data Tab 上扫一眼就能发现 Rows 视图的存在。
-4. **传参**：把父组件已经载入的 `source`、`columns`、`numRows`、`storage` 直接
-   传给 `<RowsView>`，避免重复读取 footer。
+`ParquetPreview` 维持 Schema / Data 两个 Tab。TabsList 右侧的 `Browse as cards`
+按钮（`LayoutList` 图标）调 `navigate('/r/<storage>/<file>?rows=...')`，并把当前
+URL 上的 `?rows=` 一并 forward。`disabled={!storage}` 防止在罕见的 storage 缺失
+时跳到不存在的路由。
+
+`resolveActiveTab` 只识别 `'schema'` / `'data'`；任何其他 `?tab=` 值都静默降级
+到 Schema。模态里完全不引用 `RowsView`，卡片视图只活在 `/r/...` 路由下。
 
 ## 6. 关键决策与取舍
 
 | 决策 | 选项 | 取舍 |
 | --- | --- | --- |
-| 视图位置 | 第三个 Tab vs 独立 Previewer | 第三 Tab。复用父组件已经载入的 `ParquetSource`，footer 不重复下载；视图语义"还是同一个 parquet 文件"。 |
+| 视图位置 | Tab vs 顶层路由 | 顶层路由。Rows 视图有自己的配置面板、自己的滚动空间、需要纵向铺满视口，模态吃不下。`/r/:storage/*` 让 URL 是文件路径而不是 query，浏览器 Back 把用户送回文件列表 + 模态，分享链接也更短更直观。footer 重复读取的成本（一次小 Range 请求）远低于"模态吃不下整页视图"的体验损失。 |
 | 配置语言 | JSON vs YAML vs 表单生成器 | JSON。项目已不缺 JSON 处理；shadcn 没有 Select/Combobox，做表单要先扩 UI 库；YAML 需要额外依赖。 |
-| 配置认定 | URL vs localStorage vs 混合 | URL only。可分享、可书签、清空容易；副作用是新开 Tab 总是空态，这正是"显式分享"语义。 |
-| 编辑器位置 | 顶部内联面板 vs 模态对话框 | 模态对话框。卡片视图本身就要占满 Tab，编辑器内联会抢空间；模态与已有 `CellValueDialog` 同构。 |
+| 配置载体 | URL vs localStorage vs 混合 | URL only。可分享、可书签、清空容易；副作用是新开 Tab 总是空态，这正是"显式分享"语义。 |
+| 编辑器位置 | 顶部内联面板 vs 模态对话框 | 模态对话框。卡片视图本身就要占满页面，编辑器内联会抢空间；模态与已有 `CellValueDialog` 同构。 |
 | 图片来源 | 仅存储路径 vs +绝对 URL | 仅存储路径。覆盖文档中给出的全部示例；绝对 URL 可后续按"前缀以 `http://` 开头则视为字面 URL"扩展，不破坏现有规则文件。 |
 | 加载策略 | 一次性 / 分页跳转 / 增量 Load more / 无限滚动 | Load more。简单、可预测，不需要 `IntersectionObserver`；行高差异大时无限滚动的滚动条会反复跳动。 |
 | 列丢失 | 跳过 vs 占位提示 | 占位提示。规则跨文件复用时，"缺什么"的可见性比"看起来正常"重要。 |
 | URL 写入时机 | 实时 debounce vs Save 显式 | Save 显式。模态本身就有"草稿"语义，关闭对话框等于放弃；同时减少 history entries。 |
 | URL 压缩 | 原始 JSON vs lz-string vs gzip | lz-string。已经被广泛用于"把 JSON 塞进 URL"，输出原生 URL-safe，体积上比 base64(gzip) 更小。 |
-| Tab 同步 | URL 受控 vs 仅 mount 时读 URL | URL 受控。让浏览器 Back 走 Tab 历史、让分享链接精确落点、让 URL 始终反映用户所见，全部依赖这一点。 |
-| Tab 参数命名 | `tab` vs `ptab`/`pqTab` 等命名空间 | `tab`。`?tab=` 仅在 `?preview=` 存在时有意义，作用域已被隐式限定，加前缀只是噪音。 |
-| Tab 默认值入参 | 总是写 vs 默认 Tab 不写 | 默认 Tab 不写。Schema 是"普通访问"的状态，URL 不应因此变长；只有 `data`/`rows` 是值得分享的"非默认状态"。 |
-| 入口可发现性 | 仅靠 Tab vs +显式按钮 | +按钮。"Browse as cards" 显式按钮（仅非 Rows Tab 显示）专门用来宣告这是一个有独立配置 + 分享语义的视图，单纯一个 Tab 容易被错过。 |
-| 旧链接兼容 | 直接报废 vs 隐式当 `?tab=rows` | 隐式兼容。`?rows=` 出现时自动 fallback 到 Rows Tab，不打破任何已分享的链接；代价是 §4.3 中需要为 schema 写显式 `?tab=schema`。 |
+| 路由风格 | `/r/<storage>/<file>` vs `/rows/<storage>/<file>` vs query param | 单字母 `/r/`。与已有 `/s/` 文件浏览器对仗（storage / rows），URL 短、可记；"rows" 全词 8 个字符放在路径里有点重，query param 又会让 Rows 看着像 FileList 的附属功能。 |
+| 文件 key 位置 | 路径 splat vs query param | 路径 splat。`/r/mybucket/datasets/train.parquet` 看一眼就知道指向哪个文件；query param `?file=...` 会被各种工具截断或转义，分享体验差。 |
+| ParquetPreview 入口形态 | 内嵌渲染 vs 跳转按钮 | 跳转按钮。Rows 视图"整页接管"的体感与模态的"原地变身"不匹配；按钮 + 路由 navigate 让转场更可预期，浏览器 history 也更干净。 |
+| ParquetPreview 内的 Tab URL | URL 受控 vs 仅 mount 时读 URL | URL 受控。让浏览器 Back 走 Tab 历史、让分享链接精确落点。 |
+| `?tab=` 默认值入参 | 总是写 vs 默认 Tab 不写 | 默认 Tab 不写。Schema 是"普通访问"的状态，URL 不应因此变长。 |
+| 未识别 `?tab=` 值 | 报错 vs 重定向 vs 静默降级 | 静默降级到 Schema。让任何非预期值平稳回到默认 Tab，比把用户拦在错误页或强制 redirect 更稳妥。 |
 
 ## 7. 验证清单
 
 * `tsc -b` + `eslint .` 全绿；
-* **基础规则编辑**：打开任意 parquet：
-  * 切到 Rows Tab → 看到 "No rules configured" 空态；
+* **路由与跳转**（§4 重点）：
+  * 文件列表中点 `train.parquet` → 模态打开，Tabs 为 `Schema | Data`，右侧出现
+    `Browse as cards` 按钮；
+  * 点 `Browse as cards` → URL 变为 `/r/<storage>/datasets/train.parquet`，模态
+    消失，进入 Rows 页面；
+  * 浏览器 Back → 回到 `/s/<storage>/datasets/?preview=train.parquet`，模态恢复；
+  * 直接在地址栏输入 `/r/<storage>/datasets/train.parquet` → 同样进入 Rows 页面；
+  * 在 Rows 页面顶部点 `← Files` → 回到 `/s/<storage>/datasets/`。
+* **空态 / 规则编辑**：
+  * Rows 页面第一次打开 → "No rules configured" 空态卡 + CTA；
   * 打开 Rules 对话框，粘贴非法 JSON → 出现校验 Alert，URL 未变；
-  * 粘贴合法 rules（一个 text 列 + 一个 image 列），Save → 地址栏出现 `?rows=…`，
-    卡片渲染正确；
+  * 粘贴合法 rules（一个 text 列 + 一个 image 列），Save → 地址栏 query 变为
+    `?rows=…`，卡片渲染正确；
   * 滚到底部点 `Load N more` → 后续 20 行 append，已渲染的卡片不重排；
   * 手动把 `?rows=` 从地址栏删除并刷新 → 回到空态。
-* **URL 与 Tab 同步**（§4 重点）：
+* **规则 Forward**（§4.4）：
+  * 在模态预览里手工拼一个带 `?rows=…` 的 URL（例如先去 Rows 页面 Save 规则、
+    再 Back 回模态），点 `Browse as cards` → 目标 Rows 页面继承同一份 `?rows=…`；
+  * 分享给他人的 Rows 页面 URL，对方打开看到的视图一致。
+* **ParquetPreview Tab URL**：
   * 在 Schema Tab → 地址栏**没有** `?tab=`；
-  * 点击 `Browse as cards` 或 Rows Tab → URL 变成 `?tab=rows`，按钮消失；
-  * 切到 Data Tab → URL 变成 `?tab=data`；
-  * 切回 Schema → `?tab=` 被删除（前提是 `?rows=` 也没设）；
-  * 设置过 rules 后切到 Schema → URL 同时保留 `?rows=…&tab=schema`，刷新仍停在
-    Schema（不会因为 `?rows=` 兜底反弹到 Rows）；
-  * 复制带 `?tab=rows` 的 URL 到新 Tab → 自动落在 Rows Tab；
-  * 复制只带 `?rows=…`（无 `?tab=`）的老格式 URL → 同样落在 Rows Tab（兼容）；
-  * 浏览器 Back → 走文件 / 页面历史，**不**反向逐 Tab 倒退（受 `replace: true` 保护）。
-* **跨文件**：切到另一个 schema 不同的 parquet：
-  * 规则保留；命中的列渲染正常，缺失的列显示 `column "foo" not in this file`；
-  * Tab 选择保留。
+  * 切到 Data → URL 变成 `?tab=data`；切回 Schema → `?tab=` 被删除；
+  * 复制带 `?tab=data` 的 URL 到新 Tab → 自动落在 Data Tab；
+  * 手工把 URL 改成 `?tab=foo`（或任何非 schema/data 的值）→ 静默降级到 Schema。
+* **跨文件**：从一个 parquet 的 Rows 页面，编辑地址栏文件路径到另一个 schema 不同
+  的 parquet：
+  * 规则保留；命中的列渲染正常，缺失的列显示 `column "foo" not in this file`。
 * **路径解析**（§3.2）：
   * 打开 `dataset/train.parquet`，规则 `pathPrefix: "./"` + 值 `"img/001.png"` →
     实际加载 `dataset/img/001.png`；
@@ -347,8 +402,8 @@ function useRowsViewConfig(): {
 
 ## 8. 后续可能的扩展
 
-* **绝对 URL** 支持：`pathPrefix` 以 `http://` / `https://` / `/` 开头时跳过 `proxyUrl`，
-  直接拼接作为图片地址。
+* **绝对 URL** 支持：`pathPrefix` 以 `http://` / `https://` 开头时跳过 `proxyUrl`，
+  直接拼接作为图片地址（现状只支持存储根 `/...` 的绝对路径）。
 * **更多 widget kind**：`json`（pretty-print）、`link`（可点击外链）、`markdown`、
   `video` —— 走和 `image` 一样的"列值 → URL"模型即可。
 * **多预设**：URL 可加 `&rowsPreset=name`，把 `?rows=` 的内容写到本地 IndexedDB 当作
