@@ -44,4 +44,8 @@ export interface StoragesResponse {
 
 export interface ServerInfo {
   hostname: string
+  /// Backend semver from Cargo.toml; surfaced as a fixed bottom-left chip in
+  /// the SPA so it's visible across pages without polling a separate
+  /// endpoint.
+  version: string
 }

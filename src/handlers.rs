@@ -100,11 +100,16 @@ pub struct StoragesResponse {
 #[derive(Debug, Serialize)]
 pub struct ServerInfo {
   pub hostname: String,
+  /// Backend semver from `Cargo.toml`, baked in at compile time. Returning
+  /// it on the same endpoint the frontend already polls keeps this a
+  /// zero-extra-request feature; the SPA renders it as a footer chip.
+  pub version: &'static str,
 }
 
 pub async fn server_info_handler(State(state): State<AppState>) -> Json<ServerInfo> {
   Json(ServerInfo {
     hostname: state.hostname.as_str().to_string(),
+    version: env!("CARGO_PKG_VERSION"),
   })
 }
 

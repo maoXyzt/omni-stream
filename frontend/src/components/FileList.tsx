@@ -414,6 +414,16 @@ export function FileList() {
         </Button>
       )}
 
+      {/* Backend version chip in the bottom-left, fixed so it survives scroll
+          and modal overlays. `pointer-events-none` lets clicks pass through
+          to whatever's underneath (e.g. the sidebar) since the chip is
+          purely informational. */}
+      {serverInfo.data?.version && (
+        <div className="pointer-events-none fixed bottom-2 left-2 z-30 rounded-md border bg-background/70 px-2 py-0.5 font-mono text-[10px] text-muted-foreground/80 shadow-sm backdrop-blur supports-backdrop-filter:bg-background/50">
+          v{serverInfo.data.version}
+        </div>
+      )}
+
       {previewState && (
         <PreviewModal
           fileKey={previewState.key}
