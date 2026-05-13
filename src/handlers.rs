@@ -10,9 +10,7 @@ use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
 
 use crate::error::AppError;
-use crate::storage::factory::{
-  BackendRegistry, InvalidStorageEntry, NamedBackend, StorageDetails,
-};
+use crate::storage::factory::{BackendRegistry, InvalidStorageEntry, NamedBackend, StorageDetails};
 use crate::storage::{FileMeta, GetOptions, ListResult, StorageBackend};
 use crate::thumbs::ThumbState;
 
