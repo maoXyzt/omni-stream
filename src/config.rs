@@ -1,6 +1,6 @@
 use std::env;
 use std::fmt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, anyhow, bail};
 use config::{Config as ConfigBuilder, Environment, File, FileFormat};
@@ -12,6 +12,52 @@ const APP_ORG: &str = "";
 const APP_NAME: &str = "omni-stream";
 const CONFIG_FILE: &str = "config.toml";
 const ENV_PREFIX: &str = "OMNI";
+
+// Embedded at compile time so `omni-stream config init` works on a host where
+// the binary is the only artifact present. The file is also listed in
+// `[package.include]` so the path resolves both in-tree and from a published
+// crates.io tarball.
+const EXAMPLE_CONFIG: &str = include_str!("../config.example.toml");
+
+/// One entry in the config-file lookup order. Listing these (via
+/// [`Config::candidates`]) lets the CLI report where the loader looks and
+/// which one actually wins.
+#[derive(Debug, Clone)]
+pub struct ConfigCandidate {
+  /// Human-readable origin (env var name or platform default).
+  pub label: &'static str,
+  /// Fully resolved on-disk path.
+  pub path: PathBuf,
+}
+
+/// Read an env var, returning `None` when unset *or* set to the empty string.
+/// Empty values usually come from shells (`VAR=` on the command line), and
+/// every consumer here would treat an empty path as garbage — better to
+/// collapse the two cases at the boundary.
+fn env_nonempty(key: &str) -> Option<String> {
+  env::var(key).ok().filter(|s| !s.is_empty())
+}
+
+/// Pure resolver behind [`Config::active_path`] — extracted so unit tests can
+/// exercise the precedence rules without touching process env / filesystem.
+///
+/// `omni_config_set` mirrors `OMNI_CONFIG` being present in the process env.
+/// `exists` is the existence check (real impl uses `Path::is_file`).
+fn pick_active(
+  candidates: &[ConfigCandidate],
+  omni_config_set: bool,
+  exists: impl Fn(&Path) -> bool,
+) -> Option<PathBuf> {
+  if omni_config_set {
+    // OMNI_CONFIG is by construction the first candidate when present. Return
+    // it as-is, even if the file is missing — see Config::active_path docs.
+    return candidates.first().map(|c| c.path.clone());
+  }
+  candidates
+    .iter()
+    .find(|c| exists(&c.path))
+    .map(|c| c.path.clone())
+}
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
@@ -228,34 +274,158 @@ impl fmt::Debug for AuthConfig {
 
 impl Config {
   pub fn load() -> anyhow::Result<Self> {
-    let path = config_file_path();
-    tracing::debug!(path = %path.display(), "loading omni-stream config");
+    let path_opt = Self::active_path();
+    let shown = path_opt
+      .as_ref()
+      .map(|p| p.display().to_string())
+      .unwrap_or_else(|| "<none>".to_string());
 
-    let path_str = path.to_string_lossy().into_owned();
-    let exists = path.is_file();
-
-    let raw = ConfigBuilder::builder()
-      .add_source(
+    let mut builder = ConfigBuilder::builder();
+    if let Some(path) = path_opt.as_ref() {
+      // When `active_path()` returns Some it's already either a verified-
+      // existing file (the common case) or an explicit `OMNI_CONFIG` value
+      // we promised to honour as-given. Mark it required iff it exists, so
+      // an OMNI_CONFIG typo surfaces at validate() time as "no storages"
+      // rather than a crash deep in the loader.
+      let path_str = path.to_string_lossy().into_owned();
+      let exists = path.is_file();
+      builder = builder.add_source(
         File::with_name(&path_str)
           .format(FileFormat::Toml)
           .required(exists),
-      )
+      );
+    }
+
+    let raw = builder
       .add_source(
         Environment::with_prefix(ENV_PREFIX)
           .separator("_")
           .try_parsing(true),
       )
       .build()
-      .with_context(|| format!("load config (file={})", path.display()))?;
+      .with_context(|| format!("load config (file={shown})"))?;
 
     let cfg: Config = raw
       .try_deserialize()
-      .with_context(|| format!("deserialize config: {}", path.display()))?;
+      .with_context(|| format!("deserialize config: {shown}"))?;
 
+    cfg
+      .validate()
+      .with_context(|| format!("validate config: {shown}"))?;
+
+    // Logged at info post-validate (not pre-build) so a successful line means
+    // "this is the file actually serving traffic" — load failures surface via
+    // the anyhow error chain, which already names the path.
+    match path_opt.as_ref() {
+      Some(p) => tracing::info!(path = %p.display(), "loaded omni-stream config"),
+      // Unreachable in practice — validate() bails on "no storages configured"
+      // before we get here — but kept defensive in case a future env-only
+      // config (e.g. via OMNI_STORAGES_*) becomes viable.
+      None => tracing::warn!(
+        "started without a config file — running on env vars + defaults only",
+      ),
+    }
+    Ok(cfg)
+  }
+
+  /// The path the loader will actually read at startup, or `None` if no
+  /// config file is reachable.
+  ///
+  /// Resolution rules:
+  /// - If `OMNI_CONFIG` is set, that path wins **regardless of whether the
+  ///   file exists**. The env var is an explicit user instruction; falling
+  ///   through silently would mask a typo (e.g. `OMNI_CONFIG=/etc/oms.tml`
+  ///   accidentally loading a different file).
+  /// - Otherwise, walk the conventional candidate chain (XDG, ProjectDirs,
+  ///   cwd) and return the first path that exists on disk. Skipping missing
+  ///   intermediate candidates is what users expect — a missing
+  ///   `~/.config/omni-stream/config.toml` should not prevent `./config.toml`
+  ///   from being picked up.
+  /// - If nothing exists and no env override is set, returns `None`. The
+  ///   loader then falls back to env-vars + defaults only (which usually
+  ///   fails `validate()` on "no storages configured").
+  pub fn active_path() -> Option<PathBuf> {
+    pick_active(
+      &Self::candidates(),
+      env_nonempty("OMNI_CONFIG").is_some(),
+      |p| p.is_file(),
+    )
+  }
+
+  /// All paths the CLI considers, in priority order. Deduplicated by resolved
+  /// path so platforms where the XDG default coincides with ProjectDirs don't
+  /// list the same location twice.
+  pub fn candidates() -> Vec<ConfigCandidate> {
+    let mut out: Vec<ConfigCandidate> = Vec::new();
+    fn push(out: &mut Vec<ConfigCandidate>, label: &'static str, path: PathBuf) {
+      if !out.iter().any(|c| c.path == path) {
+        out.push(ConfigCandidate { label, path });
+      }
+    }
+
+    if let Some(p) = env_nonempty("OMNI_CONFIG") {
+      push(&mut out, "$OMNI_CONFIG", PathBuf::from(p));
+    }
+    match env_nonempty("XDG_CONFIG_HOME") {
+      Some(xdg) => push(
+        &mut out,
+        "$XDG_CONFIG_HOME/omni-stream/config.toml",
+        PathBuf::from(xdg).join(APP_NAME).join(CONFIG_FILE),
+      ),
+      None => {
+        if let Some(home) = env_nonempty("HOME") {
+          push(
+            &mut out,
+            "~/.config/omni-stream/config.toml",
+            PathBuf::from(home)
+              .join(".config")
+              .join(APP_NAME)
+              .join(CONFIG_FILE),
+          );
+        }
+      }
+    }
+    if let Some(dirs) = ProjectDirs::from(APP_QUALIFIER, APP_ORG, APP_NAME) {
+      push(
+        &mut out,
+        "ProjectDirs (platform default)",
+        dirs.config_dir().join(CONFIG_FILE),
+      );
+    }
+    push(&mut out, "./config.toml", PathBuf::from(CONFIG_FILE));
+
+    out
+  }
+
+  /// Parse + validate a specific config file. Skips env-var layering on
+  /// purpose: `config check` is "does this file alone make sense", not "would
+  /// the running server start". Bails when the path doesn't exist so the user
+  /// gets a clear error instead of a silently-applied empty config.
+  pub fn check(path: &Path) -> anyhow::Result<Self> {
+    if !path.is_file() {
+      bail!("config file not found: {}", path.display());
+    }
+    let path_str = path.to_string_lossy().into_owned();
+    let raw = ConfigBuilder::builder()
+      .add_source(
+        File::with_name(&path_str)
+          .format(FileFormat::Toml)
+          .required(true),
+      )
+      .build()
+      .with_context(|| format!("load config (file={})", path.display()))?;
+    let cfg: Config = raw
+      .try_deserialize()
+      .with_context(|| format!("deserialize config: {}", path.display()))?;
     cfg
       .validate()
       .with_context(|| format!("validate config: {}", path.display()))?;
     Ok(cfg)
+  }
+
+  /// The starter template `config init` writes. Compile-time embedded.
+  pub fn example_template() -> &'static str {
+    EXAMPLE_CONFIG
   }
 
   fn validate(&self) -> anyhow::Result<()> {
@@ -313,19 +483,6 @@ impl Config {
       .find(|s| s.active)
       .or_else(|| self.storages.first())
   }
-}
-
-fn config_file_path() -> PathBuf {
-  if let Ok(p) = env::var("OMNI_CONFIG") {
-    return PathBuf::from(p);
-  }
-  if let Ok(xdg) = env::var("XDG_CONFIG_HOME") {
-    return PathBuf::from(xdg).join(APP_NAME).join(CONFIG_FILE);
-  }
-  if let Some(dirs) = ProjectDirs::from(APP_QUALIFIER, APP_ORG, APP_NAME) {
-    return dirs.config_dir().join(CONFIG_FILE);
-  }
-  PathBuf::from(CONFIG_FILE)
 }
 
 #[cfg(test)]
@@ -544,6 +701,94 @@ local = { root_path = "~/data/foo" }
     assert_eq!(expand_tilde("/var/data"), PathBuf::from("/var/data"));
     // Leading "~user" is not expanded (we don't resolve other users).
     assert_eq!(expand_tilde("~other/data"), PathBuf::from("~other/data"));
+  }
+
+  #[test]
+  fn check_validates_example_file() {
+    let cfg = Config::check(Path::new("config.example.toml")).expect("check example");
+    assert!(!cfg.storages.is_empty());
+  }
+
+  #[test]
+  fn check_reports_missing_file() {
+    let err = Config::check(Path::new("/nonexistent/omni-stream/config.toml"))
+      .expect_err("should fail");
+    assert!(err.to_string().contains("config file not found"), "{err}");
+  }
+
+  #[test]
+  fn embedded_example_matches_on_disk() {
+    let on_disk = std::fs::read_to_string("config.example.toml").expect("read example");
+    assert_eq!(Config::example_template(), on_disk);
+  }
+
+  #[test]
+  fn pick_active_skips_missing_candidates_when_no_env_override() {
+    let cands = vec![
+      ConfigCandidate {
+        label: "first",
+        path: PathBuf::from("/missing/a"),
+      },
+      ConfigCandidate {
+        label: "second",
+        path: PathBuf::from("/exists/b"),
+      },
+      ConfigCandidate {
+        label: "third",
+        path: PathBuf::from("/exists/c"),
+      },
+    ];
+    let exists = |p: &Path| p.starts_with("/exists");
+    assert_eq!(
+      pick_active(&cands, false, exists),
+      Some(PathBuf::from("/exists/b")),
+      "first existing candidate wins",
+    );
+  }
+
+  #[test]
+  fn pick_active_returns_none_when_nothing_exists() {
+    let cands = vec![ConfigCandidate {
+      label: "only",
+      path: PathBuf::from("/m/a"),
+    }];
+    assert_eq!(pick_active(&cands, false, |_| false), None);
+  }
+
+  #[test]
+  fn pick_active_honors_omni_config_even_when_missing() {
+    let cands = vec![
+      ConfigCandidate {
+        label: "$OMNI_CONFIG",
+        path: PathBuf::from("/missing-but-explicit"),
+      },
+      ConfigCandidate {
+        label: "fallback",
+        path: PathBuf::from("/exists/fallback"),
+      },
+    ];
+    let exists = |p: &Path| p == Path::new("/exists/fallback");
+    assert_eq!(
+      pick_active(&cands, true, exists),
+      Some(PathBuf::from("/missing-but-explicit")),
+      "OMNI_CONFIG must not silently fall through — typos surface clearly",
+    );
+  }
+
+  #[test]
+  fn pick_active_empty_candidates_returns_none() {
+    assert_eq!(pick_active(&[], false, |_| true), None);
+    assert_eq!(pick_active(&[], true, |_| true), None);
+  }
+
+  #[test]
+  fn candidates_always_include_cwd_fallback() {
+    let cands = Config::candidates();
+    assert!(!cands.is_empty(), "candidates must never be empty");
+    assert!(
+      cands.iter().any(|c| c.path == PathBuf::from("config.toml")),
+      "cwd fallback ./config.toml must be present: {cands:?}",
+    );
   }
 
   #[test]

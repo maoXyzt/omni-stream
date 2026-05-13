@@ -121,6 +121,26 @@ OMNI_AUTH_ENABLED=true OMNI_AUTH_TOKEN=$(openssl rand -hex 32) ./omni-stream
 - TLS 不在本进程职责范围内。要暴露到不信任网络，请在前面挡 nginx / caddy /
   Cloudflare 反代，让其负责 HTTPS。
 
+### 配置文件 CLI
+
+不想手动复制 `config.example.toml` 的话，二进制自带三个 `config` 子命令：
+
+```bash
+# 按优先级列出所有候选位置，并标出当前命中的那一份
+omni-stream config list
+
+# 把内嵌的 config.example.toml 写到候选位置之一（交互式选择，含「自定义路径」选项）
+omni-stream config init
+
+# 解析 + 校验。缺字段 / 类型错 / storages 为空都会指出来。
+# 不带路径就检查当前命中那份；也可以显式传一个文件路径。
+omni-stream config check
+omni-stream config check ./my-config.toml
+```
+
+`config init` 写出的模板就是仓库里的 `config.example.toml`，已在编译期通过
+`include_str!` 嵌入二进制，不依赖任何外部文件。
+
 ## 3. 启动
 
 走 `cargo install` 装的话，`omni-stream` 已经在 `$PATH` 里，直接：
