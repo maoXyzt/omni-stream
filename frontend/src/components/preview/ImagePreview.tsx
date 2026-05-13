@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Maximize, ZoomIn, ZoomOut } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
@@ -7,6 +7,8 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { useFileStat } from '@/hooks/use-storage'
+import { formatBytes } from '@/lib/format'
 
 import { PreviewSpinner } from './PreviewSpinner'
 import type { PreviewerProps } from './types'
@@ -17,7 +19,14 @@ const ZOOM_STEP = 1.25
 const ZOOM_MIN = 0.05
 const ZOOM_MAX = 16
 
-export function ImagePreview({ fileKey, src }: PreviewerProps) {
+export function ImagePreview({ fileKey, src, storage }: PreviewerProps) {
+  // File metadata for the corner overlay (resolution + size). `meta?.size`
+  // is the byte count from `/api/stat`; resolution comes from the image's
+  // natural dimensions after `onLoad`. Two independent sources because the
+  // image is decoded by the browser, not the backend — we don't have the
+  // pixel count until the bytes have actually been rendered.
+  const { data: meta } = useFileStat(fileKey, storage)
+
   const [zoom, setZoom] = useState<Zoom>('fit')
   const [natural, setNatural] = useState<{ w: number; h: number } | null>(null)
   const [loaded, setLoaded] = useState(false)
@@ -82,6 +91,53 @@ export function ImagePreview({ fileKey, src }: PreviewerProps) {
     setLoaded(true)
   }
 
+  // --- Grab-to-pan -------------------------------------------------------
+  //
+  // Active only in the scroll wrapper (rendered when `!isFit`); the wrapper
+  // already paginates the over-sized image with native scrollbars, so we
+  // just translate pointer drag into scroll-position writes. Pointer capture
+  // keeps events flowing if the cursor leaves the wrapper mid-drag.
+  //
+  // Mouse-only on purpose: touch / pen devices already pan via the wrapper's
+  // native scroll + pinch, and overriding `touch-action` would break that.
+  const dragRef = useRef<{
+    startX: number
+    startY: number
+    scrollLeft: number
+    scrollTop: number
+  } | null>(null)
+
+  const onPanPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.pointerType !== 'mouse' || e.button !== 0) return
+    // Skip clicks that landed on the wrapper element itself — that's the
+    // scrollbar. Letting the browser handle scrollbar drags directly is
+    // simpler than fighting pointer capture against the native behavior.
+    if (e.target === e.currentTarget) return
+    const el = e.currentTarget
+    el.setPointerCapture(e.pointerId)
+    dragRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      scrollLeft: el.scrollLeft,
+      scrollTop: el.scrollTop,
+    }
+  }
+
+  const onPanPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current
+    if (!drag) return
+    const el = e.currentTarget
+    el.scrollLeft = drag.scrollLeft - (e.clientX - drag.startX)
+    el.scrollTop = drag.scrollTop - (e.clientY - drag.startY)
+  }
+
+  const onPanPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    dragRef.current = null
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId)
+    }
+  }
+
   return (
     <div className="relative h-full w-full overflow-hidden rounded-md bg-muted/30">
       {!loaded && <PreviewSpinner />}
@@ -99,7 +155,17 @@ export function ImagePreview({ fileKey, src }: PreviewerProps) {
           />
         </div>
       ) : (
-        <div className="h-full w-full overflow-auto">
+        // `active:cursor-grabbing` swaps the cursor for the full duration of
+        // the drag (CSS `:active` is true between pointerdown and pointerup),
+        // so we don't need React state for that. `select-none` prevents the
+        // browser from highlighting the image / inner div mid-drag.
+        <div
+          className="h-full w-full cursor-grab select-none overflow-auto active:cursor-grabbing"
+          onPointerDown={onPanPointerDown}
+          onPointerMove={onPanPointerMove}
+          onPointerUp={onPanPointerUp}
+          onPointerCancel={onPanPointerUp}
+        >
           <div className="flex min-h-full min-w-full items-center justify-center p-2">
             <img
               src={src}
@@ -165,8 +231,29 @@ export function ImagePreview({ fileKey, src }: PreviewerProps) {
           </TooltipTrigger>
           <TooltipContent>Original resolution</TooltipContent>
         </Tooltip>
-        <span className="px-1 font-mono text-xs tabular-nums text-muted-foreground">
-          {zoomLabel(zoom, natural)}
+        {/* Only the numeric zoom level lives in the toolbar now — it's a
+            property of the toolbar's current state. Fit mode is already
+            indicated by the highlighted Maximize button, so showing "Fit"
+            here would just duplicate that signal. */}
+        {!isFit && (
+          <span className="px-1 font-mono text-xs tabular-nums text-muted-foreground">
+            {Math.round((scale ?? 1) * 100)}%
+          </span>
+        )}
+      </div>
+
+      {/* Bottom-left metadata overlay — same chrome as the toolbar so the
+          two pills feel like a matched pair. Resolution waits on the image
+          to load (natural dimensions); file size waits on /api/stat. We
+          render either dash when the data isn't ready yet rather than
+          gating the whole overlay, so the layout doesn't pop in. */}
+      <div className="absolute bottom-2 left-2 flex items-center gap-2 rounded-md border bg-background/90 px-2 py-1 font-mono text-xs text-muted-foreground shadow-sm backdrop-blur supports-backdrop-filter:bg-background/70">
+        <span className="tabular-nums">
+          {natural ? `${natural.w}×${natural.h}` : '—'}
+        </span>
+        <span className="text-muted-foreground/50">·</span>
+        <span className="tabular-nums">
+          {meta?.size !== undefined ? formatBytes(meta.size) : '—'}
         </span>
       </div>
     </div>
@@ -186,9 +273,4 @@ function Kbd({ children }: { children: React.ReactNode }) {
 
 function clamp(scale: number): number {
   return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, scale))
-}
-
-function zoomLabel(zoom: Zoom, natural: { w: number; h: number } | null): string {
-  if (zoom === 'fit') return natural ? `${natural.w}×${natural.h}` : '…'
-  return `${Math.round(zoom * 100)}%`
 }
