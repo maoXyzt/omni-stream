@@ -19,6 +19,7 @@ import {
   type ParquetSource,
   readParquetRows,
 } from '@/lib/parquet'
+import { RowCard, RowNode } from '@/components/preview/rows-render'
 
 const ROWS_PAGE = 20
 
@@ -38,16 +39,15 @@ interface RowsViewProps {
   storage?: string
 }
 
-// fileKey and storage are unused while the renderer is being rebuilt; they
-// flow back in once the widget components land.
 export function RowsView({
-  fileKey: _fileKey,
+  fileKey,
   source,
   columns,
   numRows,
-  storage: _storage,
+  storage,
 }: RowsViewProps) {
   const { rules, decodeError, setRules } = useRowsViewConfig()
+  const renderCtx = useMemo(() => ({ fileKey, storage }), [fileKey, storage])
 
   const [rows, setRows] = useState<Record<string, unknown>[]>([])
   const [nextRowStart, setNextRowStart] = useState(0)
@@ -146,50 +146,17 @@ export function RowsView({
           <EmptyState onOpenRules={() => setDialogOpen(true)} />
         ) : (
           <div className="flex flex-col gap-4">
-            {/*
-              The renderer is being rebuilt to consume the new node tree
-              (selectors + widgets + containers). Until those land we show
-              the canonical config alongside the raw row data so the URL
-              round-trip stays verifiable end-to-end.
-            */}
-            <Alert>
-              <AlertTitle>Renderer not yet wired up</AlertTitle>
-              <AlertDescription>
-                The schema parses your rules and the editor round-trips through
-                the URL. The widget renderer is the next milestone. Below: the
-                canonical rule tree and the first {ROWS_PAGE} raw rows.
-              </AlertDescription>
-            </Alert>
-
-            <section>
-              <h4 className="mb-1 text-xs font-medium text-muted-foreground">
-                Parsed rule tree ({rules.length} top-level node{rules.length === 1 ? '' : 's'})
-              </h4>
-              <pre className="overflow-auto rounded-md border bg-muted/30 p-3 font-mono text-xs">
-                {JSON.stringify(rules, null, 2)}
-              </pre>
-            </section>
-
-            <section>
-              <h4 className="mb-1 text-xs font-medium text-muted-foreground">
-                Raw rows
-              </h4>
-              {loading && rows.length === 0 ? (
-                <RowSkeletons count={3} />
-              ) : (
-                <div className="flex flex-col gap-3">
-                  {rows.map((row, i) => (
-                    <pre
-                      key={i}
-                      className="overflow-auto rounded-md border bg-card p-3 font-mono text-xs"
-                    >
-                      {JSON.stringify(row, jsonReplacer, 2)}
-                    </pre>
+            {loading && rows.length === 0 ? (
+              <RowSkeletons count={3} ruleCount={rules.length} />
+            ) : (
+              rows.map((row, i) => (
+                <RowCard key={i} index={i}>
+                  {rules.map((node, j) => (
+                    <RowNode key={j} node={node} row={row} ctx={renderCtx} />
                   ))}
-                </div>
-              )}
-            </section>
-
+                </RowCard>
+              ))
+            )}
             {error && (
               <Alert variant="destructive">
                 <AlertCircle className="size-4" />
@@ -257,13 +224,20 @@ function EmptyState({ onOpenRules }: { onOpenRules: () => void }) {
   )
 }
 
-function RowSkeletons({ count }: { count: number }) {
+function RowSkeletons({ count, ruleCount }: { count: number; ruleCount: number }) {
   return (
-    <div className="flex flex-col gap-3">
+    <>
       {Array.from({ length: count }).map((_, i) => (
-        <Skeleton key={i} className="h-24 w-full" />
+        <div key={i} className="rounded-md border bg-card">
+          <Skeleton className="h-6 w-32 rounded-none rounded-t-md" />
+          <div className="flex flex-col gap-3 p-3">
+            {Array.from({ length: ruleCount }).map((__, j) => (
+              <Skeleton key={j} className="h-16 w-full" />
+            ))}
+          </div>
+        </div>
       ))}
-    </div>
+    </>
   )
 }
 
@@ -375,13 +349,4 @@ function RulesDialog({ open, rules, columns, onClose, onSave }: RulesDialogProps
 function describeError(err: unknown): string {
   if (err instanceof Error) return err.message
   return String(err)
-}
-
-// JSON.stringify replacer for the raw-rows placeholder dump — keeps
-// bigint / Uint8Array / Date legible without exploding.
-function jsonReplacer(_key: string, v: unknown): unknown {
-  if (typeof v === 'bigint') return v.toString()
-  if (v instanceof Uint8Array) return `<binary ${v.byteLength}B>`
-  if (v instanceof Date) return v.toISOString()
-  return v
 }
