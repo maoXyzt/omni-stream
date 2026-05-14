@@ -1,12 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import {
-  AlertCircle,
-  ImageOff,
-  Loader2,
-  Settings2,
-} from 'lucide-react'
+import { AlertCircle, Loader2, Settings2 } from 'lucide-react'
 
-import { proxyUrl } from '@/api/storage'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import {
@@ -17,25 +11,23 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Skeleton } from '@/components/ui/skeleton'
-import {
-  type Rule,
-  useRowsViewConfig,
-  validateRules,
-} from '@/hooks/use-rows-view-config'
+import { useRowsViewConfig } from '@/hooks/use-rows-view-config'
+import { type Node, parseRules } from '@/lib/rows-schema'
 import { cn } from '@/lib/utils'
 import {
   type ParquetColumnInfo,
   type ParquetSource,
-  formatCell,
   readParquetRows,
 } from '@/lib/parquet'
 
 const ROWS_PAGE = 20
 
+// Sugar-form example with the most common building blocks: text atom, image
+// with a literal cell value, image with a `src` template, and a row container.
 const EXAMPLE_RULES = `[
-  { "column": "prompt", "kind": "text" },
-  { "column": "image", "kind": "image", "pathPrefix": "./" },
-  { "column": "image_edit", "kind": "image", "pathPrefix": "../edits/" }
+  "prompt",
+  { "image": "image" },
+  { "image": "image_edit", "src": "../edits/{value}" }
 ]`
 
 interface RowsViewProps {
@@ -46,7 +38,15 @@ interface RowsViewProps {
   storage?: string
 }
 
-export function RowsView({ fileKey, source, columns, numRows, storage }: RowsViewProps) {
+// fileKey and storage are unused while the renderer is being rebuilt; they
+// flow back in once the widget components land.
+export function RowsView({
+  fileKey: _fileKey,
+  source,
+  columns,
+  numRows,
+  storage: _storage,
+}: RowsViewProps) {
   const { rules, decodeError, setRules } = useRowsViewConfig()
 
   const [rows, setRows] = useState<Record<string, unknown>[]>([])
@@ -86,8 +86,6 @@ export function RowsView({ fileKey, source, columns, numRows, storage }: RowsVie
         setLoading(false)
       })
   }, [source, numRows])
-
-  const columnSet = useMemo(() => new Set(columns.map((c) => c.name)), [columns])
 
   const hasMore = nextRowStart < numRows
 
@@ -148,21 +146,50 @@ export function RowsView({ fileKey, source, columns, numRows, storage }: RowsVie
           <EmptyState onOpenRules={() => setDialogOpen(true)} />
         ) : (
           <div className="flex flex-col gap-4">
-            {loading && rows.length === 0 ? (
-              <RowSkeletons count={3} ruleCount={rules.length} />
-            ) : (
-              rows.map((row, i) => (
-                <RowCard
-                  key={i}
-                  index={i}
-                  row={row}
-                  rules={rules}
-                  columnSet={columnSet}
-                  fileKey={fileKey}
-                  storage={storage}
-                />
-              ))
-            )}
+            {/*
+              The renderer is being rebuilt to consume the new node tree
+              (selectors + widgets + containers). Until those land we show
+              the canonical config alongside the raw row data so the URL
+              round-trip stays verifiable end-to-end.
+            */}
+            <Alert>
+              <AlertTitle>Renderer not yet wired up</AlertTitle>
+              <AlertDescription>
+                The schema parses your rules and the editor round-trips through
+                the URL. The widget renderer is the next milestone. Below: the
+                canonical rule tree and the first {ROWS_PAGE} raw rows.
+              </AlertDescription>
+            </Alert>
+
+            <section>
+              <h4 className="mb-1 text-xs font-medium text-muted-foreground">
+                Parsed rule tree ({rules.length} top-level node{rules.length === 1 ? '' : 's'})
+              </h4>
+              <pre className="overflow-auto rounded-md border bg-muted/30 p-3 font-mono text-xs">
+                {JSON.stringify(rules, null, 2)}
+              </pre>
+            </section>
+
+            <section>
+              <h4 className="mb-1 text-xs font-medium text-muted-foreground">
+                Raw rows
+              </h4>
+              {loading && rows.length === 0 ? (
+                <RowSkeletons count={3} />
+              ) : (
+                <div className="flex flex-col gap-3">
+                  {rows.map((row, i) => (
+                    <pre
+                      key={i}
+                      className="overflow-auto rounded-md border bg-card p-3 font-mono text-xs"
+                    >
+                      {JSON.stringify(row, jsonReplacer, 2)}
+                    </pre>
+                  ))}
+                </div>
+              )}
+            </section>
+
             {error && (
               <Alert variant="destructive">
                 <AlertCircle className="size-4" />
@@ -218,9 +245,8 @@ function EmptyState({ onOpenRules }: { onOpenRules: () => void }) {
       <div className="max-w-md rounded-md border bg-muted/30 p-6 text-center">
         <h3 className="text-base font-medium">No rules configured</h3>
         <p className="mt-2 text-sm text-muted-foreground">
-          Map columns to widgets to browse rows as cards. Each rule picks a
-          column and a display kind (text or image). Rules live in the URL —
-          share the link to share the view.
+          Describe how each row should be laid out using the rules editor.
+          Rules live in the URL — share the link to share the view.
         </p>
         <Button className="mt-4" onClick={onOpenRules}>
           <Settings2 className="size-4" />
@@ -231,239 +257,22 @@ function EmptyState({ onOpenRules }: { onOpenRules: () => void }) {
   )
 }
 
-interface RowCardProps {
-  index: number
-  row: Record<string, unknown>
-  rules: Rule[]
-  columnSet: Set<string>
-  fileKey: string
-  storage?: string
-}
-
-function RowCard({ index, row, rules, columnSet, fileKey, storage }: RowCardProps) {
+function RowSkeletons({ count }: { count: number }) {
   return (
-    <div className="rounded-md border bg-card">
-      <div className="border-b bg-muted/40 px-3 py-1.5 font-mono text-xs text-muted-foreground tabular-nums">
-        row {(index + 1).toLocaleString()}
-      </div>
-      <div className="flex flex-col gap-3 p-3">
-        {rules.map((rule, i) => {
-          const present = columnSet.has(rule.column)
-          return (
-            <div key={i} className="flex flex-col gap-1">
-              <div className="flex items-baseline gap-2">
-                <span className="font-mono text-xs text-muted-foreground">
-                  {rule.label ?? rule.column}
-                </span>
-                {rule.label && (
-                  <span className="font-mono text-[10px] text-muted-foreground/60">
-                    ({rule.column})
-                  </span>
-                )}
-              </div>
-              {!present ? (
-                <MissingColumnHint column={rule.column} />
-              ) : rule.kind === 'text' ? (
-                <TextWidget value={row[rule.column]} />
-              ) : (
-                <ImageWidget
-                  value={row[rule.column]}
-                  pathPrefix={rule.pathPrefix ?? './'}
-                  fileKey={fileKey}
-                  storage={storage}
-                />
-              )}
-            </div>
-          )
-        })}
-      </div>
-    </div>
-  )
-}
-
-function MissingColumnHint({ column }: { column: string }) {
-  return (
-    <div className="rounded-md border border-dashed bg-muted/20 px-3 py-2 text-xs italic text-muted-foreground">
-      column <span className="font-mono">"{column}"</span> not in this file
-    </div>
-  )
-}
-
-function TextWidget({ value }: { value: unknown }) {
-  const text = formatCell(value)
-  if (text === '') {
-    return (
-      <div className="rounded-md border border-dashed bg-muted/20 px-3 py-2 text-xs italic text-muted-foreground">
-        empty
-      </div>
-    )
-  }
-  return (
-    <pre className="max-h-72 overflow-auto rounded-md border bg-muted/30 p-3 font-mono text-xs whitespace-pre-wrap break-words selection:bg-primary/20">
-      {text}
-    </pre>
-  )
-}
-
-interface ImageWidgetProps {
-  value: unknown
-  pathPrefix: string
-  fileKey: string
-  storage?: string
-}
-
-function ImageWidget({ value, pathPrefix, fileKey, storage }: ImageWidgetProps) {
-  const [failed, setFailed] = useState(false)
-  const path = imagePathFromValue(value)
-
-  // Resolution treats `pathPrefix + value` as a path relative to the parquet
-  // file's own directory: `./` keeps the parquet's dir, `../` walks up. Going
-  // above storage root surfaces an error here instead of an opaque 404 from
-  // the proxy. See `resolveStorageKey` for the rules.
-  const resolved = useMemo(() => {
-    if (!path) return null
-    return resolveStorageKey(fileKey, pathPrefix, path)
-  }, [fileKey, pathPrefix, path])
-
-  const url =
-    resolved && resolved.ok ? proxyUrl(resolved.key, storage) : null
-
-  // Reset the error flag whenever the resolved URL changes — otherwise a row
-  // that recycled a previously-failed cell would stay stuck on the fallback.
-  useEffect(() => {
-    setFailed(false)
-  }, [url])
-
-  if (!path) {
-    return (
-      <div className="rounded-md border border-dashed bg-muted/20 px-3 py-2 text-xs italic text-muted-foreground">
-        no image path
-      </div>
-    )
-  }
-  if (resolved && !resolved.ok) {
-    return (
-      <div className="flex items-start gap-2 rounded-md border border-dashed border-destructive/40 bg-destructive/5 px-3 py-2 text-xs italic text-destructive">
-        <AlertCircle className="mt-0.5 size-4 shrink-0" />
-        <span>
-          {resolved.error}: <span className="font-mono not-italic">{pathPrefix + path}</span>
-        </span>
-      </div>
-    )
-  }
-  if (!url) return null
-  if (failed) {
-    return (
-      <div className="flex items-center gap-2 rounded-md border border-dashed bg-muted/20 px-3 py-2 text-xs italic text-muted-foreground">
-        <ImageOff className="size-4" />
-        failed to load <span className="font-mono not-italic">{resolved!.key}</span>
-      </div>
-    )
-  }
-  return (
-    <div className="overflow-hidden rounded-md border bg-muted/30">
-      <img
-        src={url}
-        alt={resolved!.key}
-        onError={() => setFailed(true)}
-        className="max-h-96 w-auto max-w-full object-contain"
-        loading="lazy"
-      />
-    </div>
-  )
-}
-
-type ResolveResult =
-  | { ok: true; key: string }
-  | { ok: false; error: string }
-
-/// Resolve `prefix + value` into an absolute storage key, anchored at the
-/// parquet file's own directory.
-///
-/// Rules:
-/// * The combined `prefix + value` is treated as a single path string.
-/// * Leading `/` ⇒ absolute from storage root. Otherwise relative to the
-///   parquet file's parent directory.
-/// * `.` segments are dropped, `..` segments pop one directory off the stack.
-/// * Popping past the storage root is rejected — we never want a rendered
-///   parquet to be able to coerce the proxy into reading paths outside the
-///   storage's wildcard scope. The backend would refuse anyway, but failing
-///   early gives the user a meaningful error in place of an opaque 404.
-function resolveStorageKey(
-  parquetKey: string,
-  prefix: string,
-  value: string,
-): ResolveResult {
-  const combined = (prefix ?? '') + value
-  if (combined.length === 0) {
-    return { ok: false, error: 'empty image path' }
-  }
-  const isAbsolute = combined.startsWith('/')
-  let stack: string[]
-  if (isAbsolute) {
-    stack = []
-  } else {
-    // Parent directory of the parquet file: drop the last slash-segment.
-    const parts = parquetKey.split('/').filter((s) => s.length > 0)
-    parts.pop()
-    stack = parts
-  }
-  for (const seg of combined.split('/')) {
-    if (seg === '' || seg === '.') continue
-    if (seg === '..') {
-      if (stack.length === 0) {
-        return { ok: false, error: 'path escapes storage root' }
-      }
-      stack.pop()
-      continue
-    }
-    stack.push(seg)
-  }
-  if (stack.length === 0) {
-    return { ok: false, error: 'path resolves to storage root with no file' }
-  }
-  return { ok: true, key: stack.join('/') }
-}
-
-// Pull a usable path out of whatever the cell holds. Parquet image columns
-// are typically plain strings, but some pipelines wrap them in `{path: ...}`
-// or `{uri: ...}` structs — try a couple of common shapes before giving up.
-function imagePathFromValue(value: unknown): string | null {
-  if (value === null || value === undefined) return null
-  if (typeof value === 'string') return value.length > 0 ? value : null
-  if (typeof value === 'object' && value !== null) {
-    const v = value as Record<string, unknown>
-    for (const key of ['path', 'uri', 'url', 'src']) {
-      const candidate = v[key]
-      if (typeof candidate === 'string' && candidate.length > 0) return candidate
-    }
-  }
-  return null
-}
-
-function RowSkeletons({ count, ruleCount }: { count: number; ruleCount: number }) {
-  return (
-    <>
+    <div className="flex flex-col gap-3">
       {Array.from({ length: count }).map((_, i) => (
-        <div key={i} className="rounded-md border bg-card">
-          <Skeleton className="h-6 w-32 rounded-none rounded-t-md" />
-          <div className="flex flex-col gap-3 p-3">
-            {Array.from({ length: ruleCount }).map((__, j) => (
-              <Skeleton key={j} className="h-16 w-full" />
-            ))}
-          </div>
-        </div>
+        <Skeleton key={i} className="h-24 w-full" />
       ))}
-    </>
+    </div>
   )
 }
 
 interface RulesDialogProps {
   open: boolean
-  rules: Rule[]
+  rules: Node[]
   columns: ParquetColumnInfo[]
   onClose: () => void
-  onSave: (next: Rule[]) => void
+  onSave: (next: Node[]) => void
 }
 
 function RulesDialog({ open, rules, columns, onClose, onSave }: RulesDialogProps) {
@@ -492,7 +301,7 @@ function RulesDialog({ open, rules, columns, onClose, onSave }: RulesDialogProps
       setValidationError(`invalid JSON: ${err instanceof Error ? err.message : String(err)}`)
       return
     }
-    const result = validateRules(parsed)
+    const result = parseRules(parsed)
     if (result.error) {
       setValidationError(result.error)
       return
@@ -514,9 +323,12 @@ function RulesDialog({ open, rules, columns, onClose, onSave }: RulesDialogProps
         </DialogHeader>
 
         <p className="text-xs text-muted-foreground">
-          JSON array of rules. Each rule: <span className="font-mono">{'{"column": "...", "kind": "text" | "image", "label"?: "...", "pathPrefix"?: "..."}'}</span>.
-          Image cells resolve <span className="font-mono">pathPrefix + value</span> relative to this parquet file's directory
-          (<span className="font-mono">./</span> by default, <span className="font-mono">../</span> walks up one level; leading <span className="font-mono">/</span> is absolute from storage root).
+          JSON array of rule nodes. Sugar form is accepted (e.g.{' '}
+          <span className="font-mono">"col"</span> for a text atom,{' '}
+          <span className="font-mono">{'{ "image": "col" }'}</span> for an
+          image, <span className="font-mono">{'{ "row": [...] }'}</span> for a
+          container). See <span className="font-mono">docs/parquet_rows_view_user_guide.md</span>
+          {' '}for the full spec.
         </p>
 
         <textarea
@@ -563,4 +375,13 @@ function RulesDialog({ open, rules, columns, onClose, onSave }: RulesDialogProps
 function describeError(err: unknown): string {
   if (err instanceof Error) return err.message
   return String(err)
+}
+
+// JSON.stringify replacer for the raw-rows placeholder dump — keeps
+// bigint / Uint8Array / Date legible without exploding.
+function jsonReplacer(_key: string, v: unknown): unknown {
+  if (typeof v === 'bigint') return v.toString()
+  if (v instanceof Uint8Array) return `<binary ${v.byteLength}B>`
+  if (v instanceof Date) return v.toISOString()
+  return v
 }

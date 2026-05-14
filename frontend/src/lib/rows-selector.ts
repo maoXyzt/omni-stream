@@ -74,13 +74,9 @@ class Parser {
     // Backtick is the JSON-friendly form: column names with dots / spaces /
     // other special chars don't need double escaping inside the JSON.
     const rootAt = this.pos
-    let column: string | null = null
     const c0 = this.peek()
-    if (c0 === '"' || c0 === '`') {
-      column = this.readQuotedString(c0)
-    } else {
-      column = this.readIdent()
-    }
+    const column =
+      c0 === '"' || c0 === '`' ? this.readQuotedString(c0) : this.readIdent()
     if (column === null) {
       throw new SelectorError(
         this.pos,
@@ -247,7 +243,7 @@ class Parser {
   tryReadInt(): number | null {
     const start = this.pos
     if (this.peek() === '-') this.pos++
-    let digitStart = this.pos
+    const digitStart = this.pos
     while (this.pos < this.src.length && isDigit(this.src[this.pos]!)) {
       this.pos++
     }
