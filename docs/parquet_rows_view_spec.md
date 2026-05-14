@@ -117,16 +117,17 @@ images.[abc:5]: slice bounds must be integers (col 8)
 |--------|------|------|
 | `default` | `formatCell` 风格的纯文本；primitive 原样，object/list 走多行布局；与表格 Data tab 一致 | `maxHeight` |
 | `highlight` | `highlight.js` 语法高亮 | `lang` (必填), `maxHeight` |
-| `image` | `<img>`；value 是 path 字符串，或 `{path|uri|url|src}` 的 object | `pathPrefix` |
-| `video` | `<video controls>`，支持 Range | `pathPrefix` |
-| `audio` | `<audio controls>` | `pathPrefix` |
-| `link` | `<a href>`，URL 与显示文本一致 | `pathPrefix` |
+| `image` | `<img>`；value 是 path 字符串，或 `{path|uri|url|src}` 的 object | `src` |
+| `video` | `<video controls>`，支持 Range | `src` |
+| `audio` | `<audio controls>` | `src` |
+| `link` | `<a href>`，URL 与显示文本一致 | `src` |
 | `markdown` | 最小 markdown 子集（粗/斜/标题/列表/inline code/链接），渲染前 DOMPurify 净化 | `maxHeight` |
 
 * `default` 覆盖纯文本 / 原始字符串 / 美化 JSON 三种用例：对 object/array value 自动走 `formatCellExpanded`。
 * `highlight` 的 `lang` 必填，typical values：`json`, `python`, `typescript`, `sql`, `bash`, `yaml`, `markdown`, `html`。未注册的 `lang` 退化为纯文本。
 * `markdown` 实现约束：使用 `marked` (或等价) 解析 → `DOMPurify` 净化 → 注入 DOM。**GFM 表格 / fenced code 语法高亮均不启用**（要语法高亮请直接用 `highlight` widget；要表格暂时用 `default` 看 raw JSON）；不允许 raw HTML、`<script>` / `<iframe>` / 事件属性等任何脚本注入面。
-* path 解析（image/video/audio/link）：`resolveStorageKey(pathPrefix + value)` 锚到**源数据文件所在目录**（无论该文件是 parquet / jsonl / 其他行式格式），`..` 弹栈不可越过 storage root。
+* **`src` URL 模板**（image/video/audio/link 共用）：字符串里的 `{value}` 在渲染期替换成 cell 值，其余字符原样；其他 `{...}` 序列不识别，留作字面量。缺省 `src` 是 `"{value}"`（cell 值直接当路径）。渲染好的字符串再走 `resolveStorageKey`，锚到**源数据文件所在目录**（无论 parquet / jsonl / 其他行式格式），`..` 弹栈不可越过 storage root。
+  典型用法：`{value}` 直用 / `./images/{value}` 移到 sibling 目录 / `https://cdn/{value}.png` 拼远程 URL。
 
 ---
 
@@ -158,7 +159,7 @@ interface AtomNode extends BaseNode {
   show?: Widget
   /// widget 选项
   lang?: string        // highlight (必填)
-  pathPrefix?: string  // image / video / audio / link
+  src?: string         // image / video / audio / link — URL/path 模板，{value} 占位，缺省 "{value}"
   maxHeight?: string   // default / highlight / markdown
   /// selector 含 `.[*]` 时，多元素之间怎么排
   layout?: 'column' | 'row' | 'grid'
@@ -194,7 +195,7 @@ interface ContainerNode extends BaseNode {
 1. **`lang` 仅且必须**在 `show: "highlight"` 时出现。换言之：
    * 用了 highlight → 必须给 `lang`；
    * 没用 highlight → 不许给 `lang`。
-2. **`pathPrefix` 仅** `show ∈ {image, video, audio, link}` 时允许。其他 widget（含 default / highlight / markdown）写 `pathPrefix` 直接报错。
+2. **`src` 仅** `show ∈ {image, video, audio, link}` 时允许。其他 widget（含 default / highlight / markdown）写 `src` 直接报错。
 3. **`layout` / `columns` / `gap` / `empty` 要求 selector 里含 `.[*]`**。没有遍历步意味着 atom 只产出一个值，谈不上"多元素排布"，写这些字段会被 parse-time 拒。
 
 #### 3.2.2 其他字段级校验
@@ -229,11 +230,11 @@ interface ContainerNode extends BaseNode {
 |------|-----------|
 | `{ "image": "thumb" }` | `{ "from": "thumb", "show": "image" }` |
 | `{ "highlight": "code", "lang": "py" }` | `{ "from": "code", "show": "highlight", "lang": "py" }` |
-| `{ "video": "clip", "pathPrefix": "../" }` | `{ "from": "clip", "show": "video", "pathPrefix": "../" }` |
+| `{ "video": "clip", "src": "../clips/{value}" }` | `{ "from": "clip", "show": "video", "src": "../clips/{value}" }` |
 
 剩余键原样并入。**消歧规则**：若对象同时含 `show` 字段，按 canonical 处理；widget-tag sugar 不触发。
 
-**冲突核对**（widget 名 vs 字段名）：widget 集 = `{default, highlight, image, video, audio, link, markdown}`；字段集 = `{from, show, lang, pathPrefix, maxHeight, layout, columns, gap, empty, label, width, children, kind}`。两个集合**完全不相交**，单键 sugar 无歧义。
+**冲突核对**（widget 名 vs 字段名）：widget 集 = `{default, highlight, image, video, audio, link, markdown}`；字段集 = `{from, show, lang, src, maxHeight, layout, columns, gap, empty, label, width, children, kind}`。两个集合**完全不相交**，单键 sugar 无歧义。
 
 ### 4.3 顶层 / 嵌套数组 → column 容器
 
@@ -296,7 +297,7 @@ input (unknown)
     { "image": "images.[*].[path]",
       "width": "360px", "layout": "grid", "columns": 2 }
   ]},
-  { "video": "clip_path", "pathPrefix": "../clips/", "label": "Source clip" },
+  { "video": "clip_path", "src": "../clips/{value}", "label": "Source clip" },
   { "highlight": "metadata", "lang": "json", "label": "Raw metadata" },
   { "image": "thumbnails.[0]", "label": "Cover image" },
   "description.[0:200]"
@@ -320,7 +321,7 @@ input (unknown)
       }
     ]
   },
-  { "from": "clip_path", "show": "video", "pathPrefix": "../clips/", "label": "Source clip" },
+  { "from": "clip_path", "show": "video", "src": "../clips/{value}", "label": "Source clip" },
   { "from": "metadata", "show": "highlight", "lang": "json", "label": "Raw metadata" },
   { "from": "thumbnails.[0]", "show": "image", "label": "Cover image" },
   { "from": "description.[0:200]" }

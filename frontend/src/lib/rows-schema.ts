@@ -33,8 +33,17 @@ export interface AtomNode extends BaseNode {
   show?: Widget
   /// Required when show='highlight', rejected otherwise.
   lang?: string
-  /// Allowed on image/video/audio/link only. Defaults to './' at render.
-  pathPrefix?: string
+  /// URL/path template for image/video/audio/link widgets. The literal token
+  /// `{value}` is substituted with the cell value at render time; everything
+  /// else is taken verbatim. Defaults to '{value}' (cell value used as-is).
+  /// Examples:
+  ///   "{value}"                  → use cell value as the storage path
+  ///   "./images/{value}"         → cell value lives under a sibling dir
+  ///   "https://cdn/{value}.png"  → build a remote URL from an ID column
+  /// The rendered string is then resolved like any storage path: relative
+  /// paths anchor at the source file's directory, '..' walks up, absolute
+  /// paths start with '/'.
+  src?: string
   /// Allowed on default/highlight/markdown only.
   maxHeight?: string
   /// Only meaningful when the selector contains `.[*]` (fan-out). Validates
@@ -71,14 +80,15 @@ const WIDGETS = new Set<string>([
 ])
 
 const CONTAINER_KINDS = new Set<string>(['row', 'column', 'grid'])
-const PATH_PREFIX_WIDGETS = new Set<string>(['image', 'video', 'audio', 'link'])
+// Widgets that produce a URL/path from the cell value via the `src` template.
+const SRC_WIDGETS = new Set<string>(['image', 'video', 'audio', 'link'])
 const MAX_HEIGHT_WIDGETS = new Set<string>(['default', 'highlight', 'markdown'])
 
 const ATOM_ALLOWED = new Set([
   'from',
   'show',
   'lang',
-  'pathPrefix',
+  'src',
   'maxHeight',
   'layout',
   'columns',
@@ -299,12 +309,12 @@ function buildAtom(obj: Record<string, unknown>, path: string): AtomNode {
     throw new SchemaError(path, '"lang" is required for show="highlight"')
   }
 
-  if ('pathPrefix' in obj) {
-    if (!PATH_PREFIX_WIDGETS.has(show)) {
-      throw new SchemaError(path, `"pathPrefix" not allowed on show="${show}"`)
+  if ('src' in obj) {
+    if (!SRC_WIDGETS.has(show)) {
+      throw new SchemaError(path, `"src" not allowed on show="${show}"`)
     }
-    if (typeof obj.pathPrefix !== 'string') {
-      throw new SchemaError(path, '"pathPrefix" must be a string')
+    if (typeof obj.src !== 'string' || obj.src.length === 0) {
+      throw new SchemaError(path, '"src" must be a non-empty string')
     }
   }
 
@@ -359,7 +369,7 @@ function buildAtom(obj: Record<string, unknown>, path: string): AtomNode {
   const node: AtomNode = { from: obj.from }
   if (show !== 'default') node.show = show
   if (typeof obj.lang === 'string') node.lang = obj.lang
-  if (typeof obj.pathPrefix === 'string') node.pathPrefix = obj.pathPrefix
+  if (typeof obj.src === 'string') node.src = obj.src
   if (typeof obj.maxHeight === 'string') node.maxHeight = obj.maxHeight
   if (
     obj.layout === 'column' ||

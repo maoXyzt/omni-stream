@@ -61,7 +61,7 @@
 [
   { "from": "prompt", "label": "Prompt" },
   { "image": "image", "label": "Generated" },
-  { "video": "preview_video", "pathPrefix": "../videos/", "label": "Preview" }
+  { "video": "preview_video", "src": "../videos/{value}", "label": "Preview" }
 ]
 ```
 
@@ -100,13 +100,21 @@
 |--------|------|------|------|
 | `default` | 文字 / 数字 / 对象的默认展示 | — | `maxHeight` |
 | `highlight` | 代码高亮 | `lang` | `maxHeight` |
-| `image` | 图片 | — | `pathPrefix` |
-| `video` | 视频（带控件、支持 Range） | — | `pathPrefix` |
-| `audio` | 音频 | — | `pathPrefix` |
-| `link` | 超链接 | — | `pathPrefix` |
+| `image` | 图片 | — | `src` |
+| `video` | 视频（带控件、支持 Range） | — | `src` |
+| `audio` | 音频 | — | `src` |
+| `link` | 超链接 | — | `src` |
 | `markdown` | Markdown 渲染（不支持 raw HTML） | — | `maxHeight` |
 
-**`pathPrefix` 是什么**：图片/视频/音频/链接的值是相对路径时，前面加上这个前缀。缺省 `"./"`（同目录），`"../clips/"` 表示上一级的 `clips` 目录。绝对路径用 `/` 开头。
+**`src` 是什么**：image/video/audio/link 的 URL/路径模板。字符串里的 `{value}` 在渲染时替换成 cell 的值；其他字符原样。例：
+
+| `src` | 效果 |
+|-------|------|
+| 不写（缺省 `"{value}"`） | cell 值直接当作路径，相对路径锚到数据文件所在目录 |
+| `"./images/{value}"` | 图片实际在源数据文件的 `images/` 子目录 |
+| `"../edits/{value}"` | 在上一级的 `edits/` 目录 |
+| `"https://cdn.example.com/{value}.png"` | 从 ID 列拼远程 CDN URL |
+| `"/static/logo.png"` | 不含 `{value}`：所有行都展示这张固定图（cell 值被忽略）|
 
 **`lang` 取值**：常见的 `json` / `python` / `typescript` / `sql` / `bash` / `yaml` / `markdown` / `html` 都支持，没注册的 lang 退化为纯文本。
 
@@ -130,14 +138,14 @@
 | 列表全部展示 | `{ "image": "images.[:]" }` | `{ "image": "images.[*]" }` |
 | 第一张图 | `{ "image": "images[0]" }`（缺前面的 `.`） | `{ "image": "images.[0]" }` |
 | 给单值加 layout | `{ "image": "thumb", "layout": "grid" }` | 单值用不上 layout；想多个就把 selector 改成 `.[*]` 结尾 |
-| 给文字加 pathPrefix | `{ "from": "prompt", "pathPrefix": "../" }` | `pathPrefix` 只能在 image/video/audio/link 上用 |
+| 给文字加 src | `{ "from": "prompt", "src": "../{value}" }` | `src` 只能在 image/video/audio/link 上用 |
 | 把 layout 写在容器里给 atom | `{ "row": [...], "layout": "grid" }` | row 是容器，不接 layout；要网格用 `{ "grid": [...], "columns": 3 }` |
 | 列名含 `.` 时直接写 | `{ "from": "weird.col" }`（会被解析成"列 weird → 字段 col"） | `` { "from": "`weird.col`" } ``（反引号包起来） |
 
 **3 条 cross-field 规则**（最容易漏，AI 体外校验时重点看）：
 
 - `lang` **仅且必须**在 `show: "highlight"` 时出现。
-- `pathPrefix` 只能在 image / video / audio / link 上出现。
+- `src` 只能在 image / video / audio / link 上出现。
 - `layout` / `columns` / `gap` / `empty` **要求 selector 里写了 `.[*]`**，否则报错（因为只有一个值，谈不上排布）。
 
 ---

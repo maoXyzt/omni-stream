@@ -49,10 +49,10 @@ describe('atom — widget tag sugar', () => {
     expect(ok([{ image: 'thumb' }])).toEqual([{ from: 'thumb', show: 'image' }])
   })
 
-  it('{ video: "x", pathPrefix: "../" } merges options', () => {
-    expect(ok([{ video: 'clip', pathPrefix: '../clips/' }])).toEqual([
-      { from: 'clip', show: 'video', pathPrefix: '../clips/' },
-    ])
+  it('{ video: "x", src: "...{value}" } merges options', () => {
+    expect(
+      ok([{ video: 'clip', src: '../clips/{value}' }]),
+    ).toEqual([{ from: 'clip', show: 'video', src: '../clips/{value}' }])
   })
 
   it('{ highlight: "x", lang: "py" }', () => {
@@ -83,8 +83,22 @@ describe('atom — canonical', () => {
 
   it('passes through canonical image atom', () => {
     expect(
-      ok([{ from: 'thumb', show: 'image', pathPrefix: './' }]),
-    ).toEqual([{ from: 'thumb', show: 'image', pathPrefix: './' }])
+      ok([{ from: 'thumb', show: 'image', src: '{value}' }]),
+    ).toEqual([{ from: 'thumb', show: 'image', src: '{value}' }])
+  })
+
+  it('CDN-style src template passes through', () => {
+    expect(
+      ok([{ from: 'id', show: 'image', src: 'https://cdn/{value}.png' }]),
+    ).toEqual([
+      { from: 'id', show: 'image', src: 'https://cdn/{value}.png' },
+    ])
+  })
+
+  it('omitted src is normal: cell value used as-is at render', () => {
+    expect(ok([{ from: 'thumb', show: 'image' }])).toEqual([
+      { from: 'thumb', show: 'image' },
+    ])
   })
 
   it('show=default is omitted from canonical output (keeps URL short)', () => {
@@ -113,15 +127,21 @@ describe('atom — widget option constraints', () => {
     )
   })
 
-  it('pathPrefix rejected on default', () => {
-    expect(fail([{ from: 'x', pathPrefix: './' }])).toMatch(
-      /"pathPrefix" not allowed on show="default"/,
+  it('src rejected on default', () => {
+    expect(fail([{ from: 'x', src: '{value}' }])).toMatch(
+      /"src" not allowed on show="default"/,
     )
   })
 
-  it('pathPrefix rejected on highlight', () => {
-    expect(fail([{ from: 'x', show: 'highlight', lang: 'js', pathPrefix: './' }])).toMatch(
-      /"pathPrefix" not allowed on show="highlight"/,
+  it('src rejected on highlight', () => {
+    expect(fail([{ from: 'x', show: 'highlight', lang: 'js', src: '{value}' }])).toMatch(
+      /"src" not allowed on show="highlight"/,
+    )
+  })
+
+  it('empty src is rejected', () => {
+    expect(fail([{ from: 'x', show: 'image', src: '' }])).toMatch(
+      /"src" must be a non-empty string/,
     )
   })
 
@@ -345,7 +365,7 @@ describe('idempotency', () => {
       {
         from: 'clip_path',
         show: 'video',
-        pathPrefix: '../clips/',
+        src: '../clips/{value}',
         label: 'Source clip',
       },
       {
@@ -375,7 +395,7 @@ describe('reference example from spec §8', () => {
           },
         ],
       },
-      { video: 'clip_path', pathPrefix: '../clips/', label: 'Source clip' },
+      { video: 'clip_path', src: '../clips/{value}', label: 'Source clip' },
       { highlight: 'metadata', lang: 'json', label: 'Raw metadata' },
       { image: 'thumbnails.[0]', label: 'Cover image' },
       'description.[0:200]',
@@ -397,7 +417,7 @@ describe('reference example from spec §8', () => {
       {
         from: 'clip_path',
         show: 'video',
-        pathPrefix: '../clips/',
+        src: '../clips/{value}',
         label: 'Source clip',
       },
       {
