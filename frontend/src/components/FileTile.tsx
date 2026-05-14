@@ -51,9 +51,16 @@ export function FileTile({ entry, prefix, storageName, onSelect }: FileTileProps
           <button
             type="button"
             onClick={() => onSelect(entry)}
-            className="group flex flex-col gap-1.5 text-left"
+            className="group flex flex-col gap-1.5 text-left focus-visible:outline-none"
           >
-            <div className="relative aspect-square overflow-hidden rounded-md border bg-muted/40 transition-colors group-hover:bg-muted">
+            {/* Hover state stacks four cues, each cheap on its own:
+                  - border tints to primary so the focused tile reads from a glance
+                  - shadow lifts the tile slightly off the grid background
+                  - background nudges from muted/40 -> muted (already present)
+                  - inner image / icon scales 1.05-1.10 inside `overflow-hidden`
+                Keyboard focus mirrors hover via `group-focus-visible:` so tabbing
+                through the grid is just as clear. */}
+            <div className="relative aspect-square overflow-hidden rounded-md border bg-muted/40 transition duration-200 group-hover:border-primary/40 group-hover:bg-muted group-hover:shadow-md group-focus-visible:border-primary group-focus-visible:ring-2 group-focus-visible:ring-primary/30">
               {entry.is_dir ? (
                 <IconFill icon={Folder} color={FOLDER_COLOR} />
               ) : isImage ? (
@@ -71,7 +78,7 @@ export function FileTile({ entry, prefix, storageName, onSelect }: FileTileProps
             </div>
             <div
               ref={nameRef}
-              className="truncate px-1 text-xs text-muted-foreground"
+              className="truncate px-1 text-xs text-muted-foreground transition-colors group-hover:text-foreground group-focus-visible:text-foreground"
             >
               {name}
             </div>
@@ -131,8 +138,13 @@ function ImageContent({ entry, storageName, alt }: ImageContentProps) {
       loading="lazy"
       decoding="async"
       className={cn(
-        'size-full object-cover transition-opacity duration-200',
+        // `transition` (everything) instead of `transition-opacity` so the
+        // hover-scale below animates alongside the fade-in.
+        'size-full object-cover transition duration-200',
         loaded ? 'opacity-100' : 'opacity-0',
+        // `overflow-hidden` on the parent clips the overflow, so the image
+        // zooms within the tile box without changing layout.
+        'group-hover:scale-105 group-focus-visible:scale-105',
       )}
       onLoad={() => setLoaded(true)}
       onError={handleError}
@@ -149,7 +161,9 @@ function IconFill({
 }) {
   return (
     <div className={cn('flex size-full items-center justify-center', color)}>
-      <Icon className="size-10" />
+      {/* Icons are smaller than thumbnails so a slightly bigger zoom (1.10
+          vs 1.05) reads more clearly on directories / non-image files. */}
+      <Icon className="size-10 transition-transform duration-200 group-hover:scale-110 group-focus-visible:scale-110" />
     </div>
   )
 }

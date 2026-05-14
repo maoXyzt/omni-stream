@@ -8,6 +8,9 @@ function readStored(): ViewMode {
   try {
     const v = window.localStorage.getItem(STORAGE_KEY)
     if (v === 'list' || v === 'grid') return v
+    // Legacy: 'gallery' used to be its own mode. It's now folded into list
+    // (list automatically splits when a preview is open on desktop).
+    if (v === 'gallery') return 'list'
   } catch {
     // localStorage may throw in privacy mode / sandboxed iframes — fall through.
   }

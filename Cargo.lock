@@ -2154,6 +2154,7 @@ dependencies = [
  "hostname",
  "image",
  "mime_guess",
+ "nu-ansi-term",
  "rust-embed",
  "serde",
  "serde_json",

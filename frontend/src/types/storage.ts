@@ -27,6 +27,26 @@ export interface ApiErrorBody {
 export interface StorageDescriptor {
   name: string
   type: 'local' | 's3'
+  /// `false` for storages declared in the config that failed to initialise
+  /// at server startup (e.g. local.root_path missing). The switcher renders
+  /// these with an `[invalid]` tag and refuses selection; targeting one via
+  /// `?storage=…` makes the API return 503 with the underlying reason.
+  valid: boolean
+  /// Init-failure message when `valid` is false. Displayed inside the
+  /// storage card so operators know what to fix.
+  error?: string | null
+  /// S3-specific identifying details. Set when `type === 's3'`. Excludes
+  /// credentials — only fields a human would use to disambiguate one
+  /// storage from another.
+  s3?: {
+    bucket: string
+    endpoint?: string | null
+    region?: string | null
+  } | null
+  /// Local-fs identifying details. Set when `type === 'local'`.
+  local?: {
+    root_path: string
+  } | null
 }
 
 export interface StoragesResponse {
@@ -36,4 +56,8 @@ export interface StoragesResponse {
 
 export interface ServerInfo {
   hostname: string
+  /// Backend semver from Cargo.toml; surfaced as a fixed bottom-left chip in
+  /// the SPA so it's visible across pages without polling a separate
+  /// endpoint.
+  version: string
 }

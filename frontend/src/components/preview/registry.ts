@@ -12,6 +12,7 @@ import {
 
 import { GenericPreview } from './GenericPreview'
 import { ImagePreview } from './ImagePreview'
+import { ParquetPreview } from './ParquetPreview'
 import { TextPreview } from './TextPreview'
 import { VideoPreview } from './VideoPreview'
 import type { PreviewKind, PreviewType } from './types'
@@ -38,6 +39,9 @@ export const PREVIEW_TYPES: readonly PreviewType[] = [
     kind: 'text',
     extensions: [
       'txt', 'md', 'markdown', 'rst', 'log', 'csv', 'tsv',
+      // `jsonl` / `ndjson` route through TextPreview too — its Range-based
+      // chunked loader kicks in above 1 MiB so large log dumps don't pull
+      // the whole file before anything renders.
       'json', 'jsonl', 'ndjson', 'xml', 'yml', 'yaml', 'toml', 'ini', 'conf', 'cfg', 'env',
       'sh', 'bash', 'zsh', 'fish', 'ps1',
       'py', 'rb', 'pl', 'lua', 'r',
@@ -49,6 +53,12 @@ export const PREVIEW_TYPES: readonly PreviewType[] = [
     ],
     icon: FileText,
     Component: TextPreview,
+  },
+  {
+    kind: 'parquet',
+    extensions: ['parquet', 'parq', 'pq'],
+    icon: FileSpreadsheet,
+    Component: ParquetPreview,
   },
   // Fallback for any file the browser can't preview inline — shows the file
   // icon + metadata, plus an iframe for PDF/similar. Has no `extensions` of
@@ -121,7 +131,7 @@ const VISUAL_GROUPS: readonly VisualGroup[] = [
   {
     Icon: FileSpreadsheet,
     color: 'text-emerald-600',
-    exts: ['xlsx', 'xls', 'xlsm', 'xlsb', 'ods', 'csv', 'tsv'],
+    exts: ['xlsx', 'xls', 'xlsm', 'xlsb', 'ods', 'csv', 'tsv', 'parquet', 'parq', 'pq'],
   },
   // PDFs and Office docs share `FileText` but get distinct colors so they're
   // visually separable from plain text and from each other.

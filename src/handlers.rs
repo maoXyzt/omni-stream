@@ -10,13 +10,18 @@ use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
 
 use crate::error::AppError;
-use crate::storage::factory::{BackendRegistry, NamedBackend};
+use crate::storage::factory::{BackendRegistry, InvalidStorageEntry, NamedBackend, StorageDetails};
 use crate::storage::{FileMeta, GetOptions, ListResult, StorageBackend};
 use crate::thumbs::ThumbState;
 
 #[derive(Clone)]
 pub struct AppState {
   backends: Arc<HashMap<String, NamedBackend>>,
+  /// Storages that exist in the config but failed to initialize at startup.
+  /// Looked up after `backends` misses so requests targeting them return
+  /// 503 (`StorageInvalid`) rather than 404 (which would imply "no such
+  /// storage was ever configured").
+  invalid: Arc<HashMap<String, InvalidStorageEntry>>,
   order: Arc<Vec<String>>,
   default_name: Arc<String>,
   thumb: Option<Arc<ThumbState>>,
@@ -27,6 +32,7 @@ impl AppState {
   pub fn new(reg: BackendRegistry, thumb: Option<Arc<ThumbState>>, hostname: Arc<String>) -> Self {
     Self {
       backends: Arc::new(reg.backends),
+      invalid: Arc::new(reg.invalid),
       order: Arc::new(reg.order),
       default_name: Arc::new(reg.default_name),
       thumb,
@@ -39,11 +45,19 @@ impl AppState {
       .map(str::trim)
       .filter(|s| !s.is_empty())
       .unwrap_or_else(|| self.default_name.as_str());
-    self
-      .backends
-      .get(key)
-      .map(|nb| nb.backend.clone())
-      .ok_or_else(|| AppError::NotFound(format!("storage '{key}'")))
+    if let Some(nb) = self.backends.get(key) {
+      return Ok(nb.backend.clone());
+    }
+    // Invalid (configured but failed to init) — distinct from "never
+    // configured", so callers get a 503 with the init failure reason
+    // rather than a 404 they'd interpret as a typo.
+    if let Some(inv) = self.invalid.get(key) {
+      return Err(AppError::StorageInvalid(format!(
+        "storage '{key}' is invalid: {}",
+        inv.reason
+      )));
+    }
+    Err(AppError::NotFound(format!("storage '{key}'")))
   }
 }
 
@@ -66,6 +80,36 @@ pub struct StorageSelector {
 pub struct StorageDescriptor {
   pub name: String,
   pub r#type: &'static str,
+  /// `false` for storages that exist in the config but failed to initialize
+  /// at startup. The UI uses this to render an "[invalid]" tag and disable
+  /// selection; requests targeting an invalid storage return 503.
+  pub valid: bool,
+  /// Human-readable init-failure reason when `valid == false`. Useful as a
+  /// tooltip in the switcher so the operator sees what to fix without
+  /// digging through server logs.
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub error: Option<String>,
+  /// Type-specific identifying details for the storage-selection dialog.
+  /// Exactly one of `s3` / `local` is populated based on `type`. Secrets
+  /// (`access_key`, `secret_key`) are never serialized here.
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub s3: Option<S3Descriptor>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub local: Option<LocalDescriptor>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct S3Descriptor {
+  pub bucket: String,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub endpoint: Option<String>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub region: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct LocalDescriptor {
+  pub root_path: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -77,11 +121,16 @@ pub struct StoragesResponse {
 #[derive(Debug, Serialize)]
 pub struct ServerInfo {
   pub hostname: String,
+  /// Backend semver from `Cargo.toml`, baked in at compile time. Returning
+  /// it on the same endpoint the frontend already polls keeps this a
+  /// zero-extra-request feature; the SPA renders it as a footer chip.
+  pub version: &'static str,
 }
 
 pub async fn server_info_handler(State(state): State<AppState>) -> Json<ServerInfo> {
   Json(ServerInfo {
     hostname: state.hostname.as_str().to_string(),
+    version: env!("CARGO_PKG_VERSION"),
   })
 }
 
@@ -89,19 +138,76 @@ pub async fn list_storages_handler(State(state): State<AppState>) -> Json<Storag
   let storages = state
     .order
     .iter()
-    .filter_map(|name| state.backends.get(name))
-    .map(|nb| StorageDescriptor {
-      name: nb.name.clone(),
-      r#type: match nb.r#type {
-        crate::config::StorageType::S3 => "s3",
-        crate::config::StorageType::Local => "local",
-      },
+    .filter_map(|name| {
+      // Each name in `order` belongs to exactly one of {backends, invalid}.
+      // Look in backends first (the hot path) so valid entries pay just one
+      // hash lookup; invalid is the slower fall-through.
+      if let Some(nb) = state.backends.get(name) {
+        let (s3, local) = split_details(&nb.details);
+        Some(StorageDescriptor {
+          name: nb.name.clone(),
+          r#type: type_label(nb.r#type),
+          valid: true,
+          error: None,
+          s3,
+          local,
+        })
+      } else {
+        // Falls through to `invalid` on miss; if it's in neither map the
+        // name is an internal-invariant violation (every entry in `order`
+        // is placed in exactly one map by factory.rs) — drop silently
+        // rather than crash a request path.
+        state.invalid.get(name).map(|inv| {
+          let (s3, local) = split_details(&inv.details);
+          StorageDescriptor {
+            name: inv.name.clone(),
+            r#type: type_label(inv.r#type),
+            valid: false,
+            error: Some(inv.reason.clone()),
+            s3,
+            local,
+          }
+        })
+      }
     })
     .collect();
   Json(StoragesResponse {
     storages,
     default: state.default_name.as_str().to_string(),
   })
+}
+
+fn type_label(t: crate::config::StorageType) -> &'static str {
+  match t {
+    crate::config::StorageType::S3 => "s3",
+    crate::config::StorageType::Local => "local",
+  }
+}
+
+/// Unpack a `StorageDetails` enum into the two flat `Option` fields the JSON
+/// response uses. Returning a tuple keeps the call site simple — exactly one
+/// of the two is `Some` by construction.
+fn split_details(d: &StorageDetails) -> (Option<S3Descriptor>, Option<LocalDescriptor>) {
+  match d {
+    StorageDetails::S3 {
+      bucket,
+      endpoint,
+      region,
+    } => (
+      Some(S3Descriptor {
+        bucket: bucket.clone(),
+        endpoint: endpoint.clone(),
+        region: region.clone(),
+      }),
+      None,
+    ),
+    StorageDetails::Local { root_path } => (
+      None,
+      Some(LocalDescriptor {
+        root_path: root_path.clone(),
+      }),
+    ),
+  }
 }
 
 pub async fn stat_handler(

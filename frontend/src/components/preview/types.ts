@@ -1,7 +1,7 @@
 import type { ComponentType } from 'react'
 import type { LucideIcon } from 'lucide-react'
 
-export type PreviewKind = 'image' | 'video' | 'text' | 'generic'
+export type PreviewKind = 'image' | 'video' | 'text' | 'parquet' | 'generic'
 
 export interface PreviewerProps {
   fileKey: string

@@ -108,6 +108,35 @@ Once enabled:
 - The embedded SPA (`/`, `/assets/*`) stays open — the browser has to load the page first before the user can enter a token. The first API call gets a 401, the SPA pops up a token input, stores it in `localStorage`, and attaches it to subsequent requests.
 - TLS is intentionally out of scope for this process. To expose it on an untrusted network, put nginx / caddy / Cloudflare in front and let them handle HTTPS.
 
+### Config CLI
+
+If you'd rather not copy `config.example.toml` by hand, the binary ships three `config` subcommands:
+
+```bash
+# List every candidate location in priority order, and mark which one the
+# loader will pick.
+omni-stream config list
+
+# Lay down the bundled config.example.toml at one of the candidate paths
+# (interactive selection, with a "custom path" option).
+omni-stream config init
+
+# Parse + validate. Surfaces missing fields, wrong types, or an empty
+# `storages` list. Without an argument it checks the active path; pass a
+# path to validate it directly.
+omni-stream config check
+omni-stream config check ./my-config.toml
+```
+
+The template `config init` writes is the verbatim `config.example.toml` from
+the repo, embedded into the binary at compile time via `include_str!` — no
+external file required.
+
+Subcommand output uses ANSI colours and emoji icons to keep interactive
+terminals scannable, but follows the [NO_COLOR](https://no-color.org/)
+convention — `NO_COLOR=1` or piping to a file / pipe automatically falls
+back to plain ASCII. Set `FORCE_COLOR=1` to force colour on inside scripts.
+
 ## 3. Run
 
 If you installed via `cargo install`, `omni-stream` is already on `$PATH`:

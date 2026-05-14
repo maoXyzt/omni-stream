@@ -299,10 +299,20 @@ jobs:
         with:
           key: publish-dry-run
 
+      # The repo's primary README.md is Chinese (per AGENTS.md §6) but crates.io
+      # readers are predominantly English-speaking, so overwrite the file with
+      # README-en.md right before `cargo package` reads it. The checkout is
+      # ephemeral — this swap never touches the repo. AGENTS.md §6 enforces
+      # that the two READMEs stay structurally in sync, which keeps the
+      # crates.io view honest about features.
+      - name: Substitute English README for crates.io packaging
+        run: cp README-en.md README.md
+
       # `--allow-dirty`: `frontend/dist/` is gitignored but pulled from the
-      # `frontend` artifact at runtime; cargo otherwise refuses to package
-      # with uncommitted files in the tree. The `include` field in Cargo.toml
-      # is what actually ships dist into the tarball.
+      # `frontend` artifact at runtime, and the README swap above also dirties
+      # the tree; cargo otherwise refuses to package with uncommitted files.
+      # The `include` field in Cargo.toml is what actually ships dist into the
+      # tarball.
       - run: cargo publish --dry-run --locked --allow-dirty --registry crates-io
 
   publish:
@@ -324,6 +334,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: publish
+
+      # Same swap as `publish-dry-run` — see comment there. Must happen here
+      # too because this is what actually uploads to crates.io.
+      - name: Substitute English README for crates.io packaging
+        run: cp README-en.md README.md
 
       # See `publish-dry-run` for why `--allow-dirty` is required.
       - name: cargo publish
