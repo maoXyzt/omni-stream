@@ -60,7 +60,6 @@ nu-ansi-term = "0.50"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "bmp", "tiff", "webp", "rayon"] }
 webp = "0.3"
 sha2 = "0.10"
-base64 = "0.22"
 
 # Drives `cargo release <patch|minor|major|x.y.z> --execute`: bumps the
 # version in Cargo.toml + Cargo.lock, commits, tags `v<version>`, and pushes.
