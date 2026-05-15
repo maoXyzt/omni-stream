@@ -808,10 +808,27 @@ function GalleryRow({
   const Icon = entry.is_dir ? Folder : iconForKey(entry.key)
   const color = entry.is_dir ? FOLDER_COLOR : colorForKey(entry.key)
   const name = displayName(entry.key, prefix)
+  const ref = useRef<HTMLButtonElement>(null)
+
+  // Keep DOM focus aligned with the visual "selected" highlight. Arrow-key
+  // nav changes `previewState` but does not touch the focused element, so
+  // without this the focus ring sits stale on the originally-clicked row
+  // while the highlight drifts away — and the new row can scroll out of
+  // view since nothing triggers a scrollIntoView. `preventScroll: true` on
+  // focus then `block: 'nearest'` keeps the layout from jumping when the
+  // row is already visible.
+  useEffect(() => {
+    if (!selected) return
+    const el = ref.current
+    if (!el) return
+    el.focus({ preventScroll: true })
+    el.scrollIntoView({ block: 'nearest' })
+  }, [selected])
 
   return (
     <EntryContextMenu entry={entry} storageName={storageName}>
       <button
+        ref={ref}
         type="button"
         onClick={() => onSelect(entry)}
         title={name}
