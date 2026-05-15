@@ -132,6 +132,17 @@ export function FileList() {
     return { key: prefix + previewName, kind }
   }, [previewName, prefix])
 
+  // `keepPreviousData` keeps the previous prefix's entries visible while
+  // the new listing loads — useful for paginating within a prefix, but
+  // when the user descends into a subfolder the carry-over entries don't
+  // start with the new prefix and render with their full paths until the
+  // fresh data lands. Detect that mismatch and treat it as loading.
+  const isStaleForPrefix = useMemo(() => {
+    const sample = listQuery.data?.entries[0]
+    return Boolean(sample) && !sample!.key.startsWith(prefix)
+  }, [listQuery.data, prefix])
+  const showListSkeleton = listQuery.isPending || isStaleForPrefix
+
   // Ignore directory jumps fired within this window after a previous one.
   // Cached + `keepPreviousData` listings can re-render the row layout almost
   // instantly after a click, so the second tick of a double-click lands on a
@@ -510,7 +521,7 @@ export function FileList() {
             />
           )}
 
-      {listQuery.isPending ? (
+      {showListSkeleton ? (
         viewMode === 'grid' ? (
           <GridSkeleton />
         ) : splitView ? (
