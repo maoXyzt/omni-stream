@@ -16,9 +16,11 @@ import {
   ChevronLeft,
   ChevronRight,
   Folder,
+  Loader2,
   LogOut,
   PanelLeft,
   PanelLeftClose,
+  RotateCw,
   Share2,
   X,
 } from 'lucide-react'
@@ -500,7 +502,13 @@ export function FileList() {
             </div>
           </div>
 
-          {listQuery.isError && <ErrorState error={listQuery.error} />}
+          {listQuery.isError && (
+            <ErrorState
+              error={listQuery.error}
+              onRetry={() => void listQuery.refetch()}
+              isRetrying={listQuery.isFetching}
+            />
+          )}
 
       {listQuery.isPending ? (
         viewMode === 'grid' ? (
@@ -911,7 +919,13 @@ function GridSkeleton() {
   )
 }
 
-function ErrorState({ error }: { error: unknown }) {
+interface ErrorStateProps {
+  error: unknown
+  onRetry?: () => void
+  isRetrying?: boolean
+}
+
+function ErrorState({ error, onRetry, isRetrying }: ErrorStateProps) {
   const message =
     error instanceof ApiError
       ? `${error.status} — ${error.message}`
@@ -922,7 +936,25 @@ function ErrorState({ error }: { error: unknown }) {
     <Alert variant="destructive">
       <AlertCircle className="size-4" />
       <AlertTitle>Failed to load directory</AlertTitle>
-      <AlertDescription>{message}</AlertDescription>
+      <AlertDescription className="flex flex-col gap-3">
+        <span>{message}</span>
+        {onRetry && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onRetry}
+            disabled={isRetrying}
+            className="self-start"
+          >
+            {isRetrying ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <RotateCw className="size-4" />
+            )}
+            Retry
+          </Button>
+        )}
+      </AlertDescription>
     </Alert>
   )
 }

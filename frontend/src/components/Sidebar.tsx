@@ -1,5 +1,12 @@
 import { useMemo } from 'react'
-import { ArrowDownAZ, ArrowDownZA, ChevronUp, Folder } from 'lucide-react'
+import {
+  AlertCircle,
+  ArrowDownAZ,
+  ArrowDownZA,
+  ChevronUp,
+  Folder,
+  RotateCw,
+} from 'lucide-react'
 
 import { useListFiles } from '@/hooks/use-storage'
 import { SIDEBAR_SORT_KEY, useSortDir } from '@/hooks/use-sort-dir'
@@ -91,6 +98,12 @@ export function Sidebar({
       <div className="flex-1 overflow-y-auto px-2">
         {query.isPending ? (
           <SidebarSkeleton />
+        ) : query.isError ? (
+          <SidebarError
+            message={describeQueryError(query.error)}
+            onRetry={() => void query.refetch()}
+            isRetrying={query.isFetching}
+          />
         ) : folders.length === 0 ? (
           <p className="px-2 py-3 text-xs text-muted-foreground">
             {atRoot ? 'No folders at root.' : 'No sibling folders.'}
@@ -161,6 +174,40 @@ function SidebarSkeleton() {
       ))}
     </div>
   )
+}
+
+interface SidebarErrorProps {
+  message: string
+  onRetry: () => void
+  isRetrying: boolean
+}
+
+function SidebarError({ message, onRetry, isRetrying }: SidebarErrorProps) {
+  return (
+    <div className="flex flex-col gap-2 px-2 py-3">
+      <div className="flex items-start gap-2 text-xs text-destructive">
+        <AlertCircle className="mt-0.5 size-3.5 shrink-0" />
+        <span className="break-words">{message}</span>
+      </div>
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={onRetry}
+        disabled={isRetrying}
+        className="h-7 self-start"
+      >
+        <RotateCw
+          className={cn('size-3.5', isRetrying && 'animate-spin')}
+        />
+        Retry
+      </Button>
+    </div>
+  )
+}
+
+function describeQueryError(error: unknown): string {
+  if (error instanceof Error) return error.message
+  return 'Failed to load folders.'
 }
 
 function dirName(key: string, parent: string): string {
