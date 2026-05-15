@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useInfiniteQuery } from '@tanstack/react-query'
 import {
   AlertCircle,
   Check,
@@ -7,6 +8,7 @@ import {
   LayoutList,
   ListOrdered,
   Loader2,
+  RotateCw,
 } from 'lucide-react'
 
 import { apiClient, ApiError } from '@/api/client'
@@ -129,6 +131,12 @@ function mergeChunk(prev: LoadState, fetched: RangeFetchResult): LoadState {
   }
 }
 
+function describeFetchError(err: unknown): string {
+  if (err instanceof ApiError) return `${err.status} — ${err.message}`
+  if (err instanceof Error) return err.message
+  return 'fetch failed'
+}
+
 function formatBytes(n: number | null): string {
   if (n === null) return '?'
   if (n < 1024) return `${n} B`
@@ -165,15 +173,34 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
     navigate(`/r/${encodeURIComponent(storage)}/${trail}${query}`)
   }, [storage, rowsFormat, searchParams, fileKey, navigate])
 
-  // Cache key on storage + path so navigating between files (or storages)
-  // doesn't bleed state.
-  const cacheKey = useMemo(() => `${storage ?? ''}:${fileKey}`, [storage, fileKey])
-  const [state, setState] = useState<LoadState>(INITIAL_STATE)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  // Inflight guard prevents double-fetch on rapid "Load more" clicks.
-  const inflight = useRef(false)
-  const cacheKeyRef = useRef(cacheKey)
+  // --- Chunked fetch -----------------------------------------------------
+
+  // useInfiniteQuery handles cancellation, dedupe, and per-file caching for
+  // free; queryKey on src isolates state by storage+path. Each page is one
+  // CHUNK_BYTES-sized Range request; the next page starts where the last
+  // ended. getNextPageParam returns undefined once the server reports EOF,
+  // which is what hides the "Load more" button (hasNextPage === false).
+  const textQuery = useInfiniteQuery({
+    queryKey: ['text-preview', src] as const,
+    queryFn: ({ pageParam }) =>
+      fetchRange(src, pageParam, pageParam + CHUNK_BYTES - 1),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage) =>
+      lastPage.isFull ? undefined : lastPage.endByte + 1,
+    staleTime: Infinity,
+  })
+
+  // Accumulated state derived from the loaded pages. Same shape as the
+  // previous local LoadState so downstream rendering doesn't change.
+  const state = useMemo<LoadState>(() => {
+    const pages = textQuery.data?.pages ?? []
+    return pages.reduce(mergeChunk, INITIAL_STATE)
+  }, [textQuery.data])
+
+  const loading = textQuery.isFetching
+  const loadingNext = textQuery.isFetchingNextPage
+  const firstLoading = textQuery.isPending && textQuery.isFetching
+  const errorMessage = textQuery.error ? describeFetchError(textQuery.error) : null
 
   // --- Language selection (highlighting) ---------------------------------
 
@@ -207,50 +234,6 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
       cancelled = true
     }
   }, [lang])
-
-  // --- Chunked fetch -----------------------------------------------------
-
-  // Callers pass the start byte explicitly so this callback's identity stays
-  // stable across renders (no state mirror needed — the
-  // react-hooks/immutability rule forbids that pattern). Initial load passes
-  // 0; the "Load more" button passes the current `state.bytesLoaded`.
-  const fetchNext = useCallback(
-    async (forKey: string, startByte: number) => {
-      if (inflight.current) return
-      inflight.current = true
-      setLoading(true)
-      setError(null)
-      try {
-        const end = startByte + CHUNK_BYTES - 1
-        const fetched = await fetchRange(src, startByte, end)
-        // Drop the result if the user navigated mid-flight.
-        if (cacheKeyRef.current !== forKey) return
-        setState((prev) => mergeChunk(prev, fetched))
-      } catch (e) {
-        if (cacheKeyRef.current !== forKey) return
-        setError(
-          e instanceof ApiError
-            ? `${e.status} — ${e.message}`
-            : e instanceof Error
-              ? e.message
-              : 'fetch failed',
-        )
-      } finally {
-        inflight.current = false
-        setLoading(false)
-      }
-    },
-    [src],
-  )
-
-  // Reset on file change and kick off the first fetch.
-  useEffect(() => {
-    cacheKeyRef.current = cacheKey
-    setState(INITIAL_STATE)
-    setError(null)
-    inflight.current = false
-    fetchNext(cacheKey, 0)
-  }, [cacheKey, fetchNext])
 
   // --- Per-line rendering ------------------------------------------------
 
@@ -406,23 +389,42 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
 
       {/* `relative` anchors the floating "Load more" overlay below. */}
       <div className="relative flex-1 overflow-hidden">
-        {error && (
+        {errorMessage && (
           <div className="p-3">
             <Alert variant="destructive">
               <AlertCircle className="size-4" />
               <AlertTitle>Failed to load text</AlertTitle>
-              <AlertDescription>{error}</AlertDescription>
+              <AlertDescription className="flex flex-col gap-3">
+                <span>{errorMessage}</span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    if (state.text.length === 0) void textQuery.refetch()
+                    else void textQuery.fetchNextPage()
+                  }}
+                  disabled={loading}
+                  className="self-start"
+                >
+                  {loading ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <RotateCw className="size-4" />
+                  )}
+                  Retry
+                </Button>
+              </AlertDescription>
             </Alert>
           </div>
         )}
-        {!error && state.text.length === 0 && loading && (
+        {!errorMessage && state.text.length === 0 && firstLoading && (
           <div className="flex w-full flex-col gap-2 p-3">
             {Array.from({ length: 12 }).map((_, i) => (
               <Skeleton key={i} className="h-4 w-full" />
             ))}
           </div>
         )}
-        {!error && state.text.length === 0 && !loading && state.done && (
+        {!errorMessage && state.text.length === 0 && !loading && state.done && (
           <div className="p-6 text-center text-sm text-muted-foreground">
             File is empty.
           </div>
@@ -468,14 +470,14 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
               - there's nothing loaded yet,
               - an error is showing.
             Disabled mid-fetch to suppress duplicate clicks. */}
-        {!state.done && state.text.length > 0 && !error && (
+        {!state.done && state.text.length > 0 && !errorMessage && (
           <Button
             size="sm"
             className="absolute right-4 bottom-4 h-8 px-3 text-xs shadow-lg hover:shadow-xl"
-            disabled={loading}
-            onClick={() => fetchNext(cacheKey, state.bytesLoaded)}
+            disabled={loadingNext}
+            onClick={() => void textQuery.fetchNextPage()}
           >
-            {loading && <Loader2 className="mr-1 size-3 animate-spin" />}
+            {loadingNext && <Loader2 className="mr-1 size-3 animate-spin" />}
             Load more
           </Button>
         )}
