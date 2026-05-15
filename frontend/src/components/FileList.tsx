@@ -21,6 +21,7 @@ import {
   PanelLeft,
   PanelLeftClose,
   RotateCw,
+  Search,
   Share2,
   X,
 } from 'lucide-react'
@@ -56,6 +57,7 @@ import { TokenPrompt } from '@/components/TokenPrompt'
 import { ViewToggle } from '@/components/ViewToggle'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   Tooltip,
@@ -124,6 +126,16 @@ export function FileList() {
   ])
   const currentToken = tokenStack[tokenStack.length - 1]
   const listQuery = useListFiles(prefix, currentToken, storageName || undefined)
+
+  // Client-side filters, scoped to the current page only. Filters reset on
+  // prefix change (entering a new directory wants a fresh view); they
+  // persist across pagination within the same prefix.
+  const [nameFilter, setNameFilter] = useState('')
+  const [typeFilter, setTypeFilter] = useState('')
+  useEffect(() => {
+    setNameFilter('')
+    setTypeFilter('')
+  }, [prefix])
 
   const previewName = searchParams.get(PREVIEW_PARAM)
   const previewState = useMemo(() => {
@@ -207,16 +219,49 @@ export function FileList() {
     )
   }, [setSearchParams])
 
+  const sortedEntries = useMemo(
+    () => (listQuery.data ? sortEntries(listQuery.data.entries, sortDir) : []),
+    [listQuery.data, sortDir],
+  )
+
+  const filteredEntries = useMemo(() => {
+    const q = nameFilter.trim().toLowerCase()
+    if (!q && !typeFilter) return sortedEntries
+    return sortedEntries.filter((e) => {
+      if (q) {
+        const name = displayName(e.key, prefix).toLowerCase()
+        if (!name.includes(q)) return false
+      }
+      if (typeFilter && typeLabelForEntry(e.key, e.is_dir) !== typeFilter) {
+        return false
+      }
+      return true
+    })
+  }, [sortedEntries, nameFilter, typeFilter, prefix])
+
+  // Types that actually appear in the current page — populated before
+  // filtering so the dropdown stays stable as the user narrows down.
+  const availableTypes = useMemo(() => {
+    const set = new Set<string>()
+    for (const e of sortedEntries) {
+      set.add(typeLabelForEntry(e.key, e.is_dir))
+    }
+    return Array.from(set).sort()
+  }, [sortedEntries])
+
+  const filtersActive = nameFilter !== '' || typeFilter !== ''
+  const clearFilters = () => {
+    setNameFilter('')
+    setTypeFilter('')
+  }
+
   // Keyboard navigation only steps through the previewable subset of the
   // current page — pagination boundaries are deliberate stops since the next
-  // page hasn't been fetched yet.
+  // page hasn't been fetched yet. Filters apply here too so arrow keys
+  // skip over rows the user hid.
   const previewableEntries = useMemo(
-    () =>
-      (listQuery.data
-        ? sortEntries(listQuery.data.entries, sortDir)
-        : []
-      ).filter((e) => !e.is_dir && previewableKind(e.key)),
-    [listQuery.data, sortDir],
+    () => filteredEntries.filter((e) => !e.is_dir && previewableKind(e.key)),
+    [filteredEntries],
   )
 
   const navigatePreview = useCallback(
@@ -300,11 +345,6 @@ export function FileList() {
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
   }, [previewState, parentInfo, goToPath])
-
-  const sortedEntries = useMemo(
-    () => (listQuery.data ? sortEntries(listQuery.data.entries, sortDir) : []),
-    [listQuery.data, sortDir],
-  )
 
   // Scroll-to-top: the shell's main element is the scroll container (sidebar
   // and main scroll independently), so we listen on the ref rather than on
@@ -537,6 +577,19 @@ export function FileList() {
               style={{ width: splitResize.width }}
               className="flex shrink-0 flex-col gap-2 overflow-hidden pr-3"
             >
+              {sortedEntries.length > 0 && (
+                <FilterBar
+                  nameValue={nameFilter}
+                  onNameChange={setNameFilter}
+                  typeValue={typeFilter}
+                  onTypeChange={setTypeFilter}
+                  availableTypes={availableTypes}
+                  filtersActive={filtersActive}
+                  onClear={clearFilters}
+                  shownCount={filteredEntries.length}
+                  totalCount={sortedEntries.length}
+                />
+              )}
               <Pager
                 hasPrev={tokenStack.length > 1}
                 hasNext={Boolean(listQuery.data.next_token)}
@@ -554,12 +607,14 @@ export function FileList() {
                 }}
                 className="flex min-h-0 flex-1 flex-col overflow-y-auto"
               >
-                {sortedEntries.length === 0 ? (
+                {filteredEntries.length === 0 ? (
                   <div className="py-10 text-center text-sm text-muted-foreground">
-                    Empty directory.
+                    {sortedEntries.length === 0
+                      ? 'Empty directory.'
+                      : 'No items match the current filter.'}
                   </div>
                 ) : (
-                  sortedEntries.map((entry) => (
+                  filteredEntries.map((entry) => (
                     <GalleryRow
                       key={entry.key}
                       entry={entry}
@@ -604,6 +659,19 @@ export function FileList() {
           </div>
         ) : (
           <>
+            {sortedEntries.length > 0 && (
+              <FilterBar
+                nameValue={nameFilter}
+                onNameChange={setNameFilter}
+                typeValue={typeFilter}
+                onTypeChange={setTypeFilter}
+                availableTypes={availableTypes}
+                filtersActive={filtersActive}
+                onClear={clearFilters}
+                shownCount={filteredEntries.length}
+                totalCount={sortedEntries.length}
+              />
+            )}
             <Pager
               hasPrev={tokenStack.length > 1}
               hasNext={Boolean(listQuery.data.next_token)}
@@ -614,7 +682,7 @@ export function FileList() {
 
             {viewMode === 'grid' ? (
               <FileGrid
-                entries={sortedEntries}
+                entries={filteredEntries}
                 prefix={prefix}
                 storageName={storageName}
                 onSelect={handleEntry}
@@ -630,17 +698,19 @@ export function FileList() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {sortedEntries.length === 0 && (
+                  {filteredEntries.length === 0 && (
                     <TableRow>
                       <TableCell
                         colSpan={4}
                         className="text-center text-muted-foreground py-10"
                       >
-                        Empty directory.
+                        {sortedEntries.length === 0
+                          ? 'Empty directory.'
+                          : 'No items match the current filter.'}
                       </TableCell>
                     </TableRow>
                   )}
-                  {sortedEntries.map((entry) => (
+                  {filteredEntries.map((entry) => (
                     <FileRow
                       key={entry.key}
                       entry={entry}
@@ -878,6 +948,74 @@ function InlinePreview({ fileKey, kind, storage }: InlinePreviewProps) {
   return (
     <div className="flex h-full w-full min-h-0">
       <Previewer fileKey={fileKey} src={src} storage={storage} />
+    </div>
+  )
+}
+
+interface FilterBarProps {
+  nameValue: string
+  onNameChange: (next: string) => void
+  typeValue: string
+  onTypeChange: (next: string) => void
+  availableTypes: string[]
+  filtersActive: boolean
+  onClear: () => void
+  shownCount: number
+  totalCount: number
+}
+
+// Client-side filter controls for the current page. Pure UI — all filtering
+// happens in the parent against the already-fetched listing, so changes are
+// instant. The type select pulls from the page's actual types (not the
+// whole VISUAL_GROUPS roster) so the user only sees options that resolve.
+function FilterBar({
+  nameValue,
+  onNameChange,
+  typeValue,
+  onTypeChange,
+  availableTypes,
+  filtersActive,
+  onClear,
+  shownCount,
+  totalCount,
+}: FilterBarProps) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <div className="relative min-w-[180px] max-w-xs flex-1">
+        <Search className="pointer-events-none absolute left-2 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          type="search"
+          value={nameValue}
+          onChange={(e) => onNameChange(e.target.value)}
+          placeholder="Filter by name…"
+          aria-label="Filter by name"
+          className="h-8 pl-8"
+        />
+      </div>
+      <select
+        value={typeValue}
+        onChange={(e) => onTypeChange(e.target.value)}
+        aria-label="Filter by type"
+        className="h-8 rounded-md border border-input bg-background px-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+      >
+        <option value="">All types</option>
+        {availableTypes.map((t) => (
+          <option key={t} value={t}>
+            {t}
+          </option>
+        ))}
+      </select>
+      {filtersActive && (
+        <>
+          <Button variant="ghost" size="sm" onClick={onClear} className="h-8">
+            <X className="size-4" />
+            Clear
+          </Button>
+          <span className="text-xs text-muted-foreground tabular-nums">
+            {shownCount} of {totalCount}
+          </span>
+        </>
+      )}
     </div>
   )
 }
