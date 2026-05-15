@@ -3,33 +3,16 @@ import { AlertCircle, Loader2, Settings2 } from 'lucide-react'
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useRowsViewConfig } from '@/hooks/use-rows-view-config'
-import { type Node, parseRules } from '@/lib/rows-schema'
 import {
-  type ColumnInfo,
   type RowsSource,
   type SourceDiagnostics,
 } from '@/lib/rows-source'
-import { cn } from '@/lib/utils'
 import { RowCard, RowNode } from '@/components/preview/rows-render'
+import { RulesDialog } from '@/components/preview/rows-rules-dialog'
 
 const ROWS_PAGE = 20
-
-// Sugar-form example with the most common building blocks: text atom, image
-// with a literal cell value, image with a `src` template, and a row container.
-const EXAMPLE_RULES = `[
-  "prompt",
-  { "image": "image" },
-  { "image": "image_edit", "src": "../edits/{value}" }
-]`
 
 interface RowsViewProps {
   fileKey: string
@@ -244,110 +227,6 @@ function RowSkeletons({ count, ruleCount }: { count: number; ruleCount: number }
   )
 }
 
-interface RulesDialogProps {
-  open: boolean
-  rules: Node[]
-  columns: ColumnInfo[]
-  onClose: () => void
-  onSave: (next: Node[]) => void
-}
-
-function RulesDialog({ open, rules, columns, onClose, onSave }: RulesDialogProps) {
-  // Draft text lives only while the dialog is open. We seed it from the
-  // current saved rules every time the dialog opens so the textarea always
-  // reflects what's actually in the URL, not a stale in-memory edit.
-  const initialDraft = useMemo(
-    () => (rules.length > 0 ? JSON.stringify(rules, null, 2) : EXAMPLE_RULES),
-    [rules],
-  )
-  const [draft, setDraft] = useState(initialDraft)
-  const [validationError, setValidationError] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (open) {
-      setDraft(initialDraft)
-      setValidationError(null)
-    }
-  }, [open, initialDraft])
-
-  const handleSave = () => {
-    let parsed: unknown
-    try {
-      parsed = JSON.parse(draft)
-    } catch (err) {
-      setValidationError(`invalid JSON: ${err instanceof Error ? err.message : String(err)}`)
-      return
-    }
-    const result = parseRules(parsed)
-    if (result.error) {
-      setValidationError(result.error)
-      return
-    }
-    onSave(result.rules)
-  }
-
-  const handleClear = () => {
-    onSave([])
-  }
-
-  const columnNames = columns.map((c) => c.name).join(', ')
-
-  return (
-    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose() }}>
-      <DialogContent className="sm:max-w-2xl gap-3">
-        <DialogHeader>
-          <DialogTitle>Rows view rules</DialogTitle>
-        </DialogHeader>
-
-        <p className="text-xs text-muted-foreground">
-          JSON array of rule nodes. Sugar form is accepted (e.g.{' '}
-          <span className="font-mono">"col"</span> for a text atom,{' '}
-          <span className="font-mono">{'{ "image": "col" }'}</span> for an
-          image, <span className="font-mono">{'{ "row": [...] }'}</span> for a
-          container). See <span className="font-mono">docs/parquet_rows_view_user_guide.md</span>
-          {' '}for the full spec.
-        </p>
-
-        <textarea
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          spellCheck={false}
-          rows={14}
-          className={cn(
-            'w-full rounded-md border border-input bg-transparent p-3 font-mono text-xs leading-relaxed',
-            'transition-colors outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50',
-            'dark:bg-input/30',
-          )}
-        />
-
-        {validationError && (
-          <Alert variant="destructive">
-            <AlertCircle className="size-4" />
-            <AlertTitle>Invalid rules</AlertTitle>
-            <AlertDescription>{validationError}</AlertDescription>
-          </Alert>
-        )}
-
-        <details className="text-xs text-muted-foreground">
-          <summary className="cursor-pointer select-none">Columns in this file ({columns.length})</summary>
-          <div className="mt-1 font-mono break-words text-[11px]">{columnNames || '(none)'}</div>
-        </details>
-
-        <DialogFooter>
-          {rules.length > 0 && (
-            <Button variant="ghost" onClick={handleClear} className="mr-auto">
-              Clear rules
-            </Button>
-          )}
-          <Button variant="outline" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button onClick={handleSave}>Save</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  )
-}
 
 function describeError(err: unknown): string {
   if (err instanceof Error) return err.message
