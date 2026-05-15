@@ -15,19 +15,29 @@
 //     (wrapped in backticks when the column has special chars).
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AlertCircle, CheckCircle2, Eye, Wand2 } from 'lucide-react'
+import {
+  AlertCircle,
+  Check,
+  CheckCircle2,
+  Copy,
+  Eye,
+  Sparkles,
+  Wand2,
+} from 'lucide-react'
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
 import { RowNode } from '@/components/preview/rows-render'
 import { type RenderContext } from '@/components/preview/rows-widgets'
+import { buildAiPrompt } from '@/components/preview/rows-ai-prompt'
 import { type Node, parseRules } from '@/lib/rows-schema'
 import { type ColumnInfo } from '@/lib/rows-source'
 import { cn } from '@/lib/utils'
@@ -202,6 +212,7 @@ export function RulesDialog({
   }
 
   const formattable = isFormattableJson(draft)
+  const [aiPromptOpen, setAiPromptOpen] = useState(false)
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose() }}>
@@ -316,6 +327,15 @@ export function RulesDialog({
             <Wand2 className="size-4" />
             Format
           </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setAiPromptOpen(true)}
+          >
+            <Sparkles className="size-4" />
+            AI prompt
+          </Button>
           {rules.length > 0 && (
             <Button variant="ghost" onClick={handleClear}>
               Clear rules
@@ -329,6 +349,95 @@ export function RulesDialog({
             <kbd className="ml-1 inline-flex h-4 items-center rounded border border-primary-foreground/30 bg-primary-foreground/15 px-1 font-mono text-[10px] leading-none">
               ⌘S
             </kbd>
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+      <AiPromptDialog
+        open={aiPromptOpen}
+        columns={columns}
+        onClose={() => setAiPromptOpen(false)}
+      />
+    </Dialog>
+  )
+}
+
+// Nested dialog: presents the AI prompt as an editable textarea with one-
+// click clipboard copy. Rebuilds the prompt on open so the column list
+// reflects whichever file the user is currently viewing.
+function AiPromptDialog({
+  open,
+  columns,
+  onClose,
+}: {
+  open: boolean
+  columns: ColumnInfo[]
+  onClose: () => void
+}) {
+  const initial = useMemo(() => buildAiPrompt(columns), [columns])
+  const [text, setText] = useState(initial)
+  const [copied, setCopied] = useState(false)
+  useEffect(() => {
+    if (open) {
+      setText(initial)
+      setCopied(false)
+    }
+  }, [open, initial])
+
+  const handleCopy = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1800)
+    } catch {
+      // Clipboard API can refuse under insecure contexts / denied perms;
+      // a silent no-op is acceptable — the user can still select all + copy.
+    }
+  }, [text])
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose() }}>
+      <DialogContent className="flex h-[85vh] w-[92vw] max-w-3xl flex-col gap-3 sm:max-w-3xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Sparkles className="size-4" />
+            Generate rules with AI
+          </DialogTitle>
+          <DialogDescription className="text-xs">
+            Copy this prompt into ChatGPT / Claude / Gemini. Replace the
+            <span className="font-mono"> {'<<<…>>>'} </span>
+            placeholder with what you want each card to look like, send,
+            then paste the JSON the AI returns into the editor.
+          </DialogDescription>
+        </DialogHeader>
+        <textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          spellCheck={false}
+          className={cn(
+            'min-h-0 flex-1 resize-none rounded-md border border-input bg-transparent p-3 font-mono text-[11px] leading-relaxed',
+            'transition-colors outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50',
+            'dark:bg-input/30',
+          )}
+        />
+        <DialogFooter className="gap-2 sm:gap-2">
+          <p className="mr-auto text-[10px] text-muted-foreground">
+            Prompt is editable — tweak anything before copying.
+          </p>
+          <Button variant="outline" onClick={onClose}>
+            Close
+          </Button>
+          <Button onClick={handleCopy}>
+            {copied ? (
+              <>
+                <Check className="size-4" />
+                Copied
+              </>
+            ) : (
+              <>
+                <Copy className="size-4" />
+                Copy
+              </>
+            )}
           </Button>
         </DialogFooter>
       </DialogContent>
