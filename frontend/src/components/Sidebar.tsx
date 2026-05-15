@@ -5,6 +5,7 @@ import {
   ArrowDownZA,
   ChevronUp,
   Folder,
+  Home,
   RotateCw,
 } from 'lucide-react'
 
@@ -54,11 +55,13 @@ export function Sidebar({
     <div className="flex h-full flex-col gap-1 py-2">
       <div className="mx-2 flex items-center gap-1">
         {atRoot ? (
+          // Home icon (not Folder) so the row reads as a location indicator
+          // rather than a sibling folder literally named "Root".
           <div
             className="flex flex-1 items-center gap-2 truncate px-2 py-1.5 text-xs font-medium text-muted-foreground"
             title="Storage root"
           >
-            <Folder className={cn('size-4 shrink-0', FOLDER_COLOR)} />
+            <Home className="size-4 shrink-0" />
             <span className="truncate">Root</span>
           </div>
         ) : (
