@@ -7,10 +7,10 @@
 * 用**三个正交维度**描述一行卡片：
   - **Selector**：从行里抽取值的路径表达式（含字段访问、下标、切片、遍历）；
   - **Widget**：把单个值渲染成什么 UI；
-  - **Container**：多 widget 之间的布局（row / column / grid）。
+  - **Container**：多 widget 之间的布局，默认 `flow`（flex-wrap 横向流），显式容器 `row` / `column` / `grid` 各起一行。
 * 三个用户场景一并解掉：
   - list 字段每元素展示 —— selector 用 `.[*]`；
-  - 行内多列布局 —— `row` 容器；
+  - 行内多列布局 —— 默认就是 flow，多个 widget 自动横向排，超宽换行；想要"严格不换行"用 `row` 容器；
   - 视频 / 音频 / 链接 / 高亮代码 —— widget 集合扩到 7 个。
 * URL 分享 wire format：LZString 压 canonical JSON 写入 `?rows=` 参数。
 
@@ -171,20 +171,31 @@ interface AtomNode extends BaseNode {
 }
 
 interface ContainerNode extends BaseNode {
-  kind: 'row' | 'column' | 'grid'
+  kind: 'flow' | 'row' | 'column' | 'grid'
   children: Node[]
   columns?: number     // grid only
   gap?: string
 }
 ```
 
+**四种 container 行为对照**：
+
+| kind | CSS 模型 | 占空间 | 用途 |
+|------|----------|--------|------|
+| `flow` (默认) | `flex; flex-wrap: wrap` | 跟随父布局 | 横向排列，挤不下自动换行 |
+| `row` | `flex; flex-wrap: nowrap; width: 100%` | **占满整行** | 必须放在同一行（不换行）的强约束 |
+| `column` | `flex; flex-direction: column; width: 100%` | **占满整行** | 强制纵向堆叠的一段 |
+| `grid` | `display: grid; grid-template-columns: repeat(N, 1fr); width: 100%` | **占满整行** | N 等分网格 |
+
+任何**显式**容器（`row` / `column` / `grid`）都自带 `width: 100%`，**等价于"在父 flow 中起新的一行"**。不显式包容器就跟前后兄弟一起 flow 横排。
+
 ### 3.1 节点形态自描述
 
-**顶层 JSON 数组本身就是一个 column 容器**（垂直排列），不需要额外包成 `{ "kind": "column", "children": [...] }`。下面的形态判定只对容器内部的子节点 / 顶层数组的元素生效。
+**顶层 JSON 数组本身就是一个 flow 容器**（横向排，超宽自动换行），不需要额外包成 `{ "kind": "flow", "children": [...] }`。下面的形态判定只对容器内部的子节点 / 顶层数组的元素生效。
 
 不需要 `kind` 字段区分 atom：
 
-* 有 `children` → container（`kind` 选 row/column/grid，缺省 column）；
+* 有 `children` → container（`kind` 选 flow/row/column/grid，缺省 flow）；
 * 有 `from` 或是裸字符串 → atom；
 * 两者都没有 → 错误。
 
@@ -208,6 +219,7 @@ interface ContainerNode extends BaseNode {
 | `columns` 仅当 `layout='grid'`（atom）或 `kind='grid'`（container）时允许 | `"columns" only allowed on grid layout` |
 | `columns` 必须是正整数 | `"columns" must be a positive integer` |
 | container 的 `children` 必须是数组 | `"children" must be an array` |
+| container 的 `kind` 必须是 `flow` / `row` / `column` / `grid` | `"kind" must be one of flow \| row \| column \| grid` |
 | 出现未知字段 | `unknown field "<x>" on <kind>` |
 
 ---
@@ -222,24 +234,28 @@ interface ContainerNode extends BaseNode {
 "prompt"  ≡  { "from": "prompt" }
 ```
 
-### 4.2 单键对象 = widget shortcut
+### 4.2 单键对象 = widget / container shortcut
 
-对象**只含一个**「键名等于某个 widget」时，把该键的值当作 `from`：
+对象**只含一个**「键名等于某个 widget 或 container」时展开：widget 名对应 atom，container 名对应 container。
 
 | 写法 | canonical |
 |------|-----------|
 | `{ "image": "thumb" }` | `{ "from": "thumb", "show": "image" }` |
 | `{ "highlight": "code", "lang": "py" }` | `{ "from": "code", "show": "highlight", "lang": "py" }` |
 | `{ "video": "clip", "src": "../clips/{value}" }` | `{ "from": "clip", "show": "video", "src": "../clips/{value}" }` |
+| `{ "row": [a, b] }` | `{ "kind": "row", "children": [a, b] }` |
+| `{ "flow": [a, b] }` | `{ "kind": "flow", "children": [a, b] }` |
+| `{ "column": [a, b] }` | `{ "kind": "column", "children": [a, b] }` |
+| `{ "grid": [a, b], "columns": 2 }` | `{ "kind": "grid", "columns": 2, "children": [a, b] }` |
 
-剩余键原样并入。**消歧规则**：若对象同时含 `show` 字段，按 canonical 处理；widget-tag sugar 不触发。
+剩余键原样并入。**消歧规则**：若对象同时含 `show` 或 `kind` 字段，按 canonical 处理；tag-key sugar 不触发。
 
-**冲突核对**（widget 名 vs 字段名）：widget 集 = `{default, highlight, image, video, audio, link, markdown}`；字段集 = `{from, show, lang, src, maxHeight, layout, columns, gap, empty, label, width, children, kind}`。两个集合**完全不相交**，单键 sugar 无歧义。
+**冲突核对**（tag 名 vs 字段名）：widget 集 = `{default, highlight, image, video, audio, link, markdown}`；container 集 = `{flow, row, column, grid}`；字段集 = `{from, show, lang, src, maxHeight, layout, columns, gap, empty, label, width, children, kind}`。三个集合**完全不相交**，单键 sugar 无歧义。
 
-### 4.3 顶层 / 嵌套数组 → column 容器
+### 4.3 顶层 / 嵌套数组 → flow 容器
 
-* 顶层数组的元素**逐个 desugar**，作为 canonical `Node[]` 序列化。
-* 嵌套位置出现的数组（如 `{row: ["a", "b"]}` 里的 `children`、container 的 children）**隐式视为 column 容器**。
+* 顶层数组的元素**逐个 desugar**，作为 canonical `Node[]` 序列化；UI 渲染时这些节点处在隐式的 flow 容器里（横向排列、超宽换行）。
+* 嵌套位置出现的数组（如 `{row: ["a", "b"]}` 里的 `children`、container 的 children）**隐式视为 flow 容器**。
 
 ### 4.4 已评估、故意排除的 sugar
 
@@ -292,14 +308,27 @@ input (unknown)
 
 ```jsonc
 [
+  // flow 默认：prompt + 缩略图自动横向排，挤不下换行
+  { "from": "prompt", "width": "1fr" },
+  { "image": "thumbnails.[0]", "width": "120px" },
+
+  // 显式 row：强制 N 张图同一行，超宽 overflow（不换行）
   { "row": [
-    "prompt",
-    { "image": "images.[*].[path]",
-      "width": "360px", "layout": "grid", "columns": 2 }
+    { "image": "images.[0]" },
+    { "image": "images.[1]" },
+    { "image": "images.[2]" }
   ]},
-  { "video": "clip_path", "src": "../clips/{value}", "label": "Source clip" },
-  { "highlight": "metadata", "lang": "json", "label": "Raw metadata" },
-  { "image": "thumbnails.[0]", "label": "Cover image" },
+
+  // 显式 grid：每张图遍历一份，固定列数
+  { "image": "images.[*].[path]", "layout": "grid", "columns": 3 },
+
+  // 显式 column：把 video + 它的标签纵向粘在一起
+  { "column": [
+    { "video": "clip_path", "src": "../clips/{value}" },
+    { "highlight": "metadata", "lang": "json" }
+  ]},
+
+  // 长文本截断单独一行
   "description.[0:200]"
 ]
 ```
@@ -308,22 +337,29 @@ input (unknown)
 
 ```json
 [
+  { "from": "prompt", "width": "1fr" },
+  { "from": "thumbnails.[0]", "show": "image", "width": "120px" },
   {
     "kind": "row",
     "children": [
-      { "from": "prompt" },
-      {
-        "from": "images.[*].[path]",
-        "show": "image",
-        "width": "360px",
-        "layout": "grid",
-        "columns": 2
-      }
+      { "from": "images.[0]", "show": "image" },
+      { "from": "images.[1]", "show": "image" },
+      { "from": "images.[2]", "show": "image" }
     ]
   },
-  { "from": "clip_path", "show": "video", "src": "../clips/{value}", "label": "Source clip" },
-  { "from": "metadata", "show": "highlight", "lang": "json", "label": "Raw metadata" },
-  { "from": "thumbnails.[0]", "show": "image", "label": "Cover image" },
+  {
+    "from": "images.[*].[path]",
+    "show": "image",
+    "layout": "grid",
+    "columns": 3
+  },
+  {
+    "kind": "column",
+    "children": [
+      { "from": "clip_path", "show": "video", "src": "../clips/{value}" },
+      { "from": "metadata", "show": "highlight", "lang": "json" }
+    ]
+  },
   { "from": "description.[0:200]" }
 ]
 ```

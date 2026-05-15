@@ -18,7 +18,7 @@ export type Widget =
   | 'link'
   | 'markdown'
 
-export type ContainerKind = 'row' | 'column' | 'grid'
+export type ContainerKind = 'flow' | 'row' | 'column' | 'grid'
 
 export interface BaseNode {
   label?: string
@@ -47,8 +47,9 @@ export interface AtomNode extends BaseNode {
   /// Allowed on default/highlight/markdown only.
   maxHeight?: string
   /// Only meaningful when the selector contains `.[*]` (fan-out). Validates
-  /// against the selector AST at parse time.
-  layout?: 'column' | 'row' | 'grid'
+  /// against the selector AST at parse time. Defaults to 'flow' at render
+  /// (horizontal wrap), matching the top-level default.
+  layout?: 'flow' | 'row' | 'column' | 'grid'
   columns?: number
   gap?: string
   empty?: string
@@ -79,7 +80,7 @@ const WIDGETS = new Set<string>([
   'markdown',
 ])
 
-const CONTAINER_KINDS = new Set<string>(['row', 'column', 'grid'])
+const CONTAINER_KINDS = new Set<string>(['flow', 'row', 'column', 'grid'])
 // Widgets that produce a URL/path from the cell value via the `src` template.
 const SRC_WIDGETS = new Set<string>(['image', 'video', 'audio', 'link'])
 const MAX_HEIGHT_WIDGETS = new Set<string>(['default', 'highlight', 'markdown'])
@@ -150,7 +151,7 @@ function parseNode(input: unknown, path: string): Node {
   }
   if (Array.isArray(input)) {
     const children = input.map((c, i) => parseNode(c, `${path}[${i}]`))
-    return { kind: 'column', children }
+    return { kind: 'flow', children }
   }
   if (input === null || typeof input !== 'object') {
     const t = input === null ? 'null' : typeof input
@@ -162,21 +163,21 @@ function parseNode(input: unknown, path: string): Node {
   if (typeof obj.kind === 'string' && CONTAINER_KINDS.has(obj.kind)) {
     return buildContainer(obj, path)
   }
-  // Children without explicit kind defaults to 'column'.
+  // Children without explicit kind defaults to 'flow'.
   if ('children' in obj) {
     if ('kind' in obj) {
       throw new SchemaError(
         path,
-        `"kind" must be one of row | column | grid (got ${JSON.stringify(obj.kind)})`,
+        `"kind" must be one of flow | row | column | grid (got ${JSON.stringify(obj.kind)})`,
       )
     }
-    return buildContainer({ kind: 'column', ...obj }, path)
+    return buildContainer({ kind: 'flow', ...obj }, path)
   }
   // Stray non-container kind.
   if ('kind' in obj) {
     throw new SchemaError(
       path,
-      `"kind" must be one of row | column | grid (got ${JSON.stringify(obj.kind)})`,
+      `"kind" must be one of flow | row | column | grid (got ${JSON.stringify(obj.kind)})`,
     )
   }
 
@@ -340,8 +341,16 @@ function buildAtom(obj: Record<string, unknown>, path: string): AtomNode {
     }
   }
   if ('layout' in obj) {
-    if (obj.layout !== 'column' && obj.layout !== 'row' && obj.layout !== 'grid') {
-      throw new SchemaError(path, '"layout" must be "column" | "row" | "grid"')
+    if (
+      obj.layout !== 'flow' &&
+      obj.layout !== 'column' &&
+      obj.layout !== 'row' &&
+      obj.layout !== 'grid'
+    ) {
+      throw new SchemaError(
+        path,
+        '"layout" must be "flow" | "row" | "column" | "grid"',
+      )
     }
   }
   if ('columns' in obj) {
@@ -372,6 +381,7 @@ function buildAtom(obj: Record<string, unknown>, path: string): AtomNode {
   if (typeof obj.src === 'string') node.src = obj.src
   if (typeof obj.maxHeight === 'string') node.maxHeight = obj.maxHeight
   if (
+    obj.layout === 'flow' ||
     obj.layout === 'column' ||
     obj.layout === 'row' ||
     obj.layout === 'grid'

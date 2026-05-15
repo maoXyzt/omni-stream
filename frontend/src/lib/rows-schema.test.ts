@@ -276,9 +276,24 @@ describe('container — row / column / grid', () => {
     expect(ok(input)).toEqual(input)
   })
 
-  it('children without kind defaults to column', () => {
+  it('children without kind defaults to flow', () => {
     expect(ok([{ children: ['a', 'b'] }])).toEqual([
-      { kind: 'column', children: [{ from: 'a' }, { from: 'b' }] },
+      { kind: 'flow', children: [{ from: 'a' }, { from: 'b' }] },
+    ])
+  })
+
+  it('explicit flow container is accepted', () => {
+    expect(ok([{ kind: 'flow', children: ['a', 'b'] }])).toEqual([
+      { kind: 'flow', children: [{ from: 'a' }, { from: 'b' }] },
+    ])
+  })
+
+  it('flow tag-key shortcut', () => {
+    expect(ok([{ flow: ['a', { image: 'thumb' }] }])).toEqual([
+      {
+        kind: 'flow',
+        children: [{ from: 'a' }, { from: 'thumb', show: 'image' }],
+      },
     ])
   })
 
@@ -300,7 +315,7 @@ describe('container — row / column / grid', () => {
     )
   })
 
-  it('nested array literal becomes implicit column', () => {
+  it('nested array literal becomes implicit flow', () => {
     expect(
       ok([{ kind: 'row', children: [['a', 'b'], 'c'] }]),
     ).toEqual([
@@ -308,7 +323,7 @@ describe('container — row / column / grid', () => {
         kind: 'row',
         children: [
           {
-            kind: 'column',
+            kind: 'flow',
             children: [{ from: 'a' }, { from: 'b' }],
           },
           { from: 'c' },
@@ -327,7 +342,7 @@ describe('container — row / column / grid', () => {
 
   it('non-container kind rejected', () => {
     expect(fail([{ kind: 'image', from: 'x' }])).toMatch(
-      /"kind" must be one of row \| column \| grid/,
+      /"kind" must be one of flow \| row \| column \| grid/,
     )
   })
 })
@@ -335,13 +350,13 @@ describe('container — row / column / grid', () => {
 describe('rejects unrecognized kinds and stray fields', () => {
   it('non-container kind on object with column-like fields', () => {
     expect(fail([{ column: 'x', kind: 'pdf' }])).toMatch(
-      /"kind" must be one of row \| column \| grid/,
+      /"kind" must be one of flow \| row \| column \| grid/,
     )
   })
 
   it('stray `column` field on a canonical atom', () => {
     expect(fail([{ kind: 'text', from: 'prompt', column: 'x' }])).toMatch(
-      /"kind" must be one of row \| column \| grid/,
+      /"kind" must be one of flow \| row \| column \| grid/,
     )
   })
 })

@@ -20,7 +20,16 @@
 [{ "image": "thumbnail" }]
 ```
 
-### 1.3 左文右图
+### 1.3 左文右图（默认 flow 就够了）
+
+```json
+[
+  { "from": "prompt", "width": "1fr" },
+  { "image": "thumbnail", "width": "320px" }
+]
+```
+
+如果想**强制不换行**（卡片再窄也保持一行，超出就 overflow），用显式 `row`：
 
 ```json
 [{ "row": [
@@ -120,13 +129,16 @@
 
 ---
 
-## 4. 必备约定（不会变的 5 条）
+## 4. 必备约定（不会变的 6 条）
 
-1. **顶层 JSON 数组本身就是一个 column 容器**（垂直排列）。不用写 `{ "kind": "column", "children": [...] }`。
-2. 字符串 `"foo"` ≡ `{ "from": "foo" }`，是最短的 atom 简写。
-3. `{ "image": "x" }` ≡ `{ "show": "image", "from": "x" }`。所有 widget 都能这么简写。
-4. `{ "row": [...] }` ≡ `{ "kind": "row", "children": [...] }`。`column` / `grid` 同理。
-5. 缺省渲染是 `default`，不用写 `"show": "default"`。
+1. **顶层 JSON 数组就是一个 flow 容器**：所有 widget **横向排**，挤不下自动换行。不用写 `{ "kind": "flow", "children": [...] }`。
+2. **想要"新的一行"就用显式容器**：`{ "row": [...] }` / `{ "column": [...] }` / `{ "grid": [...] }` 三者都自带 `width: 100%`，在父 flow 里**强制占满整行**。`row` 还会强制内部不换行（卡片窄就 overflow）。
+3. 字符串 `"foo"` ≡ `{ "from": "foo" }`，是最短的 atom 简写。
+4. `{ "image": "x" }` ≡ `{ "show": "image", "from": "x" }`。所有 widget 都能这么简写。
+5. `{ "row": [...] }` ≡ `{ "kind": "row", "children": [...] }`。`flow` / `column` / `grid` 同理。
+6. 缺省渲染是 `default`，不用写 `"show": "default"`。
+
+**直觉记忆**：把每张卡片想成 CSS `flex-wrap: wrap`；想要"分段"就用容器，每个容器自动起新一行。
 
 ---
 

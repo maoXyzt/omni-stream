@@ -49,6 +49,11 @@ export function RowNode({ node, row, ctx }: RowNodeProps) {
 
 // One card per source data row. Header strip mirrors the v1 look so the visual
 // anchor stays familiar; tabular-nums keeps the row counter aligned.
+//
+// The body's inner layout mirrors a top-level `flow` container: children are
+// placed with flex-wrap so unrelated atoms naturally sit side by side until
+// the card width forces a wrap. Explicit `row` / `column` / `grid` children
+// each take a full line (they're width-full).
 export function RowCard({
   index,
   children,
@@ -61,7 +66,7 @@ export function RowCard({
       <div className="border-b bg-muted/40 px-3 py-1.5 font-mono text-xs text-muted-foreground tabular-nums">
         row {(index + 1).toLocaleString()}
       </div>
-      <div className="flex flex-col gap-3 p-3">{children}</div>
+      <div className="flex flex-wrap items-start gap-3 p-3">{children}</div>
     </div>
   )
 }
@@ -117,18 +122,21 @@ function RowAtom({
     return <WidgetSlot value={values[0]} node={node} ctx={ctx} />
   }
 
-  // Fan-out: render N widgets in the atom's own layout container.
+  // Fan-out: render N widgets in the atom's own layout container. Default is
+  // `flow` — matches the top-level default and is the most useful for image
+  // / video / link lists (wrap-flow rather than tall column).
   if (values.length === 0) {
     return <EmptyHint text={node.empty} />
   }
-  const layout = node.layout ?? 'column'
+  const layout = node.layout ?? 'flow'
   const gap = node.gap ?? '0.75rem'
   const elements = values.map((v, i) => (
     <WidgetSlot key={i} value={v} node={node} ctx={ctx} />
   ))
   if (layout === 'row') {
+    // No-wrap horizontal line — overflows when content doesn't fit.
     return (
-      <div className="flex flex-row flex-wrap items-start" style={{ gap }}>
+      <div className="flex flex-row items-start overflow-auto" style={{ gap }}>
         {elements}
       </div>
     )
@@ -147,9 +155,16 @@ function RowAtom({
       </div>
     )
   }
-  // default 'column'
+  if (layout === 'column') {
+    return (
+      <div className="flex flex-col" style={{ gap }}>
+        {elements}
+      </div>
+    )
+  }
+  // 'flow' — horizontal with wrap.
   return (
-    <div className="flex flex-col" style={{ gap }}>
+    <div className="flex flex-wrap items-start" style={{ gap }}>
       {elements}
     </div>
   )
@@ -231,9 +246,20 @@ function RowContainer({
   const children = node.children.map((c, i) => (
     <RowNode key={i} node={c} row={row} ctx={ctx} />
   ))
+  // flow: horizontal wrap, follows the parent's content width naturally.
+  // The other three (row / column / grid) are "block-like" — they take the
+  // full available width, which inside a parent flow effectively makes them
+  // a new line. This is what gives users "explicit row" semantics.
+  if (node.kind === 'flow') {
+    return (
+      <div className="flex flex-wrap items-start" style={{ gap }}>
+        {children}
+      </div>
+    )
+  }
   if (node.kind === 'column') {
     return (
-      <div className="flex flex-col" style={{ gap }}>
+      <div className="flex w-full flex-col" style={{ gap }}>
         {children}
       </div>
     )
@@ -245,7 +271,7 @@ function RowContainer({
       .join(' ')
     return (
       <div
-        className="grid items-start"
+        className="grid w-full items-start"
         style={{ gridTemplateColumns: tracks, gap }}
       >
         {children}
@@ -256,7 +282,7 @@ function RowContainer({
   const columns = node.columns ?? 2
   return (
     <div
-      className="grid items-start"
+      className="grid w-full items-start"
       style={{
         gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
         gap,
