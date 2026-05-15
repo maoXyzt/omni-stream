@@ -690,13 +690,19 @@ function isFormattableJson(text: string): boolean {
   }
 }
 
-// Encode a column name as a JSON string holding a valid selector. Plain
-// identifiers go through as-is; anything else gets wrapped in backticks so
-// special chars (dots, spaces, ...) don't get re-interpreted by the selector
-// parser. The JSON.stringify then escapes any embedded quotes for the
-// JSON layer.
+// Encode a column name as a JSON string holding a valid selector. Three
+// branches, in order of preference:
+//   * Plain identifier — emit bare, no quoting needed.
+//   * Backtick-quoted (raw) — preferred for special chars (dots, spaces, …)
+//     since it avoids double escaping inside the JSON layer.
+//   * Double-quoted (JSON escapes) — required when the name itself contains
+//     a backtick, since backtick-quoted selectors are raw and end at the
+//     first inner backtick. `JSON.stringify(col)` already produces exactly
+//     the double-quoted selector form (JSON escapes are a superset of what
+//     the selector accepts), so the outer `JSON.stringify` just escapes it
+//     for the embedded JSON layer.
 function asJsonString(col: string): string {
-  const isPlainIdent = /^[A-Za-z_][A-Za-z0-9_]*$/.test(col)
-  const selector = isPlainIdent ? col : `\`${col}\``
-  return JSON.stringify(selector)
+  if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(col)) return JSON.stringify(col)
+  if (col.includes('`')) return JSON.stringify(JSON.stringify(col))
+  return JSON.stringify(`\`${col}\``)
 }
