@@ -40,7 +40,10 @@ export function RowsView({ fileKey, source, storage }: RowsViewProps) {
     staleTime: Infinity,
   })
 
-  const pages = rowsQuery.data?.pages ?? []
+  const pages = useMemo(
+    () => rowsQuery.data?.pages ?? [],
+    [rowsQuery.data],
+  )
   const rows = useMemo(() => pages.flatMap((p) => p.rows), [pages])
   const latestPage = pages.at(-1)
   // Streaming jsonl surfaces totalRows only after the stream completes; fall
