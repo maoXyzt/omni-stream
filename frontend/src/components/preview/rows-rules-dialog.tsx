@@ -15,7 +15,7 @@
 //     (wrapped in backticks when the column has special chars).
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AlertCircle, CheckCircle2, Wand2 } from 'lucide-react'
+import { AlertCircle, CheckCircle2, Eye, Wand2 } from 'lucide-react'
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -26,6 +26,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { RowNode } from '@/components/preview/rows-render'
+import { type RenderContext } from '@/components/preview/rows-widgets'
 import { type Node, parseRules } from '@/lib/rows-schema'
 import { type ColumnInfo } from '@/lib/rows-source'
 import { cn } from '@/lib/utils'
@@ -87,6 +89,12 @@ interface RulesDialogProps {
   open: boolean
   rules: Node[]
   columns: ColumnInfo[]
+  /// First loaded data row, used for the live-preview pane. Undefined while
+  /// rows are still loading or the file is empty.
+  sampleRow: Record<string, unknown> | undefined
+  /// Forwarded to the preview RowNodes so image / video / link widgets
+  /// resolve paths the same way the real renderer does.
+  renderCtx: RenderContext
   onClose: () => void
   onSave: (next: Node[]) => void
 }
@@ -95,6 +103,8 @@ export function RulesDialog({
   open,
   rules,
   columns,
+  sampleRow,
+  renderCtx,
   onClose,
   onSave,
 }: RulesDialogProps) {
@@ -196,7 +206,7 @@ export function RulesDialog({
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose() }}>
       <DialogContent
-        className="flex h-[85vh] w-[92vw] max-w-4xl flex-col gap-3 sm:max-w-4xl"
+        className="flex h-[88vh] w-[95vw] max-w-7xl flex-col gap-3 sm:max-w-7xl"
         onKeyDown={handleKeyDown}
       >
         <DialogHeader>
@@ -237,7 +247,7 @@ export function RulesDialog({
           </div>
 
           {/* Side panel */}
-          <aside className="flex w-64 shrink-0 flex-col gap-3 overflow-auto">
+          <aside className="flex w-56 shrink-0 flex-col gap-3 overflow-auto">
             <Section title="Insert">
               <div className="flex flex-wrap gap-1">
                 {TEMPLATES.map((t) => (
@@ -254,8 +264,7 @@ export function RulesDialog({
                 ))}
               </div>
               <p className="mt-1 text-[10px] text-muted-foreground">
-                Click to insert at cursor. The column-name placeholder is
-                pre-selected so you can immediately type.
+                Click to insert at cursor.
               </p>
             </Section>
 
@@ -282,11 +291,17 @@ export function RulesDialog({
               {columns.length > 0 && (
                 <p className="mt-1 text-[10px] text-muted-foreground">
                   Click to insert as <span className="font-mono">"col"</span>.
-                  Hover for the column type.
                 </p>
               )}
             </Section>
           </aside>
+
+          {/* Preview pane */}
+          <PreviewPane
+            validation={validation}
+            sampleRow={sampleRow}
+            renderCtx={renderCtx}
+          />
         </div>
 
         <DialogFooter className="gap-2 sm:gap-2">
@@ -324,6 +339,79 @@ export function RulesDialog({
 type Validation =
   | { ok: true; rules: Node[] }
   | { ok: false; error: string }
+
+// Live preview pane — renders the first loaded row using the current draft
+// (when valid). Mirrors the body layout of the real RowCard so the user
+// sees something close to the production rendering.
+function PreviewPane({
+  validation,
+  sampleRow,
+  renderCtx,
+}: {
+  validation: Validation
+  sampleRow: Record<string, unknown> | undefined
+  renderCtx: RenderContext
+}) {
+  return (
+    <aside className="flex w-[28rem] shrink-0 min-w-0 flex-col gap-2">
+      <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+        <Eye className="size-3.5" />
+        Live preview
+      </div>
+      <div className="min-h-0 flex-1 overflow-auto rounded-md border bg-card">
+        <div className="border-b bg-muted/40 px-3 py-1.5 font-mono text-xs text-muted-foreground">
+          {sampleRow ? 'row 1' : '—'}
+        </div>
+        <div className="flex flex-wrap items-start gap-3 p-3">
+          <PreviewBody
+            validation={validation}
+            sampleRow={sampleRow}
+            renderCtx={renderCtx}
+          />
+        </div>
+      </div>
+    </aside>
+  )
+}
+
+function PreviewBody({
+  validation,
+  sampleRow,
+  renderCtx,
+}: {
+  validation: Validation
+  sampleRow: Record<string, unknown> | undefined
+  renderCtx: RenderContext
+}) {
+  if (!validation.ok) {
+    return (
+      <div className="w-full rounded-md border border-dashed bg-muted/20 px-3 py-6 text-center text-xs italic text-muted-foreground">
+        Fix the errors above to see the live preview.
+      </div>
+    )
+  }
+  if (!sampleRow) {
+    return (
+      <div className="w-full rounded-md border border-dashed bg-muted/20 px-3 py-6 text-center text-xs italic text-muted-foreground">
+        No row loaded yet. Open a non-empty file to preview.
+      </div>
+    )
+  }
+  if (validation.rules.length === 0) {
+    return (
+      <div className="w-full rounded-md border border-dashed bg-muted/20 px-3 py-6 text-center text-xs italic text-muted-foreground">
+        Empty rule set — nothing to render.
+      </div>
+    )
+  }
+  return (
+    <>
+      {validation.rules.map((node, i) => (
+        <RowNode key={i} node={node} row={sampleRow} ctx={renderCtx} />
+      ))}
+    </>
+  )
+}
 
 function StatusLine({ validation }: { validation: Validation }) {
   if (validation.ok) {

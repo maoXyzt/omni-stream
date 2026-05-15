@@ -182,6 +182,8 @@ export function RowsView({ fileKey, source, storage }: RowsViewProps) {
         open={dialogOpen}
         rules={rules}
         columns={columns}
+        sampleRow={rows[0]}
+        renderCtx={renderCtx}
         onClose={() => setDialogOpen(false)}
         onSave={(next) => {
           setRules(next)
