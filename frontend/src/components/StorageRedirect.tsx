@@ -1,11 +1,12 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { AlertCircle } from 'lucide-react'
+import { AlertCircle, Loader2, RotateCw } from 'lucide-react'
 import { Navigate } from 'react-router-dom'
 
 import { ApiError } from '@/api/client'
 import { useStorages } from '@/hooks/use-storage'
 import { TokenPrompt } from '@/components/TokenPrompt'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 
 /**
@@ -16,7 +17,8 @@ import { Skeleton } from '@/components/ui/skeleton'
  */
 export function StorageRedirect() {
   const queryClient = useQueryClient()
-  const { data, error, isPending } = useStorages()
+  const query = useStorages()
+  const { data, error, isPending, isFetching, refetch } = query
 
   if (
     error instanceof ApiError &&
@@ -45,7 +47,23 @@ export function StorageRedirect() {
         <Alert variant="destructive">
           <AlertCircle className="size-4" />
           <AlertTitle>Failed to load storages</AlertTitle>
-          <AlertDescription>{message}</AlertDescription>
+          <AlertDescription className="flex flex-col gap-3">
+            <span>{message}</span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void refetch()}
+              disabled={isFetching}
+              className="self-start"
+            >
+              {isFetching ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <RotateCw className="size-4" />
+              )}
+              Retry
+            </Button>
+          </AlertDescription>
         </Alert>
       </div>
     )

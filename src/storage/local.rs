@@ -180,13 +180,17 @@ impl StorageBackend for LocalFsBackend {
     let total_size = metadata.len();
     let mut file = fs::File::open(&full).await?;
 
-    let (start, end, is_partial, content_range) = if let Some(range) = opts.range {
+    // Empty files: ignore any Range and return an empty 200. RFC 7233 lets us
+    // 416 here, but that's user-hostile — the text previewer would surface
+    // "Range Not Satisfiable" for a perfectly valid 0-byte file.
+    let (start, end, is_partial, content_range) = if total_size == 0 {
+      (0, 0, false, None)
+    } else if let Some(range) = opts.range {
       let (s, e) = parse_range(&range, total_size)?;
       file.seek(SeekFrom::Start(s)).await?;
       (s, e, true, Some(format!("bytes {s}-{e}/{total_size}")))
     } else {
-      let end = total_size.saturating_sub(1);
-      (0, end, false, None)
+      (0, total_size - 1, false, None)
     };
 
     let length = if total_size == 0 { 0 } else { end - start + 1 };
@@ -419,5 +423,29 @@ mod tests {
     let mut expected: Vec<String> = names.clone();
     expected.sort();
     assert_eq!(seen, expected, "all keys returned exactly once, in order");
+  }
+
+  #[tokio::test]
+  async fn get_file_empty_with_range_returns_ok_not_416() {
+    // Regression: the text previewer always sends Range: bytes=0-1048575,
+    // including for 0-byte files. Old behavior was 416 → "Failed to load
+    // text" in the UI. We now ignore the Range header and serve an empty
+    // 200 OK instead.
+    let dir = tempdir();
+    std::fs::write(dir.join("empty.txt"), b"").unwrap();
+    let backend = LocalFsBackend::new(&dir, false);
+
+    let resp = backend
+      .get_file(
+        "empty.txt",
+        GetOptions {
+          range: Some("bytes=0-1048575".into()),
+        },
+      )
+      .await
+      .expect("empty file with Range must not error");
+    assert_eq!(resp.content_length, Some(0));
+    assert!(!resp.is_partial);
+    assert!(resp.content_range.is_none());
   }
 }

@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import {
   AlertCircle,
   Check,
@@ -8,6 +9,7 @@ import {
   Copy,
   LayoutList,
   Loader2,
+  RotateCw,
 } from 'lucide-react'
 
 import { ApiError } from '@/api/client'
@@ -41,7 +43,6 @@ import { formatBytes } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import {
   type ParquetColumnInfo,
-  type ParquetSource,
   compressionSummary,
   extractTopLevelColumns,
   formatCell,
@@ -77,17 +78,7 @@ function resolveActiveTab(searchParams: URLSearchParams): ParquetTab {
   return lastActiveTab
 }
 
-interface RowsState {
-  rows: Record<string, unknown>[]
-  pageIndex: number
-}
-
 export function ParquetPreview({ fileKey, src, storage }: PreviewerProps) {
-  const [source, setSource] = useState<ParquetSource | null>(null)
-  const [metaError, setMetaError] = useState<string | null>(null)
-  const [rowsState, setRowsState] = useState<RowsState | null>(null)
-  const [rowsLoading, setRowsLoading] = useState(false)
-  const [rowsError, setRowsError] = useState<string | null>(null)
   const [pageIndex, setPageIndex] = useState(0)
   const { data: stat } = useFileStat(fileKey, storage)
   const [searchParams, setSearchParams] = useSearchParams()
@@ -96,6 +87,24 @@ export function ParquetPreview({ fileKey, src, storage }: PreviewerProps) {
   // the right view and browser Back actually walks tab history. Falls back
   // to session memory / 'schema' when no URL hint is present.
   const activeTab = resolveActiveTab(searchParams)
+
+  // Parquet footer / metadata. Immutable per src, so caching forever is
+  // safe — keeps repeated visits to the same file footer-fetch-free.
+  const sourceQuery = useQuery({
+    queryKey: ['parquet-source', src] as const,
+    queryFn: () => loadParquetSource(src),
+    staleTime: Infinity,
+    retry: 1,
+  })
+  const source = sourceQuery.data
+  const metaError = sourceQuery.error
+
+  // Switching files resets pagination; keeps the keepPreviousData hop on
+  // the rows query semantically meaningful (it carries previous-page rows
+  // across page-index transitions within a file, not across files).
+  useEffect(() => {
+    setPageIndex(0)
+  }, [src])
 
   const setActiveTab = (next: ParquetTab) => {
     lastActiveTab = next
@@ -130,27 +139,6 @@ export function ParquetPreview({ fileKey, src, storage }: PreviewerProps) {
     navigate(`/r/${encodeURIComponent(storage)}/${trail}${query}`)
   }
 
-  // Each `src` change starts a fresh load — track a token so a stale async
-  // result from a previous file can't overwrite the current state.
-  const loadTokenRef = useRef(0)
-
-  useEffect(() => {
-    const token = ++loadTokenRef.current
-    setSource(null)
-    setMetaError(null)
-    setRowsState(null)
-    setRowsError(null)
-    setPageIndex(0)
-    loadParquetSource(src)
-      .then((s) => {
-        if (loadTokenRef.current === token) setSource(s)
-      })
-      .catch((err: unknown) => {
-        if (loadTokenRef.current !== token) return
-        setMetaError(describeError(err))
-      })
-  }, [src])
-
   const columns = useMemo<ParquetColumnInfo[]>(
     () => (source ? extractTopLevelColumns(source.metadata) : []),
     [source],
@@ -159,34 +147,28 @@ export function ParquetPreview({ fileKey, src, storage }: PreviewerProps) {
   const pageCount = Math.max(1, Math.ceil(numRows / PAGE_SIZE))
   const clampedPage = Math.min(pageIndex, pageCount - 1)
 
-  // Fetch the requested page on demand. Re-uses the AsyncBuffer in `source`
-  // so hyparquet can issue only the Range requests needed for that page's
-  // row groups; we don't re-download the footer.
-  useEffect(() => {
-    if (!source || numRows === 0) return
-    if (rowsState && rowsState.pageIndex === clampedPage) return
-    const token = ++loadTokenRef.current
-    setRowsLoading(true)
-    setRowsError(null)
-    const rowStart = clampedPage * PAGE_SIZE
-    const rowEnd = Math.min(rowStart + PAGE_SIZE, numRows)
-    readParquetRows({
-      file: source.file,
-      metadata: source.metadata,
-      rowStart,
-      rowEnd,
-    })
-      .then((rows) => {
-        if (loadTokenRef.current !== token) return
-        setRowsState({ rows, pageIndex: clampedPage })
-        setRowsLoading(false)
+  // Per-page row read. Re-uses the AsyncBuffer in `source` so hyparquet
+  // issues only the Range requests needed for that page's row groups; the
+  // footer is never re-downloaded. keepPreviousData keeps the old page's
+  // rows on screen while the next page loads, so paginating feels
+  // continuous instead of flashing skeletons.
+  const rowsQuery = useQuery({
+    queryKey: ['parquet-rows', src, clampedPage] as const,
+    queryFn: () => {
+      if (!source) throw new Error('source not loaded')
+      const rowStart = clampedPage * PAGE_SIZE
+      const rowEnd = Math.min(rowStart + PAGE_SIZE, numRows)
+      return readParquetRows({
+        file: source.file,
+        metadata: source.metadata,
+        rowStart,
+        rowEnd,
       })
-      .catch((err: unknown) => {
-        if (loadTokenRef.current !== token) return
-        setRowsError(describeError(err))
-        setRowsLoading(false)
-      })
-  }, [source, numRows, clampedPage, rowsState])
+    },
+    enabled: Boolean(source) && numRows > 0,
+    placeholderData: keepPreviousData,
+    staleTime: Infinity,
+  })
 
   if (metaError) {
     return (
@@ -194,21 +176,59 @@ export function ParquetPreview({ fileKey, src, storage }: PreviewerProps) {
         <Alert variant="destructive" className="max-w-xl">
           <AlertCircle className="size-4" />
           <AlertTitle>Failed to read parquet file</AlertTitle>
-          <AlertDescription>{metaError}</AlertDescription>
+          <AlertDescription className="flex flex-col gap-3">
+            <span>{describeError(metaError)}</span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void sourceQuery.refetch()}
+              disabled={sourceQuery.isFetching}
+              className="self-start"
+            >
+              {sourceQuery.isFetching ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <RotateCw className="size-4" />
+              )}
+              Retry
+            </Button>
+          </AlertDescription>
         </Alert>
       </div>
     )
   }
 
   if (!source) {
+    // Match the post-load layout: InfoBar (a row of stats), tab strip +
+    // Browse-as-cards button, then the table body. Sidesteps the layout
+    // jump that a generic 3-block skeleton would otherwise produce.
     return (
-      <div className="flex h-full w-full flex-col gap-3 p-6">
-        <Skeleton className="h-6 w-72" />
-        <Skeleton className="h-9 w-48" />
-        <Skeleton className="h-64 w-full" />
+      <div className="flex h-full w-full flex-col gap-3 p-4">
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+          <Skeleton className="h-4 w-20" />
+          <Skeleton className="h-4 w-24" />
+          <Skeleton className="h-4 w-28" />
+          <Skeleton className="h-4 w-32" />
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <Skeleton className="h-9 w-44" />
+          <Skeleton className="h-8 w-36" />
+        </div>
+        <div className="flex flex-1 flex-col gap-2 overflow-hidden">
+          {Array.from({ length: 10 }).map((_, i) => (
+            <Skeleton key={i} className="h-6 w-full" />
+          ))}
+        </div>
       </div>
     )
   }
+
+  const rows = rowsQuery.data ?? []
+  const rowsError = rowsQuery.error
+  const rowsFetching = rowsQuery.isFetching
+  // Only show the skeleton when there's no page at all yet — keepPreviousData
+  // keeps prior rows visible across page-index transitions.
+  const rowsFirstLoading = rowsQuery.isPending && rowsFetching
 
   const codec = compressionSummary(source.metadata)
   const groupCount = rowGroupCount(source.metadata)
@@ -266,7 +286,7 @@ export function ParquetPreview({ fileKey, src, storage }: PreviewerProps) {
             pageCount={pageCount}
             pageSize={PAGE_SIZE}
             totalRows={numRows}
-            loading={rowsLoading}
+            loading={rowsFetching}
             onPrev={() => setPageIndex((p) => Math.max(0, p - 1))}
             onNext={() => setPageIndex((p) => Math.min(pageCount - 1, p + 1))}
             onJump={(p) => setPageIndex(p)}
@@ -275,13 +295,29 @@ export function ParquetPreview({ fileKey, src, storage }: PreviewerProps) {
             <Alert variant="destructive">
               <AlertCircle className="size-4" />
               <AlertTitle>Failed to read rows</AlertTitle>
-              <AlertDescription>{rowsError}</AlertDescription>
+              <AlertDescription className="flex flex-col gap-3">
+                <span>{describeError(rowsError)}</span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void rowsQuery.refetch()}
+                  disabled={rowsFetching}
+                  className="self-start"
+                >
+                  {rowsFetching ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <RotateCw className="size-4" />
+                  )}
+                  Retry
+                </Button>
+              </AlertDescription>
             </Alert>
           ) : (
             <DataTable
               columns={columns}
-              rows={rowsState?.rows ?? []}
-              loading={rowsLoading && !rowsState}
+              rows={rows}
+              loading={rowsFirstLoading}
             />
           )}
         </TabsContent>
@@ -357,7 +393,7 @@ function PaginationBar({
           ? 'Empty file'
           : `Rows ${firstRow.toLocaleString()}–${lastRow.toLocaleString()} of ${totalRows.toLocaleString()}`}
         {loading && (
-          <Loader2 className="ml-2 inline size-3.5 animate-spin align-[-2px]" />
+          <Loader2 className="ml-2 inline size-4 animate-spin align-[-3px]" />
         )}
       </div>
       <div className="flex items-center gap-1">

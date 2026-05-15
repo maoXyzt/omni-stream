@@ -1,7 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
 import { Navigate, useNavigate, useParams } from 'react-router-dom'
-import { useQueryClient } from '@tanstack/react-query'
-import { AlertCircle, ArrowLeft } from 'lucide-react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { AlertCircle, ArrowLeft, Loader2, RotateCw } from 'lucide-react'
 
 import { ApiError } from '@/api/client'
 import { proxyUrl } from '@/api/storage'
@@ -11,12 +10,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { TokenPrompt } from '@/components/TokenPrompt'
 import { RowsView } from '@/components/preview/RowsView'
 import { useStorages } from '@/hooks/use-storage'
-import {
-  type ParquetSource,
-  extractTopLevelColumns,
-  loadParquetSource,
-  totalRowCount,
-} from '@/lib/parquet'
+import { loadRowsSource } from '@/lib/rows-source'
 
 export function RowsPage() {
   const queryClient = useQueryClient()
@@ -30,26 +24,13 @@ export function RowsPage() {
   const storagesQuery = useStorages()
   const src = proxyUrl(fileKey, storageName || undefined)
 
-  const [source, setSource] = useState<ParquetSource | null>(null)
-  const [metaError, setMetaError] = useState<ApiError | Error | null>(null)
-  // Token guard mirrors `ParquetPreview` — stale loads from an earlier `src`
-  // must not splat back into state after the user navigates between files.
-  const loadTokenRef = useRef(0)
-
-  useEffect(() => {
-    if (!fileKey) return
-    const token = ++loadTokenRef.current
-    setSource(null)
-    setMetaError(null)
-    loadParquetSource(src)
-      .then((s) => {
-        if (loadTokenRef.current === token) setSource(s)
-      })
-      .catch((err: unknown) => {
-        if (loadTokenRef.current !== token) return
-        setMetaError(err instanceof ApiError || err instanceof Error ? err : new Error(String(err)))
-      })
-  }, [src, fileKey])
+  const sourceQuery = useQuery({
+    queryKey: ['rows-source', storageName, fileKey] as const,
+    queryFn: () => loadRowsSource(src, fileKey),
+    enabled: fileKey.length > 0,
+    staleTime: 60_000,
+    retry: 1,
+  })
 
   // Validate storage exists in the user's roster — typo'd / removed storage
   // bounces to root instead of looping on a perpetual error.
@@ -62,7 +43,7 @@ export function RowsPage() {
   }
 
   // Missing file path means the URL is malformed (`/r/storage/`). Send the
-  // user to the storage's file list rather than rendering a parquet loader
+  // user to the storage's file list rather than rendering a data loader
   // pointed at nothing.
   if (!fileKey) {
     return (
@@ -74,7 +55,7 @@ export function RowsPage() {
   }
 
   const isAuthError =
-    (metaError instanceof ApiError && metaError.status === 401) ||
+    (sourceQuery.error instanceof ApiError && sourceQuery.error.status === 401) ||
     (storagesQuery.isError &&
       storagesQuery.error instanceof ApiError &&
       storagesQuery.error.status === 401)
@@ -122,24 +103,45 @@ export function RowsPage() {
       </header>
 
       <main className="flex min-h-0 flex-1 flex-col overflow-hidden p-4">
-        {metaError ? (
+        {sourceQuery.error ? (
           <Alert variant="destructive" className="max-w-xl">
             <AlertCircle className="size-4" />
-            <AlertTitle>Failed to read parquet file</AlertTitle>
-            <AlertDescription>{metaError.message}</AlertDescription>
+            <AlertTitle>Failed to read data file</AlertTitle>
+            <AlertDescription className="flex flex-col gap-3">
+              <span>{sourceQuery.error.message}</span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void sourceQuery.refetch()}
+                disabled={sourceQuery.isFetching}
+                className="self-start"
+              >
+                {sourceQuery.isFetching ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <RotateCw className="size-4" />
+                )}
+                Retry
+              </Button>
+            </AlertDescription>
           </Alert>
-        ) : !source ? (
-          <div className="flex flex-col gap-3">
-            <Skeleton className="h-6 w-72" />
-            <Skeleton className="h-9 w-48" />
-            <Skeleton className="h-64 w-full" />
+        ) : !sourceQuery.data ? (
+          // Match the post-load RowsView shape: header strip with metadata
+          // + Rules button, then a stack of card-shaped rows. Keeps the
+          // transition into the real view visually continuous.
+          <div className="flex flex-col gap-4">
+            <div className="flex items-center justify-between">
+              <Skeleton className="h-5 w-64" />
+              <Skeleton className="h-9 w-24" />
+            </div>
+            {Array.from({ length: 4 }).map((_, i) => (
+              <Skeleton key={i} className="h-32 w-full rounded-md" />
+            ))}
           </div>
         ) : (
           <RowsView
             fileKey={fileKey}
-            source={source}
-            columns={extractTopLevelColumns(source.metadata)}
-            numRows={totalRowCount(source.metadata)}
+            source={sourceQuery.data}
             storage={storageName || undefined}
           />
         )}

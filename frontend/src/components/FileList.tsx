@@ -16,9 +16,12 @@ import {
   ChevronLeft,
   ChevronRight,
   Folder,
+  Loader2,
   LogOut,
   PanelLeft,
   PanelLeftClose,
+  RotateCw,
+  Search,
   Share2,
   X,
 } from 'lucide-react'
@@ -46,6 +49,7 @@ import {
   getPreviewType,
   iconForKey,
   previewableKind,
+  typeLabelForEntry,
 } from '@/components/preview/registry'
 import type { PreviewKind } from '@/components/preview/types'
 import { StorageSwitcher } from '@/components/StorageSwitcher'
@@ -53,6 +57,7 @@ import { TokenPrompt } from '@/components/TokenPrompt'
 import { ViewToggle } from '@/components/ViewToggle'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   Tooltip,
@@ -122,6 +127,16 @@ export function FileList() {
   const currentToken = tokenStack[tokenStack.length - 1]
   const listQuery = useListFiles(prefix, currentToken, storageName || undefined)
 
+  // Client-side filters, scoped to the current page only. Filters reset on
+  // prefix change (entering a new directory wants a fresh view); they
+  // persist across pagination within the same prefix.
+  const [nameFilter, setNameFilter] = useState('')
+  const [typeFilter, setTypeFilter] = useState('')
+  useEffect(() => {
+    setNameFilter('')
+    setTypeFilter('')
+  }, [prefix])
+
   const previewName = searchParams.get(PREVIEW_PARAM)
   const previewState = useMemo(() => {
     if (!previewName) return null
@@ -130,8 +145,29 @@ export function FileList() {
     return { key: prefix + previewName, kind }
   }, [previewName, prefix])
 
+  // `keepPreviousData` keeps the previous prefix's entries visible while
+  // the new listing loads — useful for paginating within a prefix, but
+  // when the user descends into a subfolder the carry-over entries don't
+  // start with the new prefix and render with their full paths until the
+  // fresh data lands. Detect that mismatch and treat it as loading.
+  const isStaleForPrefix = useMemo(() => {
+    const sample = listQuery.data?.entries[0]
+    return Boolean(sample) && !sample!.key.startsWith(prefix)
+  }, [listQuery.data, prefix])
+  const showListSkeleton = listQuery.isPending || isStaleForPrefix
+
+  // Ignore directory jumps fired within this window after a previous one.
+  // Cached + `keepPreviousData` listings can re-render the row layout almost
+  // instantly after a click, so the second tick of a double-click lands on a
+  // new folder at the same screen position — the user sees one click descend
+  // two levels. Throttling at `goToPath` (rather than inside the row click
+  // handler) covers the file list, sidebar, and breadcrumb in one place.
+  const lastDirNavRef = useRef(0)
   const goToPath = useCallback(
     (nextPrefix: string) => {
+      const now = performance.now()
+      if (now - lastDirNavRef.current < 300) return
+      lastDirNavRef.current = now
       // Clearing page state when switching directories is intentional: the
       // page_token cursor returned by S3 is scoped to a specific prefix.
       setTokenStack([undefined])
@@ -183,16 +219,49 @@ export function FileList() {
     )
   }, [setSearchParams])
 
+  const sortedEntries = useMemo(
+    () => (listQuery.data ? sortEntries(listQuery.data.entries, sortDir) : []),
+    [listQuery.data, sortDir],
+  )
+
+  const filteredEntries = useMemo(() => {
+    const q = nameFilter.trim().toLowerCase()
+    if (!q && !typeFilter) return sortedEntries
+    return sortedEntries.filter((e) => {
+      if (q) {
+        const name = displayName(e.key, prefix).toLowerCase()
+        if (!name.includes(q)) return false
+      }
+      if (typeFilter && typeLabelForEntry(e.key, e.is_dir) !== typeFilter) {
+        return false
+      }
+      return true
+    })
+  }, [sortedEntries, nameFilter, typeFilter, prefix])
+
+  // Types that actually appear in the current page — populated before
+  // filtering so the dropdown stays stable as the user narrows down.
+  const availableTypes = useMemo(() => {
+    const set = new Set<string>()
+    for (const e of sortedEntries) {
+      set.add(typeLabelForEntry(e.key, e.is_dir))
+    }
+    return Array.from(set).sort()
+  }, [sortedEntries])
+
+  const filtersActive = nameFilter !== '' || typeFilter !== ''
+  const clearFilters = () => {
+    setNameFilter('')
+    setTypeFilter('')
+  }
+
   // Keyboard navigation only steps through the previewable subset of the
   // current page — pagination boundaries are deliberate stops since the next
-  // page hasn't been fetched yet.
+  // page hasn't been fetched yet. Filters apply here too so arrow keys
+  // skip over rows the user hid.
   const previewableEntries = useMemo(
-    () =>
-      (listQuery.data
-        ? sortEntries(listQuery.data.entries, sortDir)
-        : []
-      ).filter((e) => !e.is_dir && previewableKind(e.key)),
-    [listQuery.data, sortDir],
+    () => filteredEntries.filter((e) => !e.is_dir && previewableKind(e.key)),
+    [filteredEntries],
   )
 
   const navigatePreview = useCallback(
@@ -276,11 +345,6 @@ export function FileList() {
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
   }, [previewState, parentInfo, goToPath])
-
-  const sortedEntries = useMemo(
-    () => (listQuery.data ? sortEntries(listQuery.data.entries, sortDir) : []),
-    [listQuery.data, sortDir],
-  )
 
   // Scroll-to-top: the shell's main element is the scroll container (sidebar
   // and main scroll independently), so we listen on the ref rather than on
@@ -490,9 +554,15 @@ export function FileList() {
             </div>
           </div>
 
-          {listQuery.isError && <ErrorState error={listQuery.error} />}
+          {listQuery.isError && (
+            <ErrorState
+              error={listQuery.error}
+              onRetry={() => void listQuery.refetch()}
+              isRetrying={listQuery.isFetching}
+            />
+          )}
 
-      {listQuery.isPending ? (
+      {showListSkeleton ? (
         viewMode === 'grid' ? (
           <GridSkeleton />
         ) : splitView ? (
@@ -507,6 +577,19 @@ export function FileList() {
               style={{ width: splitResize.width }}
               className="flex shrink-0 flex-col gap-2 overflow-hidden pr-3"
             >
+              {sortedEntries.length > 0 && (
+                <FilterBar
+                  nameValue={nameFilter}
+                  onNameChange={setNameFilter}
+                  typeValue={typeFilter}
+                  onTypeChange={setTypeFilter}
+                  availableTypes={availableTypes}
+                  filtersActive={filtersActive}
+                  onClear={clearFilters}
+                  shownCount={filteredEntries.length}
+                  totalCount={sortedEntries.length}
+                />
+              )}
               <Pager
                 hasPrev={tokenStack.length > 1}
                 hasNext={Boolean(listQuery.data.next_token)}
@@ -524,12 +607,14 @@ export function FileList() {
                 }}
                 className="flex min-h-0 flex-1 flex-col overflow-y-auto"
               >
-                {sortedEntries.length === 0 ? (
+                {filteredEntries.length === 0 ? (
                   <div className="py-10 text-center text-sm text-muted-foreground">
-                    Empty directory.
+                    {sortedEntries.length === 0
+                      ? 'Empty directory.'
+                      : 'No items match the current filter.'}
                   </div>
                 ) : (
-                  sortedEntries.map((entry) => (
+                  filteredEntries.map((entry) => (
                     <GalleryRow
                       key={entry.key}
                       entry={entry}
@@ -574,6 +659,19 @@ export function FileList() {
           </div>
         ) : (
           <>
+            {sortedEntries.length > 0 && (
+              <FilterBar
+                nameValue={nameFilter}
+                onNameChange={setNameFilter}
+                typeValue={typeFilter}
+                onTypeChange={setTypeFilter}
+                availableTypes={availableTypes}
+                filtersActive={filtersActive}
+                onClear={clearFilters}
+                shownCount={filteredEntries.length}
+                totalCount={sortedEntries.length}
+              />
+            )}
             <Pager
               hasPrev={tokenStack.length > 1}
               hasNext={Boolean(listQuery.data.next_token)}
@@ -584,7 +682,7 @@ export function FileList() {
 
             {viewMode === 'grid' ? (
               <FileGrid
-                entries={sortedEntries}
+                entries={filteredEntries}
                 prefix={prefix}
                 storageName={storageName}
                 onSelect={handleEntry}
@@ -594,22 +692,25 @@ export function FileList() {
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-1/2">Name</TableHead>
+                    <TableHead className="w-28">Type</TableHead>
                     <TableHead className="w-32 text-right">Size</TableHead>
                     <TableHead>Modified</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {sortedEntries.length === 0 && (
+                  {filteredEntries.length === 0 && (
                     <TableRow>
                       <TableCell
-                        colSpan={3}
+                        colSpan={4}
                         className="text-center text-muted-foreground py-10"
                       >
-                        Empty directory.
+                        {sortedEntries.length === 0
+                          ? 'Empty directory.'
+                          : 'No items match the current filter.'}
                       </TableCell>
                     </TableRow>
                   )}
-                  {sortedEntries.map((entry) => (
+                  {filteredEntries.map((entry) => (
                     <FileRow
                       key={entry.key}
                       entry={entry}
@@ -722,6 +823,7 @@ function FileRow({ entry, prefix, storageName, onSelect }: FileRowProps) {
   const Icon = entry.is_dir ? Folder : iconForKey(entry.key)
   const color = entry.is_dir ? FOLDER_COLOR : colorForKey(entry.key)
   const name = displayName(entry.key, prefix)
+  const typeLabel = typeLabelForEntry(entry.key, entry.is_dir)
 
   return (
     <EntryContextMenu entry={entry} storageName={storageName}>
@@ -735,6 +837,7 @@ function FileRow({ entry, prefix, storageName, onSelect }: FileRowProps) {
             {name}
           </span>
         </TableCell>
+        <TableCell className="text-muted-foreground">{typeLabel}</TableCell>
         <TableCell className="text-right tabular-nums text-muted-foreground">
           {entry.is_dir ? '—' : formatBytes(entry.size)}
         </TableCell>
@@ -790,10 +893,27 @@ function GalleryRow({
   const Icon = entry.is_dir ? Folder : iconForKey(entry.key)
   const color = entry.is_dir ? FOLDER_COLOR : colorForKey(entry.key)
   const name = displayName(entry.key, prefix)
+  const ref = useRef<HTMLButtonElement>(null)
+
+  // Keep DOM focus aligned with the visual "selected" highlight. Arrow-key
+  // nav changes `previewState` but does not touch the focused element, so
+  // without this the focus ring sits stale on the originally-clicked row
+  // while the highlight drifts away — and the new row can scroll out of
+  // view since nothing triggers a scrollIntoView. `preventScroll: true` on
+  // focus then `block: 'nearest'` keeps the layout from jumping when the
+  // row is already visible.
+  useEffect(() => {
+    if (!selected) return
+    const el = ref.current
+    if (!el) return
+    el.focus({ preventScroll: true })
+    el.scrollIntoView({ block: 'nearest' })
+  }, [selected])
 
   return (
     <EntryContextMenu entry={entry} storageName={storageName}>
       <button
+        ref={ref}
         type="button"
         onClick={() => onSelect(entry)}
         title={name}
@@ -828,6 +948,74 @@ function InlinePreview({ fileKey, kind, storage }: InlinePreviewProps) {
   return (
     <div className="flex h-full w-full min-h-0">
       <Previewer fileKey={fileKey} src={src} storage={storage} />
+    </div>
+  )
+}
+
+interface FilterBarProps {
+  nameValue: string
+  onNameChange: (next: string) => void
+  typeValue: string
+  onTypeChange: (next: string) => void
+  availableTypes: string[]
+  filtersActive: boolean
+  onClear: () => void
+  shownCount: number
+  totalCount: number
+}
+
+// Client-side filter controls for the current page. Pure UI — all filtering
+// happens in the parent against the already-fetched listing, so changes are
+// instant. The type select pulls from the page's actual types (not the
+// whole VISUAL_GROUPS roster) so the user only sees options that resolve.
+function FilterBar({
+  nameValue,
+  onNameChange,
+  typeValue,
+  onTypeChange,
+  availableTypes,
+  filtersActive,
+  onClear,
+  shownCount,
+  totalCount,
+}: FilterBarProps) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <div className="relative min-w-[180px] max-w-xs flex-1">
+        <Search className="pointer-events-none absolute left-2 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          type="search"
+          value={nameValue}
+          onChange={(e) => onNameChange(e.target.value)}
+          placeholder="Filter by name…"
+          aria-label="Filter by name"
+          className="h-8 pl-8"
+        />
+      </div>
+      <select
+        value={typeValue}
+        onChange={(e) => onTypeChange(e.target.value)}
+        aria-label="Filter by type"
+        className="h-8 rounded-md border border-input bg-background px-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+      >
+        <option value="">All types</option>
+        {availableTypes.map((t) => (
+          <option key={t} value={t}>
+            {t}
+          </option>
+        ))}
+      </select>
+      {filtersActive && (
+        <>
+          <Button variant="ghost" size="sm" onClick={onClear} className="h-8">
+            <X className="size-4" />
+            Clear
+          </Button>
+          <span className="text-xs text-muted-foreground tabular-nums">
+            {shownCount} of {totalCount}
+          </span>
+        </>
+      )}
     </div>
   )
 }
@@ -901,7 +1089,13 @@ function GridSkeleton() {
   )
 }
 
-function ErrorState({ error }: { error: unknown }) {
+interface ErrorStateProps {
+  error: unknown
+  onRetry?: () => void
+  isRetrying?: boolean
+}
+
+function ErrorState({ error, onRetry, isRetrying }: ErrorStateProps) {
   const message =
     error instanceof ApiError
       ? `${error.status} — ${error.message}`
@@ -912,7 +1106,25 @@ function ErrorState({ error }: { error: unknown }) {
     <Alert variant="destructive">
       <AlertCircle className="size-4" />
       <AlertTitle>Failed to load directory</AlertTitle>
-      <AlertDescription>{message}</AlertDescription>
+      <AlertDescription className="flex flex-col gap-3">
+        <span>{message}</span>
+        {onRetry && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onRetry}
+            disabled={isRetrying}
+            className="self-start"
+          >
+            {isRetrying ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <RotateCw className="size-4" />
+            )}
+            Retry
+          </Button>
+        )}
+      </AlertDescription>
     </Alert>
   )
 }

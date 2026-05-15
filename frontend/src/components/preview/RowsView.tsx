@@ -1,128 +1,83 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import {
-  AlertCircle,
-  ImageOff,
-  Loader2,
-  Settings2,
-} from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { useInfiniteQuery } from '@tanstack/react-query'
+import { AlertCircle, Loader2, RotateCw, Settings2 } from 'lucide-react'
 
-import { proxyUrl } from '@/api/storage'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
 import { Skeleton } from '@/components/ui/skeleton'
-import {
-  type Rule,
-  useRowsViewConfig,
-  validateRules,
-} from '@/hooks/use-rows-view-config'
-import { cn } from '@/lib/utils'
-import {
-  type ParquetColumnInfo,
-  type ParquetSource,
-  formatCell,
-  readParquetRows,
-} from '@/lib/parquet'
+import { useRowsViewConfig } from '@/hooks/use-rows-view-config'
+import { type RowsSource } from '@/lib/rows-source'
+import { RowCard, RowNode } from '@/components/preview/rows-render'
+import { RulesDialog } from '@/components/preview/rows-rules-dialog'
 
 const ROWS_PAGE = 20
 
-const EXAMPLE_RULES = `[
-  { "column": "prompt", "kind": "text" },
-  { "column": "image", "kind": "image", "pathPrefix": "./" },
-  { "column": "image_edit", "kind": "image", "pathPrefix": "../edits/" }
-]`
-
 interface RowsViewProps {
   fileKey: string
-  source: ParquetSource
-  columns: ParquetColumnInfo[]
-  numRows: number
+  source: RowsSource
   storage?: string
 }
 
-export function RowsView({ fileKey, source, columns, numRows, storage }: RowsViewProps) {
+export function RowsView({ fileKey, source, storage }: RowsViewProps) {
   const { rules, decodeError, setRules } = useRowsViewConfig()
-
-  const [rows, setRows] = useState<Record<string, unknown>[]>([])
-  const [nextRowStart, setNextRowStart] = useState(0)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const renderCtx = useMemo(() => ({ fileKey, storage }), [fileKey, storage])
+  const columns = source.columns
   const [dialogOpen, setDialogOpen] = useState(false)
 
-  // Same stale-result-guard trick used by `ParquetPreview` itself: when the
-  // user opens a different parquet, abandoned page fetches must not splat
-  // their rows back into our state.
-  const loadTokenRef = useRef(0)
+  // Paginated read driven by the source's readRows contract. Source is
+  // already keyed by (storage, fileKey) upstream, so the same key here
+  // gives us a stable cache that survives remounts of this component.
+  const rowsQuery = useInfiniteQuery({
+    queryKey: ['rows-data', storage ?? null, fileKey] as const,
+    queryFn: ({ pageParam }) =>
+      source.readRows(pageParam, pageParam + ROWS_PAGE),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, _pages, lastPageParam) =>
+      lastPage.hasMore ? lastPageParam + lastPage.rows.length : undefined,
+    enabled: source.totalRows !== 0,
+    // Pages are derived from immutable file contents — once loaded they
+    // never need to be refetched for the lifetime of this source.
+    staleTime: Infinity,
+  })
 
-  useEffect(() => {
-    const token = ++loadTokenRef.current
-    setRows([])
-    setNextRowStart(0)
-    setError(null)
-    if (numRows === 0) return
-    setLoading(true)
-    const rowEnd = Math.min(ROWS_PAGE, numRows)
-    readParquetRows({
-      file: source.file,
-      metadata: source.metadata,
-      rowStart: 0,
-      rowEnd,
-    })
-      .then((batch) => {
-        if (loadTokenRef.current !== token) return
-        setRows(batch)
-        setNextRowStart(rowEnd)
-        setLoading(false)
-      })
-      .catch((err: unknown) => {
-        if (loadTokenRef.current !== token) return
-        setError(describeError(err))
-        setLoading(false)
-      })
-  }, [source, numRows])
+  const pages = useMemo(
+    () => rowsQuery.data?.pages ?? [],
+    [rowsQuery.data],
+  )
+  const rows = useMemo(() => pages.flatMap((p) => p.rows), [pages])
+  const latestPage = pages.at(-1)
+  // Streaming jsonl surfaces totalRows only after the stream completes; fall
+  // back to the source's load-time hint until the first page lands.
+  const totalRows = latestPage?.totalRows ?? source.totalRows
+  const diagnostics = latestPage?.diagnostics ?? source.diagnostics
+  const hasMore =
+    source.totalRows === 0 ? false : Boolean(rowsQuery.hasNextPage)
+  // First-page-in-flight is the only state that warrants the skeleton; a
+  // failing fetchNextPage keeps `rows` populated, so we never blank out.
+  const firstLoading =
+    source.totalRows !== 0 && rowsQuery.isPending && rowsQuery.isFetching
+  const loadingMore = rowsQuery.isFetchingNextPage
+  const errorMessage = rowsQuery.error ? describeError(rowsQuery.error) : null
 
-  const columnSet = useMemo(() => new Set(columns.map((c) => c.name)), [columns])
-
-  const hasMore = nextRowStart < numRows
-
-  const loadMore = () => {
-    if (loading || !hasMore) return
-    const token = ++loadTokenRef.current
-    setLoading(true)
-    setError(null)
-    const rowEnd = Math.min(nextRowStart + ROWS_PAGE, numRows)
-    readParquetRows({
-      file: source.file,
-      metadata: source.metadata,
-      rowStart: nextRowStart,
-      rowEnd,
-    })
-      .then((batch) => {
-        if (loadTokenRef.current !== token) return
-        setRows((prev) => [...prev, ...batch])
-        setNextRowStart(rowEnd)
-        setLoading(false)
-      })
-      .catch((err: unknown) => {
-        if (loadTokenRef.current !== token) return
-        setError(describeError(err))
-        setLoading(false)
-      })
+  const retry = () => {
+    if (rows.length === 0) void rowsQuery.refetch()
+    else void rowsQuery.fetchNextPage()
   }
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3">
       <div className="flex items-center justify-between gap-3">
-        <div className="text-sm text-muted-foreground">
-          {numRows === 0
-            ? 'Empty file'
-            : `${rows.length.toLocaleString()} of ${numRows.toLocaleString()} rows loaded`}
+        <div className="flex flex-wrap items-baseline gap-x-2 text-sm text-muted-foreground">
+          <span>{formatLoadedHint(rows.length, totalRows, hasMore)}</span>
+          {diagnostics?.skippedLines && diagnostics.skippedLines > 0 && (
+            <span
+              className="rounded-md border border-dashed border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-xs text-amber-700 dark:text-amber-300"
+              title="Lines that didn't parse as a JSON object — most often empty or malformed entries"
+            >
+              {diagnostics.skippedLines.toLocaleString()} line
+              {diagnostics.skippedLines === 1 ? '' : 's'} skipped
+            </span>
+          )}
         </div>
         <Button variant="outline" size="sm" onClick={() => setDialogOpen(true)}>
           <Settings2 className="size-4" />
@@ -148,26 +103,38 @@ export function RowsView({ fileKey, source, columns, numRows, storage }: RowsVie
           <EmptyState onOpenRules={() => setDialogOpen(true)} />
         ) : (
           <div className="flex flex-col gap-4">
-            {loading && rows.length === 0 ? (
+            {firstLoading ? (
               <RowSkeletons count={3} ruleCount={rules.length} />
             ) : (
               rows.map((row, i) => (
-                <RowCard
-                  key={i}
-                  index={i}
-                  row={row}
-                  rules={rules}
-                  columnSet={columnSet}
-                  fileKey={fileKey}
-                  storage={storage}
-                />
+                <RowCard key={i} index={i}>
+                  {rules.map((node, j) => (
+                    <RowNode key={j} node={node} row={row} ctx={renderCtx} />
+                  ))}
+                </RowCard>
               ))
             )}
-            {error && (
+            {errorMessage && (
               <Alert variant="destructive">
                 <AlertCircle className="size-4" />
                 <AlertTitle>Failed to load rows</AlertTitle>
-                <AlertDescription>{error}</AlertDescription>
+                <AlertDescription className="flex flex-col gap-3">
+                  <span>{errorMessage}</span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={retry}
+                    disabled={rowsQuery.isFetching}
+                    className="self-start"
+                  >
+                    {rowsQuery.isFetching ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : (
+                      <RotateCw className="size-4" />
+                    )}
+                    Retry
+                  </Button>
+                </AlertDescription>
               </Alert>
             )}
             {rows.length > 0 && hasMore && (
@@ -175,16 +142,16 @@ export function RowsView({ fileKey, source, columns, numRows, storage }: RowsVie
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={loadMore}
-                  disabled={loading}
+                  onClick={() => void rowsQuery.fetchNextPage()}
+                  disabled={loadingMore}
                 >
-                  {loading ? (
+                  {loadingMore ? (
                     <>
                       <Loader2 className="size-4 animate-spin" />
                       Loading…
                     </>
                   ) : (
-                    `Load ${Math.min(ROWS_PAGE, numRows - nextRowStart)} more`
+                    loadMoreLabel(rows.length, totalRows)
                   )}
                 </Button>
               </div>
@@ -202,6 +169,8 @@ export function RowsView({ fileKey, source, columns, numRows, storage }: RowsVie
         open={dialogOpen}
         rules={rules}
         columns={columns}
+        sampleRow={rows[0]}
+        renderCtx={renderCtx}
         onClose={() => setDialogOpen(false)}
         onSave={(next) => {
           setRules(next)
@@ -218,9 +187,8 @@ function EmptyState({ onOpenRules }: { onOpenRules: () => void }) {
       <div className="max-w-md rounded-md border bg-muted/30 p-6 text-center">
         <h3 className="text-base font-medium">No rules configured</h3>
         <p className="mt-2 text-sm text-muted-foreground">
-          Map columns to widgets to browse rows as cards. Each rule picks a
-          column and a display kind (text or image). Rules live in the URL —
-          share the link to share the view.
+          Describe how each row should be laid out using the rules editor.
+          Rules live in the URL — share the link to share the view.
         </p>
         <Button className="mt-4" onClick={onOpenRules}>
           <Settings2 className="size-4" />
@@ -229,216 +197,6 @@ function EmptyState({ onOpenRules }: { onOpenRules: () => void }) {
       </div>
     </div>
   )
-}
-
-interface RowCardProps {
-  index: number
-  row: Record<string, unknown>
-  rules: Rule[]
-  columnSet: Set<string>
-  fileKey: string
-  storage?: string
-}
-
-function RowCard({ index, row, rules, columnSet, fileKey, storage }: RowCardProps) {
-  return (
-    <div className="rounded-md border bg-card">
-      <div className="border-b bg-muted/40 px-3 py-1.5 font-mono text-xs text-muted-foreground tabular-nums">
-        row {(index + 1).toLocaleString()}
-      </div>
-      <div className="flex flex-col gap-3 p-3">
-        {rules.map((rule, i) => {
-          const present = columnSet.has(rule.column)
-          return (
-            <div key={i} className="flex flex-col gap-1">
-              <div className="flex items-baseline gap-2">
-                <span className="font-mono text-xs text-muted-foreground">
-                  {rule.label ?? rule.column}
-                </span>
-                {rule.label && (
-                  <span className="font-mono text-[10px] text-muted-foreground/60">
-                    ({rule.column})
-                  </span>
-                )}
-              </div>
-              {!present ? (
-                <MissingColumnHint column={rule.column} />
-              ) : rule.kind === 'text' ? (
-                <TextWidget value={row[rule.column]} />
-              ) : (
-                <ImageWidget
-                  value={row[rule.column]}
-                  pathPrefix={rule.pathPrefix ?? './'}
-                  fileKey={fileKey}
-                  storage={storage}
-                />
-              )}
-            </div>
-          )
-        })}
-      </div>
-    </div>
-  )
-}
-
-function MissingColumnHint({ column }: { column: string }) {
-  return (
-    <div className="rounded-md border border-dashed bg-muted/20 px-3 py-2 text-xs italic text-muted-foreground">
-      column <span className="font-mono">"{column}"</span> not in this file
-    </div>
-  )
-}
-
-function TextWidget({ value }: { value: unknown }) {
-  const text = formatCell(value)
-  if (text === '') {
-    return (
-      <div className="rounded-md border border-dashed bg-muted/20 px-3 py-2 text-xs italic text-muted-foreground">
-        empty
-      </div>
-    )
-  }
-  return (
-    <pre className="max-h-72 overflow-auto rounded-md border bg-muted/30 p-3 font-mono text-xs whitespace-pre-wrap break-words selection:bg-primary/20">
-      {text}
-    </pre>
-  )
-}
-
-interface ImageWidgetProps {
-  value: unknown
-  pathPrefix: string
-  fileKey: string
-  storage?: string
-}
-
-function ImageWidget({ value, pathPrefix, fileKey, storage }: ImageWidgetProps) {
-  const [failed, setFailed] = useState(false)
-  const path = imagePathFromValue(value)
-
-  // Resolution treats `pathPrefix + value` as a path relative to the parquet
-  // file's own directory: `./` keeps the parquet's dir, `../` walks up. Going
-  // above storage root surfaces an error here instead of an opaque 404 from
-  // the proxy. See `resolveStorageKey` for the rules.
-  const resolved = useMemo(() => {
-    if (!path) return null
-    return resolveStorageKey(fileKey, pathPrefix, path)
-  }, [fileKey, pathPrefix, path])
-
-  const url =
-    resolved && resolved.ok ? proxyUrl(resolved.key, storage) : null
-
-  // Reset the error flag whenever the resolved URL changes — otherwise a row
-  // that recycled a previously-failed cell would stay stuck on the fallback.
-  useEffect(() => {
-    setFailed(false)
-  }, [url])
-
-  if (!path) {
-    return (
-      <div className="rounded-md border border-dashed bg-muted/20 px-3 py-2 text-xs italic text-muted-foreground">
-        no image path
-      </div>
-    )
-  }
-  if (resolved && !resolved.ok) {
-    return (
-      <div className="flex items-start gap-2 rounded-md border border-dashed border-destructive/40 bg-destructive/5 px-3 py-2 text-xs italic text-destructive">
-        <AlertCircle className="mt-0.5 size-4 shrink-0" />
-        <span>
-          {resolved.error}: <span className="font-mono not-italic">{pathPrefix + path}</span>
-        </span>
-      </div>
-    )
-  }
-  if (!url) return null
-  if (failed) {
-    return (
-      <div className="flex items-center gap-2 rounded-md border border-dashed bg-muted/20 px-3 py-2 text-xs italic text-muted-foreground">
-        <ImageOff className="size-4" />
-        failed to load <span className="font-mono not-italic">{resolved!.key}</span>
-      </div>
-    )
-  }
-  return (
-    <div className="overflow-hidden rounded-md border bg-muted/30">
-      <img
-        src={url}
-        alt={resolved!.key}
-        onError={() => setFailed(true)}
-        className="max-h-96 w-auto max-w-full object-contain"
-        loading="lazy"
-      />
-    </div>
-  )
-}
-
-type ResolveResult =
-  | { ok: true; key: string }
-  | { ok: false; error: string }
-
-/// Resolve `prefix + value` into an absolute storage key, anchored at the
-/// parquet file's own directory.
-///
-/// Rules:
-/// * The combined `prefix + value` is treated as a single path string.
-/// * Leading `/` ⇒ absolute from storage root. Otherwise relative to the
-///   parquet file's parent directory.
-/// * `.` segments are dropped, `..` segments pop one directory off the stack.
-/// * Popping past the storage root is rejected — we never want a rendered
-///   parquet to be able to coerce the proxy into reading paths outside the
-///   storage's wildcard scope. The backend would refuse anyway, but failing
-///   early gives the user a meaningful error in place of an opaque 404.
-function resolveStorageKey(
-  parquetKey: string,
-  prefix: string,
-  value: string,
-): ResolveResult {
-  const combined = (prefix ?? '') + value
-  if (combined.length === 0) {
-    return { ok: false, error: 'empty image path' }
-  }
-  const isAbsolute = combined.startsWith('/')
-  let stack: string[]
-  if (isAbsolute) {
-    stack = []
-  } else {
-    // Parent directory of the parquet file: drop the last slash-segment.
-    const parts = parquetKey.split('/').filter((s) => s.length > 0)
-    parts.pop()
-    stack = parts
-  }
-  for (const seg of combined.split('/')) {
-    if (seg === '' || seg === '.') continue
-    if (seg === '..') {
-      if (stack.length === 0) {
-        return { ok: false, error: 'path escapes storage root' }
-      }
-      stack.pop()
-      continue
-    }
-    stack.push(seg)
-  }
-  if (stack.length === 0) {
-    return { ok: false, error: 'path resolves to storage root with no file' }
-  }
-  return { ok: true, key: stack.join('/') }
-}
-
-// Pull a usable path out of whatever the cell holds. Parquet image columns
-// are typically plain strings, but some pipelines wrap them in `{path: ...}`
-// or `{uri: ...}` structs — try a couple of common shapes before giving up.
-function imagePathFromValue(value: unknown): string | null {
-  if (value === null || value === undefined) return null
-  if (typeof value === 'string') return value.length > 0 ? value : null
-  if (typeof value === 'object' && value !== null) {
-    const v = value as Record<string, unknown>
-    for (const key of ['path', 'uri', 'url', 'src']) {
-      const candidate = v[key]
-      if (typeof candidate === 'string' && candidate.length > 0) return candidate
-    }
-  }
-  return null
 }
 
 function RowSkeletons({ count, ruleCount }: { count: number; ruleCount: number }) {
@@ -458,109 +216,35 @@ function RowSkeletons({ count, ruleCount }: { count: number; ruleCount: number }
   )
 }
 
-interface RulesDialogProps {
-  open: boolean
-  rules: Rule[]
-  columns: ParquetColumnInfo[]
-  onClose: () => void
-  onSave: (next: Rule[]) => void
-}
-
-function RulesDialog({ open, rules, columns, onClose, onSave }: RulesDialogProps) {
-  // Draft text lives only while the dialog is open. We seed it from the
-  // current saved rules every time the dialog opens so the textarea always
-  // reflects what's actually in the URL, not a stale in-memory edit.
-  const initialDraft = useMemo(
-    () => (rules.length > 0 ? JSON.stringify(rules, null, 2) : EXAMPLE_RULES),
-    [rules],
-  )
-  const [draft, setDraft] = useState(initialDraft)
-  const [validationError, setValidationError] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (open) {
-      setDraft(initialDraft)
-      setValidationError(null)
-    }
-  }, [open, initialDraft])
-
-  const handleSave = () => {
-    let parsed: unknown
-    try {
-      parsed = JSON.parse(draft)
-    } catch (err) {
-      setValidationError(`invalid JSON: ${err instanceof Error ? err.message : String(err)}`)
-      return
-    }
-    const result = validateRules(parsed)
-    if (result.error) {
-      setValidationError(result.error)
-      return
-    }
-    onSave(result.rules)
-  }
-
-  const handleClear = () => {
-    onSave([])
-  }
-
-  const columnNames = columns.map((c) => c.name).join(', ')
-
-  return (
-    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose() }}>
-      <DialogContent className="sm:max-w-2xl gap-3">
-        <DialogHeader>
-          <DialogTitle>Rows view rules</DialogTitle>
-        </DialogHeader>
-
-        <p className="text-xs text-muted-foreground">
-          JSON array of rules. Each rule: <span className="font-mono">{'{"column": "...", "kind": "text" | "image", "label"?: "...", "pathPrefix"?: "..."}'}</span>.
-          Image cells resolve <span className="font-mono">pathPrefix + value</span> relative to this parquet file's directory
-          (<span className="font-mono">./</span> by default, <span className="font-mono">../</span> walks up one level; leading <span className="font-mono">/</span> is absolute from storage root).
-        </p>
-
-        <textarea
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          spellCheck={false}
-          rows={14}
-          className={cn(
-            'w-full rounded-md border border-input bg-transparent p-3 font-mono text-xs leading-relaxed',
-            'transition-colors outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50',
-            'dark:bg-input/30',
-          )}
-        />
-
-        {validationError && (
-          <Alert variant="destructive">
-            <AlertCircle className="size-4" />
-            <AlertTitle>Invalid rules</AlertTitle>
-            <AlertDescription>{validationError}</AlertDescription>
-          </Alert>
-        )}
-
-        <details className="text-xs text-muted-foreground">
-          <summary className="cursor-pointer select-none">Columns in this file ({columns.length})</summary>
-          <div className="mt-1 font-mono break-words text-[11px]">{columnNames || '(none)'}</div>
-        </details>
-
-        <DialogFooter>
-          {rules.length > 0 && (
-            <Button variant="ghost" onClick={handleClear} className="mr-auto">
-              Clear rules
-            </Button>
-          )}
-          <Button variant="outline" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button onClick={handleSave}>Save</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  )
-}
 
 function describeError(err: unknown): string {
   if (err instanceof Error) return err.message
   return String(err)
+}
+
+// Header counter text. Three states map to three phrasings:
+//   * totalRows known, > 0  → "X of N rows loaded"
+//   * totalRows null (streaming) + hasMore → "X rows loaded, still streaming…"
+//   * totalRows = 0           → "Empty file"
+function formatLoadedHint(
+  loaded: number,
+  totalRows: number | null,
+  hasMore: boolean,
+): string {
+  if (totalRows === 0) return 'Empty file'
+  if (totalRows === null) {
+    if (hasMore) return `${loaded.toLocaleString()} rows loaded, still streaming…`
+    // null totalRows but no more rows = stream resolved empty-ish; treat as
+    // loaded but unknown final size
+    return `${loaded.toLocaleString()} rows loaded`
+  }
+  return `${loaded.toLocaleString()} of ${totalRows.toLocaleString()} rows loaded`
+}
+
+// "Load N more" button label. When the total is unknown (streaming) we
+// can't precompute N — just say "Load more" and let the next batch decide.
+function loadMoreLabel(loaded: number, totalRows: number | null): string {
+  if (totalRows === null) return 'Load more'
+  const remaining = Math.max(0, totalRows - loaded)
+  return `Load ${Math.min(20, remaining)} more`
 }

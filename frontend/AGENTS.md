@@ -60,6 +60,16 @@ frontend/src/
 ## 6. 开发范式 (MUST FOLLOW)
 
 * **流式处理**: 对于视频预览，利用浏览器对 `<video>` 标签的 `Range` 请求支持。若发生鉴权问题，优先通过 URL 参数传递 Token。
-* **防御性渲染**: 必须为所有 API 请求提供 `Skeleton` (骨架屏) 和 `ErrorState` (错误提示)，严禁直接渲染 `undefined` 数据。
+* **防御性渲染**: 必须为所有 API 请求提供 `Skeleton` (骨架屏) 和 `ErrorState` (错误提示)，严禁直接渲染 `undefined` 数据。具体的 Loading 行为细则见 §7。
 * **类型定义**: API 返回的 `FileMeta` 等对象必须有明确的 TypeScript 接口定义。
 * **生产约束**: 禁止引入任何需要 SSR 或 Node.js Server 运行时的依赖，确保产物为纯静态文件。
+
+## 7. Loading 状态处理规范 (MUST FOLLOW)
+
+* **状态字段**: 首次加载用 `isPending` + `Skeleton`；后台刷新用 `isFetching`，保留旧 UI 仅加轻量提示（顶部进度、`Loader2`、`opacity-60`）。禁止使用 `isLoading`，禁止用 `useState` 镜像 Query 状态。
+* **Skeleton 形状**: 行数、列数、宽高、圆角须与真实内容近似以防 CLS；作用域限定在依赖该请求的子区域，无关区域保持可交互。可参考 `FileList.tsx` 中按视图模式拆分的三种骨架。
+* **分页 / 过滤**: 列表类 Query 必须配 `placeholderData: keepPreviousData`（见 `src/hooks/use-storage.ts`）；翻页 /「加载更多」按钮在 `isFetching` 期间 `disabled`，文案换为 `Loader2` + 动名词。
+* **三态收敛**: 视图按 `isPending → error → empty → data` 顺序短路返回，三态互斥；错误态就近用 `<Alert variant="destructive">` 展示，并暴露 `refetch()` 供重试。
+* **Mutation 反馈**: 提交按钮在 `isPending` 期间 `disabled` + `Loader2`，文案改为动名词；行内编辑 / toggle / 删除走乐观更新（`onMutate` + `onError` 回滚），仅对受影响行加 `opacity-60`，避免整页遮罩。
+* **指示器选型**: 整块占位用 `Skeleton`，按钮 / 小区域用 `Loader2` + `animate-spin`（`size-4`）；同一区域只允许一个指示器，禁止骨架 + spinner 并存。
+* **取消与竞态**: 远程数据一律走 TanStack Query，由 `queryKey` 处理失效与取消；自管异步（WebWorker、流式解码）必须用 `AbortController` 或在 effect 清理函数里设 `cancelled` 标志位。

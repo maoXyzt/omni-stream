@@ -26,6 +26,17 @@ export default defineConfig([
       // bundled — initial state already handles it, the effect only covers
       // post-mount language switches. Cascading-render cost is negligible.
       'react-hooks/set-state-in-effect': 'off',
+      // Allow `_`-prefixed names to signal "intentionally unused" — useful
+      // for destructured props we plan to consume in a follow-up.
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        {
+          argsIgnorePattern: '^_',
+          varsIgnorePattern: '^_',
+          caughtErrorsIgnorePattern: '^_',
+          destructuredArrayIgnorePattern: '^_',
+        },
+      ],
     },
   },
 ])
