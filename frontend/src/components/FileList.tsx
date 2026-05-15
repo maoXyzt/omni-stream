@@ -130,8 +130,18 @@ export function FileList() {
     return { key: prefix + previewName, kind }
   }, [previewName, prefix])
 
+  // Ignore directory jumps fired within this window after a previous one.
+  // Cached + `keepPreviousData` listings can re-render the row layout almost
+  // instantly after a click, so the second tick of a double-click lands on a
+  // new folder at the same screen position — the user sees one click descend
+  // two levels. Throttling at `goToPath` (rather than inside the row click
+  // handler) covers the file list, sidebar, and breadcrumb in one place.
+  const lastDirNavRef = useRef(0)
   const goToPath = useCallback(
     (nextPrefix: string) => {
+      const now = performance.now()
+      if (now - lastDirNavRef.current < 300) return
+      lastDirNavRef.current = now
       // Clearing page state when switching directories is intentional: the
       // page_token cursor returned by S3 is scoped to a specific prefix.
       setTokenStack([undefined])
