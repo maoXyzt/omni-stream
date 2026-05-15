@@ -13,7 +13,11 @@ import {
 import { Skeleton } from '@/components/ui/skeleton'
 import { useRowsViewConfig } from '@/hooks/use-rows-view-config'
 import { type Node, parseRules } from '@/lib/rows-schema'
-import { type ColumnInfo, type RowsSource } from '@/lib/rows-source'
+import {
+  type ColumnInfo,
+  type RowsSource,
+  type SourceDiagnostics,
+} from '@/lib/rows-source'
 import { cn } from '@/lib/utils'
 import { RowCard, RowNode } from '@/components/preview/rows-render'
 
@@ -36,11 +40,19 @@ interface RowsViewProps {
 export function RowsView({ fileKey, source, storage }: RowsViewProps) {
   const { rules, decodeError, setRules } = useRowsViewConfig()
   const renderCtx = useMemo(() => ({ fileKey, storage }), [fileKey, storage])
-  const numRows = source.numRows
   const columns = source.columns
 
   const [rows, setRows] = useState<Record<string, unknown>[]>([])
-  const [nextRowStart, setNextRowStart] = useState(0)
+  // Initial values come from the source's load-time metadata; each readRows
+  // result can update them (notably: jsonl streaming surfaces totalRows only
+  // after the stream completes).
+  const [totalRows, setTotalRows] = useState<number | null>(source.totalRows)
+  const [hasMore, setHasMore] = useState<boolean>(
+    source.totalRows === null || source.totalRows > 0,
+  )
+  const [diagnostics, setDiagnostics] = useState<SourceDiagnostics | undefined>(
+    source.diagnostics,
+  )
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -52,17 +64,20 @@ export function RowsView({ fileKey, source, storage }: RowsViewProps) {
   useEffect(() => {
     const token = ++loadTokenRef.current
     setRows([])
-    setNextRowStart(0)
+    setTotalRows(source.totalRows)
+    setHasMore(source.totalRows === null || source.totalRows > 0)
+    setDiagnostics(source.diagnostics)
     setError(null)
-    if (numRows === 0) return
+    if (source.totalRows === 0) return
     setLoading(true)
-    const rowEnd = Math.min(ROWS_PAGE, numRows)
     source
-      .readRows(0, rowEnd)
-      .then((batch) => {
+      .readRows(0, ROWS_PAGE)
+      .then((result) => {
         if (loadTokenRef.current !== token) return
-        setRows(batch)
-        setNextRowStart(rowEnd)
+        setRows(result.rows)
+        setTotalRows(result.totalRows)
+        setHasMore(result.hasMore)
+        if (result.diagnostics) setDiagnostics(result.diagnostics)
         setLoading(false)
       })
       .catch((err: unknown) => {
@@ -70,22 +85,22 @@ export function RowsView({ fileKey, source, storage }: RowsViewProps) {
         setError(describeError(err))
         setLoading(false)
       })
-  }, [source, numRows])
-
-  const hasMore = nextRowStart < numRows
+  }, [source])
 
   const loadMore = () => {
     if (loading || !hasMore) return
     const token = ++loadTokenRef.current
+    const start = rows.length
     setLoading(true)
     setError(null)
-    const rowEnd = Math.min(nextRowStart + ROWS_PAGE, numRows)
     source
-      .readRows(nextRowStart, rowEnd)
-      .then((batch) => {
+      .readRows(start, start + ROWS_PAGE)
+      .then((result) => {
         if (loadTokenRef.current !== token) return
-        setRows((prev) => [...prev, ...batch])
-        setNextRowStart(rowEnd)
+        setRows((prev) => [...prev, ...result.rows])
+        setTotalRows(result.totalRows)
+        setHasMore(result.hasMore)
+        if (result.diagnostics) setDiagnostics(result.diagnostics)
         setLoading(false)
       })
       .catch((err: unknown) => {
@@ -99,18 +114,14 @@ export function RowsView({ fileKey, source, storage }: RowsViewProps) {
     <div className="flex h-full min-h-0 flex-col gap-3">
       <div className="flex items-center justify-between gap-3">
         <div className="flex flex-wrap items-baseline gap-x-2 text-sm text-muted-foreground">
-          <span>
-            {numRows === 0
-              ? 'Empty file'
-              : `${rows.length.toLocaleString()} of ${numRows.toLocaleString()} rows loaded`}
-          </span>
-          {source.diagnostics?.skippedLines && source.diagnostics.skippedLines > 0 && (
+          <span>{formatLoadedHint(rows.length, totalRows, hasMore)}</span>
+          {diagnostics?.skippedLines && diagnostics.skippedLines > 0 && (
             <span
               className="rounded-md border border-dashed border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-xs text-amber-700 dark:text-amber-300"
               title="Lines that didn't parse as a JSON object — most often empty or malformed entries"
             >
-              {source.diagnostics.skippedLines.toLocaleString()} line
-              {source.diagnostics.skippedLines === 1 ? '' : 's'} skipped
+              {diagnostics.skippedLines.toLocaleString()} line
+              {diagnostics.skippedLines === 1 ? '' : 's'} skipped
             </span>
           )}
         </div>
@@ -170,7 +181,7 @@ export function RowsView({ fileKey, source, storage }: RowsViewProps) {
                       Loading…
                     </>
                   ) : (
-                    `Load ${Math.min(ROWS_PAGE, numRows - nextRowStart)} more`
+                    loadMoreLabel(rows.length, totalRows)
                   )}
                 </Button>
               </div>
@@ -341,4 +352,31 @@ function RulesDialog({ open, rules, columns, onClose, onSave }: RulesDialogProps
 function describeError(err: unknown): string {
   if (err instanceof Error) return err.message
   return String(err)
+}
+
+// Header counter text. Three states map to three phrasings:
+//   * totalRows known, > 0  → "X of N rows loaded"
+//   * totalRows null (streaming) + hasMore → "X rows loaded, still streaming…"
+//   * totalRows = 0           → "Empty file"
+function formatLoadedHint(
+  loaded: number,
+  totalRows: number | null,
+  hasMore: boolean,
+): string {
+  if (totalRows === 0) return 'Empty file'
+  if (totalRows === null) {
+    if (hasMore) return `${loaded.toLocaleString()} rows loaded, still streaming…`
+    // null totalRows but no more rows = stream resolved empty-ish; treat as
+    // loaded but unknown final size
+    return `${loaded.toLocaleString()} rows loaded`
+  }
+  return `${loaded.toLocaleString()} of ${totalRows.toLocaleString()} rows loaded`
+}
+
+// "Load N more" button label. When the total is unknown (streaming) we
+// can't precompute N — just say "Load more" and let the next batch decide.
+function loadMoreLabel(loaded: number, totalRows: number | null): string {
+  if (totalRows === null) return 'Load more'
+  const remaining = Math.max(0, totalRows - loaded)
+  return `Load ${Math.min(20, remaining)} more`
 }

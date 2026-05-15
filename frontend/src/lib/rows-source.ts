@@ -29,16 +29,41 @@ export interface SourceDiagnostics {
   skippedLines?: number
 }
 
+export interface ReadRowsResult {
+  /// The actually-returned rows. May be shorter than `end - start` when the
+  /// underlying source runs out of data (parquet near EOF, jsonl stream
+  /// completing mid-page).
+  rows: Record<string, unknown>[]
+  /// True when more rows are available past the requested `rowEnd`. UI uses
+  /// this for the "Load more" button visibility — single source of truth so
+  /// the renderer doesn't have to reason about totalRows vs streaming.
+  hasMore: boolean
+  /// Most-recently-known total row count. Parquet knows this from the
+  /// footer at load time and always reports it. Streaming jsonl reports
+  /// null until the stream completes, then the final count. UI updates its
+  /// state from each result so the header counter transitions naturally.
+  totalRows: number | null
+  /// Optional updated diagnostics. Streaming sources surface counts that
+  /// grow as more lines are read; whole-file sources only set this on the
+  /// first read.
+  diagnostics?: SourceDiagnostics
+}
+
 export interface RowsSource {
   kind: 'parquet' | 'jsonl'
   columns: ColumnInfo[]
-  numRows: number
-  /// Optional health/info readout from the load. Used for "3 lines skipped"
-  /// style hints; absent when there's nothing worth saying.
+  /// Best-known row count at source-load time. Parquet's metadata gives the
+  /// exact number; jsonl whole-file load knows it after parsing; jsonl
+  /// streaming starts at null. UI uses this for the initial render before
+  /// the first readRows result lands, then updates from result.totalRows.
+  totalRows: number | null
+  /// Initial diagnostics from load-time work (e.g. column-inference parse
+  /// pass). May be superseded by later readRows results in streaming sources.
   diagnostics?: SourceDiagnostics
   /// Read a contiguous row range. Implementations may cache aggressively
-  /// (jsonl loads the whole file upfront); the contract is the same.
-  readRows(rowStart: number, rowEnd: number): Promise<Record<string, unknown>[]>
+  /// (jsonl whole-file) or stream on demand (jsonl streaming); the contract
+  /// is the same.
+  readRows(rowStart: number, rowEnd: number): Promise<ReadRowsResult>
 }
 
 /// Load a rows-view-ready source. Dispatches by file extension.
@@ -79,17 +104,30 @@ export function detectFormat(fileKey: string): SourceFormat | null {
 async function loadParquetRowsSource(src: string): Promise<RowsSource> {
   const parquet: ParquetSource = await loadParquetSource(src)
   const cols = extractTopLevelColumns(parquet.metadata)
+  const total = totalRowCount(parquet.metadata)
   return {
     kind: 'parquet',
     columns: cols.map((c) => ({ name: c.name, type: c.type })),
-    numRows: totalRowCount(parquet.metadata),
-    readRows: (rowStart, rowEnd) =>
-      readParquetRows({
-        file: parquet.file,
-        metadata: parquet.metadata,
-        rowStart,
-        rowEnd,
-      }),
+    totalRows: total,
+    readRows: async (rowStart, rowEnd) => {
+      // hyparquet expects valid bounds; clamp the upper end so a caller
+      // asking for [N-10, N+10) doesn't trip an internal assert.
+      const clampedEnd = Math.min(rowEnd, total)
+      const rows =
+        clampedEnd <= rowStart
+          ? []
+          : await readParquetRows({
+              file: parquet.file,
+              metadata: parquet.metadata,
+              rowStart,
+              rowEnd: clampedEnd,
+            })
+      return {
+        rows,
+        hasMore: clampedEnd < total,
+        totalRows: total,
+      }
+    },
   }
 }
 
@@ -130,12 +168,21 @@ async function loadJsonlRowsSource(src: string): Promise<RowsSource> {
   const text = await res.text()
   const { rows, errors } = parseJsonlText(text)
   const columns = inferJsonlColumns(rows, 100)
+  const diagnostics = errors > 0 ? { skippedLines: errors } : undefined
   return {
     kind: 'jsonl',
     columns,
-    numRows: rows.length,
-    diagnostics: errors > 0 ? { skippedLines: errors } : undefined,
-    readRows: async (rowStart, rowEnd) => rows.slice(rowStart, rowEnd),
+    totalRows: rows.length,
+    diagnostics,
+    readRows: async (rowStart, rowEnd) => {
+      const clampedEnd = Math.min(rowEnd, rows.length)
+      return {
+        rows: rows.slice(rowStart, clampedEnd),
+        hasMore: clampedEnd < rows.length,
+        totalRows: rows.length,
+        diagnostics,
+      }
+    },
   }
 }
 
