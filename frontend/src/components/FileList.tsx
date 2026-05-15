@@ -48,6 +48,7 @@ import {
   getPreviewType,
   iconForKey,
   previewableKind,
+  typeLabelForEntry,
 } from '@/components/preview/registry'
 import type { PreviewKind } from '@/components/preview/types'
 import { StorageSwitcher } from '@/components/StorageSwitcher'
@@ -623,6 +624,7 @@ export function FileList() {
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-1/2">Name</TableHead>
+                    <TableHead className="w-28">Type</TableHead>
                     <TableHead className="w-32 text-right">Size</TableHead>
                     <TableHead>Modified</TableHead>
                   </TableRow>
@@ -631,7 +633,7 @@ export function FileList() {
                   {sortedEntries.length === 0 && (
                     <TableRow>
                       <TableCell
-                        colSpan={3}
+                        colSpan={4}
                         className="text-center text-muted-foreground py-10"
                       >
                         Empty directory.
@@ -751,6 +753,7 @@ function FileRow({ entry, prefix, storageName, onSelect }: FileRowProps) {
   const Icon = entry.is_dir ? Folder : iconForKey(entry.key)
   const color = entry.is_dir ? FOLDER_COLOR : colorForKey(entry.key)
   const name = displayName(entry.key, prefix)
+  const typeLabel = typeLabelForEntry(entry.key, entry.is_dir)
 
   return (
     <EntryContextMenu entry={entry} storageName={storageName}>
@@ -764,6 +767,7 @@ function FileRow({ entry, prefix, storageName, onSelect }: FileRowProps) {
             {name}
           </span>
         </TableCell>
+        <TableCell className="text-muted-foreground">{typeLabel}</TableCell>
         <TableCell className="text-right tabular-nums text-muted-foreground">
           {entry.is_dir ? '—' : formatBytes(entry.size)}
         </TableCell>
