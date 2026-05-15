@@ -14,6 +14,13 @@
 import { lazy, useEffect, useMemo, useState } from 'react'
 import { ImageOff, LinkIcon, MicOff, VideoOff } from 'lucide-react'
 
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { ImagePreview } from '@/components/preview/ImagePreview'
 import { formatCell, formatCellExpanded } from '@/lib/parquet'
 import { resolveSrc, type SrcResolution } from '@/lib/rows-paths'
 
@@ -91,7 +98,13 @@ export function WidgetImage({ value, src, ctx }: MediaProps) {
   )
   const url = r.ok ? r.url : ''
   const [failed, setFailed] = useState(false)
-  useEffect(() => setFailed(false), [url])
+  const [lightboxOpen, setLightboxOpen] = useState(false)
+  // Reset both flags whenever the resolved URL changes — a recycled cell
+  // shouldn't stay stuck on the previous image's error / lightbox state.
+  useEffect(() => {
+    setFailed(false)
+    setLightboxOpen(false)
+  }, [url])
 
   if (!r.ok) return <MediaError icon={ImageOff} reason={r.reason} />
   if (failed) {
@@ -104,15 +117,48 @@ export function WidgetImage({ value, src, ctx }: MediaProps) {
     )
   }
   return (
-    <div className="overflow-hidden rounded-md border bg-muted/30">
-      <img
-        src={r.url}
-        alt={resolutionDetail(r)}
-        onError={() => setFailed(true)}
-        loading="lazy"
-        className="max-h-96 w-auto max-w-full object-contain"
-      />
-    </div>
+    <>
+      {/* Wrapping the image in a real <button> rather than an onClick <div>
+          so keyboard focus, Enter/Space activation, and focus-visible rings
+          all come for free. The image keeps cursor-zoom-in to signal what
+          clicking will do. */}
+      <button
+        type="button"
+        onClick={() => setLightboxOpen(true)}
+        aria-label="Open image at full size"
+        className="block w-fit overflow-hidden rounded-md border bg-muted/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <img
+          src={r.url}
+          alt={resolutionDetail(r)}
+          onError={() => setFailed(true)}
+          loading="lazy"
+          className="max-h-96 w-auto max-w-full cursor-zoom-in object-contain"
+        />
+      </button>
+      <Dialog open={lightboxOpen} onOpenChange={setLightboxOpen}>
+        <DialogContent
+          // Full-bleed lightbox: 95vw × 95vh, no padding, no default close
+          // button (ImagePreview's zoom toolbar lives at top-right and the
+          // default button would collide). Esc and backdrop click both still
+          // close via Radix.
+          className="flex h-[95vh] w-[95vw] max-w-[95vw] flex-col gap-0 p-0 sm:max-w-[95vw]"
+          showCloseButton={false}
+          onOpenAutoFocus={(e) => e.preventDefault()}
+        >
+          <DialogHeader className="sr-only">
+            <DialogTitle>Image preview</DialogTitle>
+          </DialogHeader>
+          <div className="flex min-h-0 flex-1">
+            <ImagePreview
+              fileKey={r.key ?? ''}
+              src={r.url}
+              storage={ctx.storage}
+            />
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }
 

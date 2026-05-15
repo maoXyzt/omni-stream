@@ -122,6 +122,7 @@ describe('resolveSrc — template handling', () => {
     expect(r).toEqual({
       ok: true,
       url: '/api/proxy/datasets/imagenet/00001.png',
+      key: 'datasets/imagenet/00001.png',
     })
   })
 
@@ -130,15 +131,20 @@ describe('resolveSrc — template handling', () => {
     expect(r).toEqual({
       ok: true,
       url: '/api/proxy/datasets/images/00001.png',
+      key: 'datasets/images/00001.png',
     })
   })
 
   it('template without {value} is used verbatim (static)', () => {
     const r = resolveSrc('/static/logo.png', 'ignored', FILE, undefined)
-    expect(r).toEqual({ ok: true, url: '/api/proxy/static/logo.png' })
+    expect(r).toEqual({
+      ok: true,
+      url: '/api/proxy/static/logo.png',
+      key: 'static/logo.png',
+    })
   })
 
-  it('CDN-style template after substitution stays external', () => {
+  it('CDN-style template after substitution stays external (no storage key)', () => {
     const r = resolveSrc(
       'https://cdn.example.com/{value}.png',
       'abc123',
@@ -168,7 +174,11 @@ describe('resolveSrc — template handling', () => {
 
   it('missing cell value without {value} template → OK', () => {
     const r = resolveSrc('/static/logo.png', null, FILE, undefined)
-    expect(r).toEqual({ ok: true, url: '/api/proxy/static/logo.png' })
+    expect(r).toEqual({
+      ok: true,
+      url: '/api/proxy/static/logo.png',
+      key: 'static/logo.png',
+    })
   })
 
   it('object cell value with .path field is supported', () => {
@@ -176,6 +186,7 @@ describe('resolveSrc — template handling', () => {
     expect(r).toEqual({
       ok: true,
       url: '/api/proxy/datasets/imagenet/a.png',
+      key: 'datasets/imagenet/a.png',
     })
   })
 
@@ -189,6 +200,7 @@ describe('resolveSrc — template handling', () => {
     expect(r).toEqual({
       ok: true,
       url: '/api/proxy/foo/bar.png?storage=mybucket',
+      key: 'foo/bar.png',
     })
   })
 
@@ -197,6 +209,7 @@ describe('resolveSrc — template handling', () => {
     expect(r).toEqual({
       ok: true,
       url: '/api/proxy/datasets/imagenet/a.png?storage=mybucket',
+      key: 'datasets/imagenet/a.png',
     })
   })
 
@@ -206,6 +219,7 @@ describe('resolveSrc — template handling', () => {
     expect(r).toEqual({
       ok: true,
       url: '/api/proxy/datasets/imagenet/abc/thumb-abc',
+      key: 'datasets/imagenet/abc/thumb-abc',
     })
   })
 

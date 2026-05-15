@@ -16,7 +16,16 @@
 import { proxyUrl } from '@/api/storage'
 
 export type SrcResolution =
-  | { ok: true; url: string }
+  | {
+      ok: true
+      /// Final URL ready to drop into an <img>/<video>/<a> element.
+      url: string
+      /// Storage key for the resolved path, when the URL goes through the
+      /// internal proxy. Unset for external http(s) URLs. Lets callers that
+      /// need additional storage operations (file stat, alt nav, etc.)
+      /// recover the key without re-parsing the URL.
+      key?: string
+    }
   | { ok: false; reason: string }
 
 /// Resolve a widget's `src` template + cell value into a final URL.
@@ -64,13 +73,17 @@ export function resolveSrc(
     if (key.length === 0) {
       return { ok: false, reason: 'path resolves to storage root with no file' }
     }
-    return { ok: true, url: proxyUrl(key, storage) }
+    return { ok: true, url: proxyUrl(key, storage), key }
   }
 
   // Relative — anchor at the source file's directory.
   const resolved = resolveStorageKey(fileKey, rendered)
   if (!resolved.ok) return resolved
-  return { ok: true, url: proxyUrl(resolved.key, storage) }
+  return {
+    ok: true,
+    url: proxyUrl(resolved.key, storage),
+    key: resolved.key,
+  }
 }
 
 /// Pull a usable path string out of a cell value. Most parquet image columns
