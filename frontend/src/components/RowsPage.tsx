@@ -11,12 +11,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { TokenPrompt } from '@/components/TokenPrompt'
 import { RowsView } from '@/components/preview/RowsView'
 import { useStorages } from '@/hooks/use-storage'
-import {
-  type ParquetSource,
-  extractTopLevelColumns,
-  loadParquetSource,
-  totalRowCount,
-} from '@/lib/parquet'
+import { type RowsSource, loadRowsSource } from '@/lib/rows-source'
 
 export function RowsPage() {
   const queryClient = useQueryClient()
@@ -30,10 +25,10 @@ export function RowsPage() {
   const storagesQuery = useStorages()
   const src = proxyUrl(fileKey, storageName || undefined)
 
-  const [source, setSource] = useState<ParquetSource | null>(null)
+  const [source, setSource] = useState<RowsSource | null>(null)
   const [metaError, setMetaError] = useState<ApiError | Error | null>(null)
-  // Token guard mirrors `ParquetPreview` — stale loads from an earlier `src`
-  // must not splat back into state after the user navigates between files.
+  // Token guard: stale loads from an earlier `src` must not splat back into
+  // state after the user navigates between files.
   const loadTokenRef = useRef(0)
 
   useEffect(() => {
@@ -41,7 +36,7 @@ export function RowsPage() {
     const token = ++loadTokenRef.current
     setSource(null)
     setMetaError(null)
-    loadParquetSource(src)
+    loadRowsSource(src, fileKey)
       .then((s) => {
         if (loadTokenRef.current === token) setSource(s)
       })
@@ -62,7 +57,7 @@ export function RowsPage() {
   }
 
   // Missing file path means the URL is malformed (`/r/storage/`). Send the
-  // user to the storage's file list rather than rendering a parquet loader
+  // user to the storage's file list rather than rendering a data loader
   // pointed at nothing.
   if (!fileKey) {
     return (
@@ -125,7 +120,7 @@ export function RowsPage() {
         {metaError ? (
           <Alert variant="destructive" className="max-w-xl">
             <AlertCircle className="size-4" />
-            <AlertTitle>Failed to read parquet file</AlertTitle>
+            <AlertTitle>Failed to read data file</AlertTitle>
             <AlertDescription>{metaError.message}</AlertDescription>
           </Alert>
         ) : !source ? (
@@ -138,8 +133,6 @@ export function RowsPage() {
           <RowsView
             fileKey={fileKey}
             source={source}
-            columns={extractTopLevelColumns(source.metadata)}
-            numRows={totalRowCount(source.metadata)}
             storage={storageName || undefined}
           />
         )}

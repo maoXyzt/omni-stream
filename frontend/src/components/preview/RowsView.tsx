@@ -13,12 +13,8 @@ import {
 import { Skeleton } from '@/components/ui/skeleton'
 import { useRowsViewConfig } from '@/hooks/use-rows-view-config'
 import { type Node, parseRules } from '@/lib/rows-schema'
+import { type ColumnInfo, type RowsSource } from '@/lib/rows-source'
 import { cn } from '@/lib/utils'
-import {
-  type ParquetColumnInfo,
-  type ParquetSource,
-  readParquetRows,
-} from '@/lib/parquet'
 import { RowCard, RowNode } from '@/components/preview/rows-render'
 
 const ROWS_PAGE = 20
@@ -33,21 +29,15 @@ const EXAMPLE_RULES = `[
 
 interface RowsViewProps {
   fileKey: string
-  source: ParquetSource
-  columns: ParquetColumnInfo[]
-  numRows: number
+  source: RowsSource
   storage?: string
 }
 
-export function RowsView({
-  fileKey,
-  source,
-  columns,
-  numRows,
-  storage,
-}: RowsViewProps) {
+export function RowsView({ fileKey, source, storage }: RowsViewProps) {
   const { rules, decodeError, setRules } = useRowsViewConfig()
   const renderCtx = useMemo(() => ({ fileKey, storage }), [fileKey, storage])
+  const numRows = source.numRows
+  const columns = source.columns
 
   const [rows, setRows] = useState<Record<string, unknown>[]>([])
   const [nextRowStart, setNextRowStart] = useState(0)
@@ -55,9 +45,8 @@ export function RowsView({
   const [error, setError] = useState<string | null>(null)
   const [dialogOpen, setDialogOpen] = useState(false)
 
-  // Same stale-result-guard trick used by `ParquetPreview` itself: when the
-  // user opens a different parquet, abandoned page fetches must not splat
-  // their rows back into our state.
+  // Stale-result-guard: when the user opens a different file, abandoned page
+  // fetches must not splat their rows back into our state.
   const loadTokenRef = useRef(0)
 
   useEffect(() => {
@@ -68,12 +57,8 @@ export function RowsView({
     if (numRows === 0) return
     setLoading(true)
     const rowEnd = Math.min(ROWS_PAGE, numRows)
-    readParquetRows({
-      file: source.file,
-      metadata: source.metadata,
-      rowStart: 0,
-      rowEnd,
-    })
+    source
+      .readRows(0, rowEnd)
       .then((batch) => {
         if (loadTokenRef.current !== token) return
         setRows(batch)
@@ -95,12 +80,8 @@ export function RowsView({
     setLoading(true)
     setError(null)
     const rowEnd = Math.min(nextRowStart + ROWS_PAGE, numRows)
-    readParquetRows({
-      file: source.file,
-      metadata: source.metadata,
-      rowStart: nextRowStart,
-      rowEnd,
-    })
+    source
+      .readRows(nextRowStart, rowEnd)
       .then((batch) => {
         if (loadTokenRef.current !== token) return
         setRows((prev) => [...prev, ...batch])
@@ -244,7 +225,7 @@ function RowSkeletons({ count, ruleCount }: { count: number; ruleCount: number }
 interface RulesDialogProps {
   open: boolean
   rules: Node[]
-  columns: ParquetColumnInfo[]
+  columns: ColumnInfo[]
   onClose: () => void
   onSave: (next: Node[]) => void
 }
