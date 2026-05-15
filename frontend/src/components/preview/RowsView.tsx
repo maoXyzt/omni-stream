@@ -1,14 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { AlertCircle, Loader2, Settings2 } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { useInfiniteQuery } from '@tanstack/react-query'
+import { AlertCircle, Loader2, RotateCw, Settings2 } from 'lucide-react'
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useRowsViewConfig } from '@/hooks/use-rows-view-config'
-import {
-  type RowsSource,
-  type SourceDiagnostics,
-} from '@/lib/rows-source'
+import { type RowsSource } from '@/lib/rows-source'
 import { RowCard, RowNode } from '@/components/preview/rows-render'
 import { RulesDialog } from '@/components/preview/rows-rules-dialog'
 
@@ -24,73 +22,43 @@ export function RowsView({ fileKey, source, storage }: RowsViewProps) {
   const { rules, decodeError, setRules } = useRowsViewConfig()
   const renderCtx = useMemo(() => ({ fileKey, storage }), [fileKey, storage])
   const columns = source.columns
-
-  const [rows, setRows] = useState<Record<string, unknown>[]>([])
-  // Initial values come from the source's load-time metadata; each readRows
-  // result can update them (notably: jsonl streaming surfaces totalRows only
-  // after the stream completes).
-  const [totalRows, setTotalRows] = useState<number | null>(source.totalRows)
-  const [hasMore, setHasMore] = useState<boolean>(
-    source.totalRows === null || source.totalRows > 0,
-  )
-  const [diagnostics, setDiagnostics] = useState<SourceDiagnostics | undefined>(
-    source.diagnostics,
-  )
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
   const [dialogOpen, setDialogOpen] = useState(false)
 
-  // Stale-result-guard: when the user opens a different file, abandoned page
-  // fetches must not splat their rows back into our state.
-  const loadTokenRef = useRef(0)
+  // Paginated read driven by the source's readRows contract. Source is
+  // already keyed by (storage, fileKey) upstream, so the same key here
+  // gives us a stable cache that survives remounts of this component.
+  const rowsQuery = useInfiniteQuery({
+    queryKey: ['rows-data', storage ?? null, fileKey] as const,
+    queryFn: ({ pageParam }) =>
+      source.readRows(pageParam, pageParam + ROWS_PAGE),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, _pages, lastPageParam) =>
+      lastPage.hasMore ? lastPageParam + lastPage.rows.length : undefined,
+    enabled: source.totalRows !== 0,
+    // Pages are derived from immutable file contents — once loaded they
+    // never need to be refetched for the lifetime of this source.
+    staleTime: Infinity,
+  })
 
-  useEffect(() => {
-    const token = ++loadTokenRef.current
-    setRows([])
-    setTotalRows(source.totalRows)
-    setHasMore(source.totalRows === null || source.totalRows > 0)
-    setDiagnostics(source.diagnostics)
-    setError(null)
-    if (source.totalRows === 0) return
-    setLoading(true)
-    source
-      .readRows(0, ROWS_PAGE)
-      .then((result) => {
-        if (loadTokenRef.current !== token) return
-        setRows(result.rows)
-        setTotalRows(result.totalRows)
-        setHasMore(result.hasMore)
-        if (result.diagnostics) setDiagnostics(result.diagnostics)
-        setLoading(false)
-      })
-      .catch((err: unknown) => {
-        if (loadTokenRef.current !== token) return
-        setError(describeError(err))
-        setLoading(false)
-      })
-  }, [source])
+  const pages = rowsQuery.data?.pages ?? []
+  const rows = useMemo(() => pages.flatMap((p) => p.rows), [pages])
+  const latestPage = pages.at(-1)
+  // Streaming jsonl surfaces totalRows only after the stream completes; fall
+  // back to the source's load-time hint until the first page lands.
+  const totalRows = latestPage?.totalRows ?? source.totalRows
+  const diagnostics = latestPage?.diagnostics ?? source.diagnostics
+  const hasMore =
+    source.totalRows === 0 ? false : Boolean(rowsQuery.hasNextPage)
+  // First-page-in-flight is the only state that warrants the skeleton; a
+  // failing fetchNextPage keeps `rows` populated, so we never blank out.
+  const firstLoading =
+    source.totalRows !== 0 && rowsQuery.isPending && rowsQuery.isFetching
+  const loadingMore = rowsQuery.isFetchingNextPage
+  const errorMessage = rowsQuery.error ? describeError(rowsQuery.error) : null
 
-  const loadMore = () => {
-    if (loading || !hasMore) return
-    const token = ++loadTokenRef.current
-    const start = rows.length
-    setLoading(true)
-    setError(null)
-    source
-      .readRows(start, start + ROWS_PAGE)
-      .then((result) => {
-        if (loadTokenRef.current !== token) return
-        setRows((prev) => [...prev, ...result.rows])
-        setTotalRows(result.totalRows)
-        setHasMore(result.hasMore)
-        if (result.diagnostics) setDiagnostics(result.diagnostics)
-        setLoading(false)
-      })
-      .catch((err: unknown) => {
-        if (loadTokenRef.current !== token) return
-        setError(describeError(err))
-        setLoading(false)
-      })
+  const retry = () => {
+    if (rows.length === 0) void rowsQuery.refetch()
+    else void rowsQuery.fetchNextPage()
   }
 
   return (
@@ -132,7 +100,7 @@ export function RowsView({ fileKey, source, storage }: RowsViewProps) {
           <EmptyState onOpenRules={() => setDialogOpen(true)} />
         ) : (
           <div className="flex flex-col gap-4">
-            {loading && rows.length === 0 ? (
+            {firstLoading ? (
               <RowSkeletons count={3} ruleCount={rules.length} />
             ) : (
               rows.map((row, i) => (
@@ -143,11 +111,27 @@ export function RowsView({ fileKey, source, storage }: RowsViewProps) {
                 </RowCard>
               ))
             )}
-            {error && (
+            {errorMessage && (
               <Alert variant="destructive">
                 <AlertCircle className="size-4" />
                 <AlertTitle>Failed to load rows</AlertTitle>
-                <AlertDescription>{error}</AlertDescription>
+                <AlertDescription className="flex flex-col gap-3">
+                  <span>{errorMessage}</span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={retry}
+                    disabled={rowsQuery.isFetching}
+                    className="self-start"
+                  >
+                    {rowsQuery.isFetching ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : (
+                      <RotateCw className="size-4" />
+                    )}
+                    Retry
+                  </Button>
+                </AlertDescription>
               </Alert>
             )}
             {rows.length > 0 && hasMore && (
@@ -155,10 +139,10 @@ export function RowsView({ fileKey, source, storage }: RowsViewProps) {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={loadMore}
-                  disabled={loading}
+                  onClick={() => void rowsQuery.fetchNextPage()}
+                  disabled={loadingMore}
                 >
-                  {loading ? (
+                  {loadingMore ? (
                     <>
                       <Loader2 className="size-4 animate-spin" />
                       Loading…
