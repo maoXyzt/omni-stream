@@ -8,11 +8,12 @@
 // stores `from` as a source string for URL compactness. We memoize per-node
 // so the same string isn't re-parsed across rows.
 
-import { useMemo } from 'react'
+import { Suspense, useMemo } from 'react'
 
 import type { AtomNode, Node } from '@/lib/rows-schema'
 import { parseSelector } from '@/lib/rows-selector'
 import { evalSelector } from '@/lib/rows-selector-eval'
+import { Skeleton } from '@/components/ui/skeleton'
 import {
   EmptyHint,
   WidgetAudio,
@@ -154,8 +155,26 @@ function RowAtom({
   )
 }
 
-// Dispatch a single value to the configured widget.
+// Dispatch a single value to the configured widget. Wraps in Suspense for the
+// two lazy widgets (markdown / highlight) — non-lazy widgets don't suspend so
+// the boundary is invisible to them.
 function WidgetSlot({
+  value,
+  node,
+  ctx,
+}: {
+  value: unknown
+  node: AtomNode
+  ctx: RenderContext
+}) {
+  return (
+    <Suspense fallback={<WidgetFallback />}>
+      <WidgetBody value={value} node={node} ctx={ctx} />
+    </Suspense>
+  )
+}
+
+function WidgetBody({
   value,
   node,
   ctx,
@@ -189,6 +208,10 @@ function WidgetSlot({
     case 'markdown':
       return <WidgetMarkdown value={value} maxHeight={node.maxHeight} />
   }
+}
+
+function WidgetFallback() {
+  return <Skeleton className="h-16 w-full" />
 }
 
 // -----------------------------------------------------------------------

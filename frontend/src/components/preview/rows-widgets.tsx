@@ -1,41 +1,29 @@
 // Widget components for the Rows View renderer. Each widget renders a single
 // cell value into UI; the renderer wraps them based on the schema node.
 //
-// All seven widgets share a small set of placeholder/error UIs so the visual
+// All widgets share a small set of placeholder/error UIs so the visual
 // language stays consistent: missing data → dashed muted box; broken media →
 // icon card; failed render → destructive-tinted hint.
+//
+// Heavyweight widgets live in their own modules so vite can code-split them
+// out of the main bundle: marked + DOMPurify (markdown) and highlight.js
+// core + grammars (highlight) only download when those widgets are actually
+// rendered. We re-export them as React.lazy here so the dispatch site stays
+// uniform; the Suspense boundary is in rows-render.tsx.
 
-import { useEffect, useMemo, useState } from 'react'
+import { lazy, useEffect, useMemo, useState } from 'react'
 import { ImageOff, LinkIcon, MicOff, VideoOff } from 'lucide-react'
-import DOMPurify, { type Config as DOMPurifyConfig } from 'dompurify'
-import { marked } from 'marked'
 
-import {
-  ensureLanguage,
-  highlight,
-  isLanguageBundled,
-} from '@/lib/highlight'
 import { formatCell, formatCellExpanded } from '@/lib/parquet'
 import { resolveSrc, type SrcResolution } from '@/lib/rows-paths'
-import { cn } from '@/lib/utils'
 
-import 'highlight.js/styles/github-dark.css'
+import { EmptyHint } from './widget-shared'
+
+export { EmptyHint } from './widget-shared'
 
 export interface RenderContext {
   fileKey: string
   storage: string | undefined
-}
-
-// Marked is configured once at module load. We turn off GFM so tables /
-// strikethrough / task-lists stay out (spec §2). DOMPurify sanitizes the
-// produced HTML before injection — that's the actual security boundary;
-// marked's deprecated `sanitize` option is not used.
-marked.use({ gfm: false, breaks: false, async: false })
-
-const PURIFY_OPTS: DOMPurifyConfig = {
-  USE_PROFILES: { html: true },
-  FORBID_TAGS: ['style', 'script', 'iframe', 'object', 'embed', 'form'],
-  FORBID_ATTR: ['style', 'onerror', 'onload', 'onclick'],
 }
 
 // -----------------------------------------------------------------------
@@ -51,8 +39,8 @@ export function WidgetDefault({ value, maxHeight = '18rem' }: DefaultProps) {
   if (value === null || value === undefined || value === '') {
     return <EmptyHint />
   }
-  // Primitives stay inline (single-line, no frame) so they don't visually
-  // dominate a row with multiple atoms. Composites use the multi-line frame.
+  // Primitives use the same frame as composites so widgets remain visually
+  // homogeneous; the formatter takes care of one-line vs multi-line.
   if (
     typeof value === 'string' ||
     typeof value === 'number' ||
@@ -80,54 +68,11 @@ export function WidgetDefault({ value, maxHeight = '18rem' }: DefaultProps) {
 }
 
 // -----------------------------------------------------------------------
-// Highlight widget
+// Lazy widgets: markdown + highlight
 // -----------------------------------------------------------------------
 
-interface HighlightProps {
-  value: unknown
-  lang: string
-  maxHeight?: string
-}
-
-export function WidgetHighlight({ value, lang, maxHeight = '24rem' }: HighlightProps) {
-  const text = useMemo(() => stringifyForHighlight(value), [value])
-  // Grammars beyond the four bundled ones are loaded async. While loading the
-  // first paint shows the same frame but with plain (escaped) text — that's
-  // what `highlight()` falls back to when the language isn't registered yet.
-  const [ready, setReady] = useState(() => isLanguageBundled(lang))
-
-  useEffect(() => {
-    if (ready) return
-    let cancelled = false
-    void ensureLanguage(lang).then((success) => {
-      if (!cancelled && success) setReady(true)
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [lang, ready])
-
-  if (text === '') return <EmptyHint />
-  const html = highlight(text, ready ? lang : 'plaintext')
-  return (
-    <pre
-      className="hljs overflow-auto rounded-md border p-3 font-mono text-xs leading-relaxed"
-      style={{ maxHeight }}
-    >
-      <code dangerouslySetInnerHTML={{ __html: html }} />
-    </pre>
-  )
-}
-
-function stringifyForHighlight(value: unknown): string {
-  if (value === null || value === undefined) return ''
-  if (typeof value === 'string') return value
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
-  if (typeof value === 'bigint') return value.toString()
-  if (value instanceof Date) return value.toISOString()
-  if (value instanceof Uint8Array) return `<binary ${value.byteLength}B>`
-  return formatCellExpanded(value)
-}
+export const WidgetMarkdown = lazy(() => import('./widget-markdown'))
+export const WidgetHighlight = lazy(() => import('./widget-highlight'))
 
 // -----------------------------------------------------------------------
 // Image / video / audio / link — all share the resolveSrc pipeline
@@ -249,56 +194,8 @@ export function WidgetLink({ value, src, ctx }: MediaProps) {
 }
 
 // -----------------------------------------------------------------------
-// Markdown widget
+// Shared MediaError card
 // -----------------------------------------------------------------------
-
-interface MarkdownProps {
-  value: unknown
-  maxHeight?: string
-}
-
-export function WidgetMarkdown({ value, maxHeight = '24rem' }: MarkdownProps) {
-  const text = typeof value === 'string' ? value : ''
-  const html = useMemo(() => {
-    if (text === '') return ''
-    const raw = marked.parse(text, { async: false }) as string
-    return DOMPurify.sanitize(raw, PURIFY_OPTS)
-  }, [text])
-  if (text === '') return <EmptyHint />
-  return (
-    <div
-      className={cn(
-        'overflow-auto rounded-md border bg-muted/30 p-3 text-sm leading-relaxed',
-        // Lightweight markdown styling — we don't pull in
-        // @tailwindcss/typography for a single widget. These selectors target
-        // the sanitized output marked produces.
-        '[&_a]:text-primary [&_a]:underline-offset-2 [&_a:hover]:underline',
-        '[&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-xs',
-        '[&_pre]:overflow-auto [&_pre]:rounded-md [&_pre]:border [&_pre]:bg-muted/50 [&_pre]:p-3 [&_pre]:font-mono [&_pre]:text-xs',
-        '[&_ul]:ml-5 [&_ul]:list-disc [&_ol]:ml-5 [&_ol]:list-decimal',
-        '[&_h1]:mt-2 [&_h1]:mb-1 [&_h1]:text-base [&_h1]:font-semibold',
-        '[&_h2]:mt-2 [&_h2]:mb-1 [&_h2]:text-sm [&_h2]:font-semibold',
-        '[&_h3]:mt-2 [&_h3]:mb-1 [&_h3]:text-sm [&_h3]:font-medium',
-        '[&_p]:my-1',
-        '[&>*:first-child]:mt-0 [&>*:last-child]:mb-0',
-      )}
-      style={{ maxHeight }}
-      dangerouslySetInnerHTML={{ __html: html }}
-    />
-  )
-}
-
-// -----------------------------------------------------------------------
-// Shared placeholders
-// -----------------------------------------------------------------------
-
-export function EmptyHint({ text }: { text?: string } = {}) {
-  return (
-    <div className="rounded-md border border-dashed bg-muted/20 px-3 py-2 text-xs italic text-muted-foreground">
-      {text ?? '(empty)'}
-    </div>
-  )
-}
 
 interface MediaErrorProps {
   icon: typeof ImageOff
