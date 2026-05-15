@@ -132,17 +132,19 @@ async function loadParquetRowsSource(src: string): Promise<RowsSource> {
 }
 
 // -----------------------------------------------------------------------
-// JSONL impl
+// JSONL impl — incremental streaming
 // -----------------------------------------------------------------------
 
-/// Hard ceiling for the v1 "download whole file" strategy. The browser tab
-/// stays responsive comfortably below this. Files past the limit need
-/// Range-based streaming (future work) — we refuse upfront so the user
-/// sees a clear message instead of an OOM / hung tab.
-export const JSONL_SIZE_LIMIT_BYTES = 50 * 1024 * 1024
+/// How many rows we read up-front during source load. Sized to give the
+/// column-inference sampler enough breadth without blocking on full
+/// downloads of huge files.
+const JSONL_COLUMN_PROBE_ROWS = 100
 
-/// v1 strategy: download the whole file, parse line by line. Memory cost
-/// ≈ file size + parsed objects.
+/// Streaming jsonl loader. Opens the response body as a ReadableStream,
+/// reads + parses chunks on demand. Memory cost grows with the rows the
+/// user actually pages through, not with file size — so a 5 GB jsonl
+/// opens in a few hundred ms (column probe only) and the user can keep
+/// hitting "Load more" as long as their tab can hold the accumulated rows.
 async function loadJsonlRowsSource(src: string): Promise<RowsSource> {
   const res = await fetch(src)
   if (!res.ok) {
@@ -150,46 +152,118 @@ async function loadJsonlRowsSource(src: string): Promise<RowsSource> {
       `failed to fetch JSONL: ${res.status} ${res.statusText || ''}`.trim(),
     )
   }
-  // Refuse oversized files *before* reading the body so we don't burn
-  // memory or block the tab. `content-length` is the proxy's raw byte
-  // count — gzip is not in play here (the proxy streams raw bytes). When
-  // the header is missing (rare), we let it through and trust the user.
-  const contentLength = res.headers.get('content-length')
-  if (contentLength) {
-    const bytes = Number.parseInt(contentLength, 10)
-    if (Number.isFinite(bytes) && bytes > JSONL_SIZE_LIMIT_BYTES) {
-      throw new Error(
-        `JSONL file too large: ${formatBytes(bytes)} (limit ${formatBytes(
-          JSONL_SIZE_LIMIT_BYTES,
-        )}). Streaming support for larger files is planned.`,
-      )
-    }
+  if (!res.body) {
+    throw new Error('jsonl: response has no streaming body')
   }
-  const text = await res.text()
-  const { rows, errors } = parseJsonlText(text)
-  const columns = inferJsonlColumns(rows, 100)
-  const diagnostics = errors > 0 ? { skippedLines: errors } : undefined
+  const stream = new JsonlStream(res.body)
+  await stream.ensureRowCount(JSONL_COLUMN_PROBE_ROWS)
+  const columns = inferJsonlColumns(stream.rows, 100)
   return {
     kind: 'jsonl',
     columns,
-    totalRows: rows.length,
-    diagnostics,
+    totalRows: stream.done ? stream.rows.length : null,
+    diagnostics: snapshotDiagnostics(stream),
     readRows: async (rowStart, rowEnd) => {
-      const clampedEnd = Math.min(rowEnd, rows.length)
+      await stream.ensureRowCount(rowEnd)
+      const clampedEnd = Math.min(rowEnd, stream.rows.length)
       return {
-        rows: rows.slice(rowStart, clampedEnd),
-        hasMore: clampedEnd < rows.length,
-        totalRows: rows.length,
-        diagnostics,
+        rows: stream.rows.slice(rowStart, clampedEnd),
+        // More rows available iff the stream isn't finished, OR we still
+        // have buffered rows past the requested end.
+        hasMore: !stream.done || clampedEnd < stream.rows.length,
+        totalRows: stream.done ? stream.rows.length : null,
+        diagnostics: snapshotDiagnostics(stream),
       }
     },
   }
 }
 
-function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
-  return `${(n / (1024 * 1024)).toFixed(1)} MB`
+function snapshotDiagnostics(s: JsonlStream): SourceDiagnostics | undefined {
+  return s.errors > 0 ? { skippedLines: s.errors } : undefined
+}
+
+/// Pull JSONL records out of a ReadableStream one chunk at a time. Exposed
+/// so its line-buffer + parsing behavior can be unit-tested without spinning
+/// up a real Response.
+///
+/// The `ensureRowCount(n)` contract: after the promise resolves, either
+/// `rows.length >= n` or `done` is true (stream exhausted). Repeated calls
+/// chain so concurrent readers don't race on the underlying reader.
+export class JsonlStream {
+  readonly rows: Record<string, unknown>[] = []
+  errors = 0
+  done = false
+  private readonly reader: ReadableStreamDefaultReader<Uint8Array>
+  private readonly decoder = new TextDecoder('utf-8')
+  private buffer = ''
+  private bomStripped = false
+  // Serializes ensureRowCount calls so two concurrent readers can't race
+  // on the same `reader.read()` queue and interleave chunk processing.
+  private pending: Promise<void> = Promise.resolve()
+
+  constructor(body: ReadableStream<Uint8Array>) {
+    this.reader = body.getReader()
+  }
+
+  async ensureRowCount(target: number): Promise<void> {
+    if (this.done || this.rows.length >= target) return
+    this.pending = this.pending.then(() => this.driveTo(target))
+    return this.pending
+  }
+
+  private async driveTo(target: number): Promise<void> {
+    while (!this.done && this.rows.length < target) {
+      const { value, done } = await this.reader.read()
+      if (done) {
+        this.done = true
+        // Flush whatever's left in the buffer (final line without newline)
+        // plus any trailing bytes the decoder is holding from a chunked
+        // multi-byte char.
+        const tail = this.decoder.decode()
+        if (tail.length > 0) this.buffer += tail
+        if (this.buffer.length > 0) {
+          this.processLine(this.buffer)
+          this.buffer = ''
+        }
+        return
+      }
+      let text = this.decoder.decode(value, { stream: true })
+      // Strip BOM once, on the very first chunk after decoding.
+      if (!this.bomStripped) {
+        this.bomStripped = true
+        if (text.charCodeAt(0) === 0xfeff) text = text.slice(1)
+      }
+      this.buffer += text
+      // Drain every newline-terminated record currently in the buffer.
+      // CRLF endings are tolerated because processLine trims first.
+      let nl = this.buffer.indexOf('\n')
+      while (nl !== -1) {
+        const line = this.buffer.slice(0, nl)
+        this.buffer = this.buffer.slice(nl + 1)
+        this.processLine(line)
+        nl = this.buffer.indexOf('\n')
+      }
+    }
+  }
+
+  private processLine(line: string): void {
+    const trimmed = line.trim()
+    if (trimmed.length === 0) return
+    try {
+      const parsed = JSON.parse(trimmed)
+      if (
+        parsed !== null &&
+        typeof parsed === 'object' &&
+        !Array.isArray(parsed)
+      ) {
+        this.rows.push(parsed as Record<string, unknown>)
+        return
+      }
+    } catch {
+      // fall through to the error counter
+    }
+    this.errors++
+  }
 }
 
 export interface ParseJsonlResult {
