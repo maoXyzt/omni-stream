@@ -5,15 +5,25 @@ import {
   AlertCircle,
   Check,
   Copy,
+  Download,
   LayoutList,
   ListOrdered,
   Loader2,
   RotateCw,
+  X,
 } from 'lucide-react'
 
 import { apiClient, ApiError } from '@/api/client'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   Tooltip,
@@ -45,6 +55,23 @@ const ROWS_PARAM = 'rows'
 // returns its first MB, the button surfaces, and each additional click pulls
 // another MB.
 const CHUNK_BYTES = 1024 * 1024
+
+// "Load all" severity tiers — chosen against *remaining* bytes (what the
+// user still has to fetch), not file size. Per-line syntax highlighting is
+// the dominant cost above ~5 MiB; beyond ~20 MiB Chrome will visibly stall
+// or OOM, so the heavy tier intentionally reads as "are you sure".
+const LOAD_ALL_WARN_BYTES = 5 * 1024 * 1024
+const LOAD_ALL_HEAVY_BYTES = 20 * 1024 * 1024
+
+type LoadAllSeverity = 'light' | 'warn' | 'heavy'
+
+function loadAllSeverityFor(remainingBytes: number | null): LoadAllSeverity {
+  // Unknown total → warn (we have no idea how much we'd actually pull).
+  if (remainingBytes === null) return 'warn'
+  if (remainingBytes >= LOAD_ALL_HEAVY_BYTES) return 'heavy'
+  if (remainingBytes >= LOAD_ALL_WARN_BYTES) return 'warn'
+  return 'light'
+}
 
 interface LoadState {
   /// Concatenated text from every chunk fetched so far. Append-only.
@@ -266,9 +293,62 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
   const statusLine = (() => {
     const bytes = `${formatBytes(state.bytesLoaded)} / ${formatBytes(state.totalBytes)}`
     const lineLabel = `${lines.length} line${lines.length === 1 ? '' : 's'}`
-    const eof = state.done ? ' · EOF' : ''
-    return `${lineLabel} · ${bytes}${eof}`
+    return `${lineLabel} · ${bytes}`
   })()
+
+  // Surface "not fully loaded" as a coloured badge in the header rather than
+  // relying on the absence of a muted "· EOF" suffix — the old hint was easy
+  // to miss, so users would copy/scroll a partially-loaded buffer thinking it
+  // was the whole file.
+  const isPartial = !state.done && state.text.length > 0
+  const progressPercent =
+    state.totalBytes !== null && state.totalBytes > 0
+      ? Math.min(100, Math.round((state.bytesLoaded / state.totalBytes) * 100))
+      : null
+  const remainingBytes =
+    state.totalBytes !== null
+      ? Math.max(0, state.totalBytes - state.bytesLoaded)
+      : null
+  const loadAllSeverity = loadAllSeverityFor(remainingBytes)
+
+  // --- Load all ---------------------------------------------------------
+
+  const [loadAllOpen, setLoadAllOpen] = useState(false)
+  const [loadingAll, setLoadingAll] = useState(false)
+  // Cancellation flag for the load-all loop. We can't abort the in-flight
+  // chunk (axios `get` here doesn't carry a signal), but flipping this stops
+  // the next iteration — usually the user wants "stop after this MiB".
+  const cancelLoadAllRef = useRef(false)
+  useEffect(
+    () => () => {
+      cancelLoadAllRef.current = true
+    },
+    [],
+  )
+
+  const startLoadAll = useCallback(async () => {
+    setLoadAllOpen(false)
+    cancelLoadAllRef.current = false
+    setLoadingAll(true)
+    try {
+      // Each fetchNextPage resolves to an observer result whose `hasNextPage`
+      // reflects post-merge state, so we don't read stale `textQuery` props.
+      let result = await textQuery.fetchNextPage()
+      while (
+        !cancelLoadAllRef.current &&
+        result.hasNextPage &&
+        !result.isError
+      ) {
+        result = await textQuery.fetchNextPage()
+      }
+    } finally {
+      setLoadingAll(false)
+    }
+  }, [textQuery])
+
+  const cancelLoadAll = useCallback(() => {
+    cancelLoadAllRef.current = true
+  }, [])
 
   // Persistent UI preference — the gutter is on by default (matches every
   // editor), and the toggle survives modal close + reload via localStorage.
@@ -304,7 +384,18 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
   return (
     <div className="flex h-full w-full flex-col overflow-hidden rounded-md bg-muted/30">
       <div className="flex items-center justify-between gap-3 border-b border-border bg-background/50 px-3 py-2">
-        <span className="truncate text-xs text-muted-foreground">{statusLine}</span>
+        <div className="flex min-w-0 items-center gap-2">
+          {isPartial && (
+            <span
+              className="flex shrink-0 items-center gap-1 rounded-md bg-amber-500/15 px-1.5 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-400"
+              title="Only part of the file has been loaded — click 'Load more' to fetch the rest."
+            >
+              <AlertCircle className="size-3" />
+              Partial{progressPercent !== null ? ` · ${progressPercent}%` : ''}
+            </span>
+          )}
+          <span className="truncate text-xs text-muted-foreground">{statusLine}</span>
+        </div>
         <div className="flex items-center gap-2">
           {showSpinner && (
             <Loader2 className="size-4 animate-spin text-muted-foreground" />
@@ -471,17 +562,103 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
               - an error is showing.
             Disabled mid-fetch to suppress duplicate clicks. */}
         {!state.done && state.text.length > 0 && !errorMessage && (
-          <Button
-            size="sm"
-            className="absolute right-4 bottom-4 h-8 px-3 text-xs shadow-lg hover:shadow-xl"
-            disabled={loadingNext}
-            onClick={() => void textQuery.fetchNextPage()}
-          >
-            {loadingNext && <Loader2 className="mr-1 size-4 animate-spin" />}
-            Load more
-          </Button>
+          <div className="absolute right-4 bottom-4 flex gap-2">
+            {loadingAll ? (
+              // While the load-all loop is running, the two action buttons
+              // collapse into a single cancel control. The header's Partial
+              // badge keeps showing live progress, so there's no need to
+              // duplicate it here.
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 px-3 text-xs shadow-lg hover:shadow-xl"
+                onClick={cancelLoadAll}
+              >
+                <Loader2 className="mr-1 size-4 animate-spin" />
+                Stop
+              </Button>
+            ) : (
+              <>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-8 px-3 text-xs shadow-lg hover:shadow-xl"
+                  disabled={loadingNext}
+                  onClick={() => setLoadAllOpen(true)}
+                >
+                  <Download className="mr-1 size-3.5" />
+                  Load all
+                </Button>
+                <Button
+                  size="sm"
+                  className="h-8 px-3 text-xs shadow-lg ring-2 ring-amber-500/40 ring-offset-2 ring-offset-background hover:shadow-xl"
+                  disabled={loadingNext}
+                  onClick={() => void textQuery.fetchNextPage()}
+                >
+                  {loadingNext && <Loader2 className="mr-1 size-4 animate-spin" />}
+                  Load more
+                </Button>
+              </>
+            )}
+          </div>
         )}
       </div>
+      <Dialog open={loadAllOpen} onOpenChange={setLoadAllOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Load the entire file?</DialogTitle>
+            <DialogDescription>
+              {remainingBytes !== null && state.totalBytes !== null ? (
+                <>
+                  About{' '}
+                  <span className="font-medium text-foreground">
+                    {formatBytes(remainingBytes)}
+                  </span>{' '}
+                  still needs to be fetched
+                  {' '}
+                  ({formatBytes(state.totalBytes)} total).
+                </>
+              ) : (
+                <>
+                  The server didn’t report a file size, so the total amount to
+                  load is unknown.
+                </>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          {loadAllSeverity !== 'light' && (
+            <Alert variant={loadAllSeverity === 'heavy' ? 'destructive' : 'default'}>
+              <AlertCircle className="size-4" />
+              <AlertTitle>
+                {loadAllSeverity === 'heavy'
+                  ? 'This may freeze the browser'
+                  : 'This may take a moment'}
+              </AlertTitle>
+              <AlertDescription>
+                {loadAllSeverity === 'heavy'
+                  ? 'Loading and syntax-highlighting more than 20 MiB of text in one tab can stall or run out of memory. Consider downloading the file instead, or keep using Load more.'
+                  : 'Several MiB of text plus syntax highlighting can be noticeably slow. You can cancel partway through.'}
+              </AlertDescription>
+            </Alert>
+          )}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setLoadAllOpen(false)}
+            >
+              <X className="size-3.5" />
+              Cancel
+            </Button>
+            <Button
+              variant={loadAllSeverity === 'heavy' ? 'destructive' : 'default'}
+              onClick={() => void startLoadAll()}
+            >
+              <Download className="size-3.5" />
+              {loadAllSeverity === 'heavy' ? 'Load anyway' : 'Load entire file'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
