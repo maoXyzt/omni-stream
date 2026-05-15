@@ -1,5 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AlertCircle, Check, Copy, ListOrdered, Loader2 } from 'lucide-react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import {
+  AlertCircle,
+  Check,
+  Copy,
+  LayoutList,
+  ListOrdered,
+  Loader2,
+} from 'lucide-react'
 
 import { apiClient, ApiError } from '@/api/client'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
@@ -18,9 +26,15 @@ import {
   highlight,
   isLanguageBundled,
 } from '@/lib/highlight'
+import { detectFormat } from '@/lib/rows-source'
 import { cn } from '@/lib/utils'
 
 import type { PreviewerProps } from './types'
+
+// Query param key that the Rows view writes its rule config into. Forwarded
+// when the user jumps from text preview to the Rows page so a shared link
+// with rules pre-applied still works.
+const ROWS_PARAM = 'rows'
 
 // One constant doing two jobs: it's the first-chunk size *and* the threshold
 // above which chunked loading kicks in. A file at or below this size fits in
@@ -133,6 +147,24 @@ function splitLines(text: string): string[] {
 }
 
 export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
+  const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  // .jsonl / .ndjson get a "Browse as cards" button that jumps to the Rows
+  // page — same UX as parquet's ParquetPreview but lazy: text-preview-able
+  // formats default to the text view, this is the opt-in.
+  const rowsFormat = useMemo(() => detectFormat(fileKey), [fileKey])
+  const openRowsPage = useCallback(() => {
+    if (!storage || !rowsFormat) return
+    const rules = searchParams.get(ROWS_PARAM)
+    const trail = fileKey
+      .split('/')
+      .filter((s) => s.length > 0)
+      .map(encodeURIComponent)
+      .join('/')
+    const query = rules ? `?${ROWS_PARAM}=${encodeURIComponent(rules)}` : ''
+    navigate(`/r/${encodeURIComponent(storage)}/${trail}${query}`)
+  }, [storage, rowsFormat, searchParams, fileKey, navigate])
+
   // Cache key on storage + path so navigating between files (or storages)
   // doesn't bleed state.
   const cacheKey = useMemo(() => `${storage ?? ''}:${fileKey}`, [storage, fileKey])
@@ -337,6 +369,26 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
                   : 'Copy loaded text'}
             </TooltipContent>
           </Tooltip>
+          {rowsFormat && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={openRowsPage}
+                  disabled={!storage}
+                  className="h-7"
+                >
+                  <LayoutList className="size-3.5" />
+                  Browse as cards
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                Open the Rows view for this file
+              </TooltipContent>
+            </Tooltip>
+          )}
           <select
             value={lang}
             onChange={(e) => setLang(e.target.value)}
