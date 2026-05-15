@@ -21,10 +21,21 @@ export interface ColumnInfo {
   type: string
 }
 
+export interface SourceDiagnostics {
+  /// Number of input lines that didn't parse as a valid JSON object and
+  /// were dropped from `numRows`. Surfaced in the UI when non-zero so a
+  /// user with malformed data realises it instead of silently missing rows.
+  /// Parquet doesn't drop lines, so its sources omit this field.
+  skippedLines?: number
+}
+
 export interface RowsSource {
   kind: 'parquet' | 'jsonl'
   columns: ColumnInfo[]
   numRows: number
+  /// Optional health/info readout from the load. Used for "3 lines skipped"
+  /// style hints; absent when there's nothing worth saying.
+  diagnostics?: SourceDiagnostics
   /// Read a contiguous row range. Implementations may cache aggressively
   /// (jsonl loads the whole file upfront); the contract is the same.
   readRows(rowStart: number, rowEnd: number): Promise<Record<string, unknown>[]>
@@ -86,9 +97,14 @@ async function loadParquetRowsSource(src: string): Promise<RowsSource> {
 // JSONL impl
 // -----------------------------------------------------------------------
 
+/// Hard ceiling for the v1 "download whole file" strategy. The browser tab
+/// stays responsive comfortably below this. Files past the limit need
+/// Range-based streaming (future work) — we refuse upfront so the user
+/// sees a clear message instead of an OOM / hung tab.
+export const JSONL_SIZE_LIMIT_BYTES = 50 * 1024 * 1024
+
 /// v1 strategy: download the whole file, parse line by line. Memory cost
-/// ≈ file size + parsed objects. Acceptable for typical datasets; large
-/// (>50 MB) files would warrant Range-based streaming — left as future work.
+/// ≈ file size + parsed objects.
 async function loadJsonlRowsSource(src: string): Promise<RowsSource> {
   const res = await fetch(src)
   if (!res.ok) {
@@ -96,15 +112,37 @@ async function loadJsonlRowsSource(src: string): Promise<RowsSource> {
       `failed to fetch JSONL: ${res.status} ${res.statusText || ''}`.trim(),
     )
   }
+  // Refuse oversized files *before* reading the body so we don't burn
+  // memory or block the tab. `content-length` is the proxy's raw byte
+  // count — gzip is not in play here (the proxy streams raw bytes). When
+  // the header is missing (rare), we let it through and trust the user.
+  const contentLength = res.headers.get('content-length')
+  if (contentLength) {
+    const bytes = Number.parseInt(contentLength, 10)
+    if (Number.isFinite(bytes) && bytes > JSONL_SIZE_LIMIT_BYTES) {
+      throw new Error(
+        `JSONL file too large: ${formatBytes(bytes)} (limit ${formatBytes(
+          JSONL_SIZE_LIMIT_BYTES,
+        )}). Streaming support for larger files is planned.`,
+      )
+    }
+  }
   const text = await res.text()
-  const { rows } = parseJsonlText(text)
+  const { rows, errors } = parseJsonlText(text)
   const columns = inferJsonlColumns(rows, 100)
   return {
     kind: 'jsonl',
     columns,
     numRows: rows.length,
+    diagnostics: errors > 0 ? { skippedLines: errors } : undefined,
     readRows: async (rowStart, rowEnd) => rows.slice(rowStart, rowEnd),
   }
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`
 }
 
 export interface ParseJsonlResult {

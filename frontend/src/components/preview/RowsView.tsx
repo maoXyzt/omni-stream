@@ -98,10 +98,21 @@ export function RowsView({ fileKey, source, storage }: RowsViewProps) {
   return (
     <div className="flex h-full min-h-0 flex-col gap-3">
       <div className="flex items-center justify-between gap-3">
-        <div className="text-sm text-muted-foreground">
-          {numRows === 0
-            ? 'Empty file'
-            : `${rows.length.toLocaleString()} of ${numRows.toLocaleString()} rows loaded`}
+        <div className="flex flex-wrap items-baseline gap-x-2 text-sm text-muted-foreground">
+          <span>
+            {numRows === 0
+              ? 'Empty file'
+              : `${rows.length.toLocaleString()} of ${numRows.toLocaleString()} rows loaded`}
+          </span>
+          {source.diagnostics?.skippedLines && source.diagnostics.skippedLines > 0 && (
+            <span
+              className="rounded-md border border-dashed border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-xs text-amber-700 dark:text-amber-300"
+              title="Lines that didn't parse as a JSON object — most often empty or malformed entries"
+            >
+              {source.diagnostics.skippedLines.toLocaleString()} line
+              {source.diagnostics.skippedLines === 1 ? '' : 's'} skipped
+            </span>
+          )}
         </div>
         <Button variant="outline" size="sm" onClick={() => setDialogOpen(true)}>
           <Settings2 className="size-4" />
