@@ -22,6 +22,7 @@ import {
   Copy,
   Eye,
   Sparkles,
+  Trash2,
   Wand2,
 } from 'lucide-react'
 
@@ -35,9 +36,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
 import { RowNode } from '@/components/preview/rows-render'
 import { type RenderContext } from '@/components/preview/rows-widgets'
 import { buildAiPrompt } from '@/components/preview/rows-ai-prompt'
+import { type Preset, useRowsPresets } from '@/hooks/use-rows-presets'
 import { type Node, parseRules } from '@/lib/rows-schema'
 import { type ColumnInfo } from '@/lib/rows-source'
 import { cn } from '@/lib/utils'
@@ -214,6 +217,17 @@ export function RulesDialog({
   const formattable = isFormattableJson(draft)
   const [aiPromptOpen, setAiPromptOpen] = useState(false)
 
+  const presets = useRowsPresets()
+  // Load a preset by replacing the draft with its serialized canonical form.
+  // Goes through the normal `setDraft` path so live validation, the modified
+  // dot, and Save behave exactly as if the user typed it.
+  const handleLoadPreset = useCallback(
+    (preset: Preset) => {
+      setDraft(JSON.stringify(preset.rules, null, 2))
+    },
+    [],
+  )
+
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose() }}>
       <DialogContent
@@ -259,6 +273,12 @@ export function RulesDialog({
 
           {/* Side panel */}
           <aside className="flex w-56 shrink-0 flex-col gap-3 overflow-auto">
+            <PresetsSection
+              presets={presets}
+              currentRules={validation.ok ? validation.rules : null}
+              onLoad={handleLoadPreset}
+            />
+
             <Section title="Insert">
               <div className="flex flex-wrap gap-1">
                 {TEMPLATES.map((t) => (
@@ -557,6 +577,103 @@ function Section({
       <h4 className="mb-1 text-xs font-medium text-muted-foreground">{title}</h4>
       {children}
     </section>
+  )
+}
+
+// Presets stored in localStorage. Disabled save when the current draft is
+// invalid or the name is blank; loading a preset replaces the draft so it
+// flows through the same validation + modified-indicator path as typing.
+function PresetsSection({
+  presets,
+  currentRules,
+  onLoad,
+}: {
+  presets: ReturnType<typeof useRowsPresets>
+  /// Canonical rules from the current draft, or null when the draft is
+  /// invalid (Save is disabled in that case).
+  currentRules: Node[] | null
+  onLoad: (preset: Preset) => void
+}) {
+  const [name, setName] = useState('')
+  const trimmed = name.trim()
+  const canSave = currentRules !== null && trimmed.length > 0
+
+  const handleSave = () => {
+    if (!canSave || currentRules === null) return
+    const saved = presets.save(trimmed, currentRules)
+    if (saved) setName('')
+  }
+
+  return (
+    <Section title={`Presets · ${presets.presets.length}`}>
+      <div className="flex gap-1">
+        <Input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              handleSave()
+            }
+          }}
+          placeholder="Preset name"
+          aria-label="Preset name"
+          className="h-7 text-xs"
+        />
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-7 px-2 text-xs"
+          onClick={handleSave}
+          disabled={!canSave}
+          title={
+            currentRules === null
+              ? 'Fix validation errors first'
+              : trimmed.length === 0
+                ? 'Enter a name'
+                : 'Save current rules'
+          }
+        >
+          Save
+        </Button>
+      </div>
+      {presets.error && (
+        <p className="mt-1 text-[10px] text-destructive">{presets.error}</p>
+      )}
+      {presets.presets.length === 0 ? (
+        <p className="mt-2 text-[10px] italic text-muted-foreground">
+          No saved presets. Save the current rules to reuse them later.
+        </p>
+      ) : (
+        <ul className="mt-1.5 space-y-0.5">
+          {presets.presets.map((p) => (
+            <li
+              key={p.id}
+              className="group flex items-center gap-1 rounded hover:bg-muted"
+            >
+              <button
+                type="button"
+                onClick={() => onLoad(p)}
+                title={`Load "${p.name}"`}
+                className="flex-1 truncate px-1.5 py-1 text-left text-xs focus:outline-none"
+              >
+                {p.name}
+              </button>
+              <button
+                type="button"
+                onClick={() => presets.remove(p.id)}
+                title={`Delete "${p.name}"`}
+                aria-label={`Delete preset ${p.name}`}
+                className="mr-1 rounded p-0.5 text-muted-foreground opacity-0 hover:text-destructive focus:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100"
+              >
+                <Trash2 className="size-3" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Section>
   )
 }
 
