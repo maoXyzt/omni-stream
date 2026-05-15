@@ -307,7 +307,7 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
         <span className="truncate text-xs text-muted-foreground">{statusLine}</span>
         <div className="flex items-center gap-2">
           {showSpinner && (
-            <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
+            <Loader2 className="size-4 animate-spin text-muted-foreground" />
           )}
           {/* Persistent across modal opens via localStorage. Variant swap
               (`default` filled when pressed, `outline` bordered when off)
@@ -477,7 +477,7 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
             disabled={loadingNext}
             onClick={() => void textQuery.fetchNextPage()}
           >
-            {loadingNext && <Loader2 className="mr-1 size-3 animate-spin" />}
+            {loadingNext && <Loader2 className="mr-1 size-4 animate-spin" />}
             Load more
           </Button>
         )}

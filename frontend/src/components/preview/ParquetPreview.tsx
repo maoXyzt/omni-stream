@@ -199,11 +199,26 @@ export function ParquetPreview({ fileKey, src, storage }: PreviewerProps) {
   }
 
   if (!source) {
+    // Match the post-load layout: InfoBar (a row of stats), tab strip +
+    // Browse-as-cards button, then the table body. Sidesteps the layout
+    // jump that a generic 3-block skeleton would otherwise produce.
     return (
-      <div className="flex h-full w-full flex-col gap-3 p-6">
-        <Skeleton className="h-6 w-72" />
-        <Skeleton className="h-9 w-48" />
-        <Skeleton className="h-64 w-full" />
+      <div className="flex h-full w-full flex-col gap-3 p-4">
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+          <Skeleton className="h-4 w-20" />
+          <Skeleton className="h-4 w-24" />
+          <Skeleton className="h-4 w-28" />
+          <Skeleton className="h-4 w-32" />
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <Skeleton className="h-9 w-44" />
+          <Skeleton className="h-8 w-36" />
+        </div>
+        <div className="flex flex-1 flex-col gap-2 overflow-hidden">
+          {Array.from({ length: 10 }).map((_, i) => (
+            <Skeleton key={i} className="h-6 w-full" />
+          ))}
+        </div>
       </div>
     )
   }
@@ -378,7 +393,7 @@ function PaginationBar({
           ? 'Empty file'
           : `Rows ${firstRow.toLocaleString()}–${lastRow.toLocaleString()} of ${totalRows.toLocaleString()}`}
         {loading && (
-          <Loader2 className="ml-2 inline size-3.5 animate-spin align-[-2px]" />
+          <Loader2 className="ml-2 inline size-4 animate-spin align-[-3px]" />
         )}
       </div>
       <div className="flex items-center gap-1">

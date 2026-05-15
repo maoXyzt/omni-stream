@@ -126,10 +126,17 @@ export function RowsPage() {
             </AlertDescription>
           </Alert>
         ) : !sourceQuery.data ? (
-          <div className="flex flex-col gap-3">
-            <Skeleton className="h-6 w-72" />
-            <Skeleton className="h-9 w-48" />
-            <Skeleton className="h-64 w-full" />
+          // Match the post-load RowsView shape: header strip with metadata
+          // + Rules button, then a stack of card-shaped rows. Keeps the
+          // transition into the real view visually continuous.
+          <div className="flex flex-col gap-4">
+            <div className="flex items-center justify-between">
+              <Skeleton className="h-5 w-64" />
+              <Skeleton className="h-9 w-24" />
+            </div>
+            {Array.from({ length: 4 }).map((_, i) => (
+              <Skeleton key={i} className="h-32 w-full rounded-md" />
+            ))}
           </div>
         ) : (
           <RowsView

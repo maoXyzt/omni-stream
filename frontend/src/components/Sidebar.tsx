@@ -186,7 +186,7 @@ function SidebarError({ message, onRetry, isRetrying }: SidebarErrorProps) {
   return (
     <div className="flex flex-col gap-2 px-2 py-3">
       <div className="flex items-start gap-2 text-xs text-destructive">
-        <AlertCircle className="mt-0.5 size-3.5 shrink-0" />
+        <AlertCircle className="mt-0.5 size-4 shrink-0" />
         <span className="break-words">{message}</span>
       </div>
       <Button
@@ -197,7 +197,7 @@ function SidebarError({ message, onRetry, isRetrying }: SidebarErrorProps) {
         className="h-7 self-start"
       >
         <RotateCw
-          className={cn('size-3.5', isRetrying && 'animate-spin')}
+          className={cn('size-4', isRetrying && 'animate-spin')}
         />
         Retry
       </Button>
