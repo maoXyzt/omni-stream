@@ -263,6 +263,25 @@ export function FileList() {
             `Page ${currentPage.toLocaleString()} doesn't exist — showing last page (${actualLastPage.toLocaleString()}).`,
           )
         }
+      } catch (err) {
+        if (cancelled) return
+        // 408 comes from the server-side TimeoutLayer on `/api/list`. Tell
+        // the user concretely, then snap the URL back to the last page we
+        // already know how to fetch so they're not stuck on a number that
+        // never resolves. Other errors (network drop, 5xx) surface as a
+        // generic toast — the React Query consumer below will retry on
+        // its own when conditions change.
+        const stuckPage = currentPage
+        const fallbackPage = Math.max(1, tokenStack.length)
+        if (err instanceof ApiError && err.status === 408) {
+          toast.error(
+            `Couldn't load page ${stuckPage.toLocaleString()} — the directory listing timed out. Try a smaller jump or use the filter.`,
+          )
+        } else {
+          const msg = err instanceof Error ? err.message : 'unknown error'
+          toast.error(`Failed to load page ${stuckPage.toLocaleString()}: ${msg}`)
+        }
+        if (fallbackPage < currentPage) gotoPage(fallbackPage)
       } finally {
         walkingRef.current = false
         if (!cancelled) setWalking(false)
