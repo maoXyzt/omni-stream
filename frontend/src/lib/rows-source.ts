@@ -50,7 +50,7 @@ export interface ReadRowsResult {
 }
 
 export interface RowsSource {
-  kind: 'parquet' | 'jsonl'
+  kind: 'parquet' | 'jsonl' | 'json'
   columns: ColumnInfo[]
   /// Best-known row count at source-load time. Parquet's metadata gives the
   /// exact number; jsonl whole-file load knows it after parsing; jsonl
@@ -68,7 +68,8 @@ export interface RowsSource {
 
 /// Load a rows-view-ready source. Dispatches by file extension.
 ///   * .parquet / .parq / .pq → parquet, via hyparquet
-///   * .jsonl / .ndjson       → jsonl, full-file load with line parsing
+///   * .jsonl / .ndjson       → jsonl, streaming line parser
+///   * .json                  → json, streaming array-of-objects parser
 ///   * anything else          → throw, the route shouldn't be reachable for
 ///                              non-supported extensions
 export async function loadRowsSource(
@@ -81,12 +82,14 @@ export async function loadRowsSource(
       return loadParquetRowsSource(src)
     case 'jsonl':
       return loadJsonlRowsSource(src)
+    case 'json':
+      return loadJsonRowsSource(src)
     case null:
       throw new Error(`unsupported format for rows view: ${fileKey}`)
   }
 }
 
-export type SourceFormat = 'parquet' | 'jsonl'
+export type SourceFormat = 'parquet' | 'jsonl' | 'json'
 
 export function detectFormat(fileKey: string): SourceFormat | null {
   const dot = fileKey.lastIndexOf('.')
@@ -94,6 +97,7 @@ export function detectFormat(fileKey: string): SourceFormat | null {
   const ext = fileKey.slice(dot + 1).toLowerCase()
   if (ext === 'parquet' || ext === 'parq' || ext === 'pq') return 'parquet'
   if (ext === 'jsonl' || ext === 'ndjson') return 'jsonl'
+  if (ext === 'json') return 'json'
   return null
 }
 
@@ -350,4 +354,273 @@ function jsonTypeName(v: unknown): string {
   if (Array.isArray(v)) return 'LIST'
   if (typeof v === 'object') return 'STRUCT'
   return typeof v
+}
+
+// -----------------------------------------------------------------------
+// JSON impl — incremental array-of-objects streaming
+// -----------------------------------------------------------------------
+
+const JSON_COLUMN_PROBE_ROWS = 100
+
+/// Streaming loader for `.json` files that are *assumed* to be a list of
+/// dicts. The whole-array bytes don't have to be present to start rendering —
+/// we extract one object at a time as soon as it parses cleanly, and stop on
+/// the first incomplete tail so the user sees whatever loaded so far. A file
+/// that doesn't open with `[` is rejected with a clear error.
+async function loadJsonRowsSource(src: string): Promise<RowsSource> {
+  const res = await fetch(src)
+  if (!res.ok) {
+    throw new Error(
+      `failed to fetch JSON: ${res.status} ${res.statusText || ''}`.trim(),
+    )
+  }
+  if (!res.body) {
+    throw new Error('json: response has no streaming body')
+  }
+  const stream = new JsonArrayStream(res.body)
+  await stream.ensureRowCount(JSON_COLUMN_PROBE_ROWS)
+  if (stream.parseError !== null) {
+    throw new Error(stream.parseError)
+  }
+  const columns = inferJsonlColumns(stream.rows, 100)
+  return {
+    kind: 'json',
+    columns,
+    totalRows: stream.done ? stream.rows.length : null,
+    diagnostics: snapshotJsonDiagnostics(stream),
+    readRows: async (rowStart, rowEnd) => {
+      await stream.ensureRowCount(rowEnd)
+      if (stream.parseError !== null) {
+        throw new Error(stream.parseError)
+      }
+      const clampedEnd = Math.min(rowEnd, stream.rows.length)
+      return {
+        rows: stream.rows.slice(rowStart, clampedEnd),
+        hasMore: !stream.done || clampedEnd < stream.rows.length,
+        totalRows: stream.done ? stream.rows.length : null,
+        diagnostics: snapshotJsonDiagnostics(stream),
+      }
+    },
+  }
+}
+
+function snapshotJsonDiagnostics(s: JsonArrayStream): SourceDiagnostics | undefined {
+  return s.errors > 0 ? { skippedLines: s.errors } : undefined
+}
+
+/// Pull JSON objects out of a `[...]` ReadableStream one complete element at
+/// a time. Mirrors `JsonlStream`'s contract (`rows`, `errors`, `done`,
+/// `ensureRowCount`) plus a `parseError` for fatal structural problems (e.g.
+/// the body doesn't open with `[`). Exposed for unit testing.
+///
+/// Tolerant by design:
+///   * any whitespace between elements is ignored
+///   * non-object array elements (numbers, strings, nested arrays) count as
+///     errors but parsing continues with the next element
+///   * a truncated trailing element is silently dropped — the rows we *did*
+///     parse are still returned and `done` flips once the stream closes
+///   * a missing closing `]` is not an error: when the stream ends we return
+///     whatever objects we managed to extract
+export class JsonArrayStream {
+  readonly rows: Record<string, unknown>[] = []
+  errors = 0
+  done = false
+  /// Non-null when the input can't be interpreted as a JSON array at all
+  /// (e.g. opens with `{` or `"`). `done` is also flipped so further
+  /// `ensureRowCount` calls return immediately; the loader surfaces this
+  /// through a thrown error.
+  parseError: string | null = null
+  private readonly reader: ReadableStreamDefaultReader<Uint8Array>
+  private readonly decoder = new TextDecoder('utf-8')
+  private buffer = ''
+  private bomStripped = false
+  private state: 'before-array' | 'in-array' | 'after-array' = 'before-array'
+  private pending: Promise<void> = Promise.resolve()
+
+  constructor(body: ReadableStream<Uint8Array>) {
+    this.reader = body.getReader()
+  }
+
+  async ensureRowCount(target: number): Promise<void> {
+    if (this.done || this.rows.length >= target) return
+    this.pending = this.pending.then(() => this.driveTo(target))
+    return this.pending
+  }
+
+  private async driveTo(target: number): Promise<void> {
+    while (!this.done && this.rows.length < target) {
+      const { value, done } = await this.reader.read()
+      if (done) {
+        // Flush whatever trailing bytes the decoder is holding from a chunked
+        // multi-byte char, then make one final pass over the buffer.
+        const tail = this.decoder.decode()
+        if (tail.length > 0) this.buffer += tail
+        this.drain()
+        this.done = true
+        return
+      }
+      let text = this.decoder.decode(value, { stream: true })
+      if (!this.bomStripped) {
+        this.bomStripped = true
+        if (text.charCodeAt(0) === 0xfeff) text = text.slice(1)
+      }
+      this.buffer += text
+      this.drain()
+      if (this.parseError !== null) {
+        // Unrecoverable: treat as terminal so callers stop polling.
+        this.done = true
+        return
+      }
+    }
+  }
+
+  private drain(): void {
+    let i = 0
+
+    if (this.state === 'before-array') {
+      i = skipWs(this.buffer, 0)
+      if (i >= this.buffer.length) {
+        this.buffer = this.buffer.slice(i)
+        return
+      }
+      if (this.buffer[i] !== '[') {
+        const preview = this.buffer.slice(i, i + 32)
+        this.parseError = `expected a JSON array (file should start with "["), got: ${JSON.stringify(preview)}`
+        return
+      }
+      i++
+      this.state = 'in-array'
+    }
+
+    if (this.state === 'in-array') {
+      while (true) {
+        i = skipWs(this.buffer, i)
+        if (i >= this.buffer.length) break
+
+        const c = this.buffer[i]
+        if (c === ',') {
+          // Tolerate leading / consecutive commas — JSON.parse on the object
+          // itself does the strict validation.
+          i++
+          continue
+        }
+        if (c === ']') {
+          this.state = 'after-array'
+          i++
+          break
+        }
+
+        const end = findValueEnd(this.buffer, i)
+        if (end === null) {
+          // Incomplete value at the tail — wait for more bytes.
+          break
+        }
+        const slice = this.buffer.slice(i, end + 1)
+        try {
+          const parsed = JSON.parse(slice)
+          if (
+            parsed !== null &&
+            typeof parsed === 'object' &&
+            !Array.isArray(parsed)
+          ) {
+            this.rows.push(parsed as Record<string, unknown>)
+          } else {
+            this.errors++
+          }
+        } catch {
+          this.errors++
+        }
+        i = end + 1
+      }
+    }
+
+    // Drop the consumed prefix; the tail (incomplete value or post-`]`
+    // garbage) stays buffered for the next chunk.
+    this.buffer = this.buffer.slice(i)
+  }
+}
+
+function skipWs(s: string, start: number): number {
+  let i = start
+  while (i < s.length) {
+    const c = s.charCodeAt(i)
+    if (c === 0x20 || c === 0x09 || c === 0x0a || c === 0x0d) i++
+    else break
+  }
+  return i
+}
+
+/// Inclusive end index of the JSON value starting at `s[start]`, or null if
+/// the value is structurally incomplete (the caller should buffer more bytes
+/// before retrying). Handles every JSON value form: object, array, string
+/// (with `\"` / `\\` escapes), number/bool/null literals.
+export function findValueEnd(s: string, start: number): number | null {
+  const c = s[start]
+  if (c === undefined) return null
+  if (c === '{' || c === '[') return findBracketEnd(s, start)
+  if (c === '"') return findStringEnd(s, start)
+  return findLiteralEnd(s, start)
+}
+
+function findBracketEnd(s: string, start: number): number | null {
+  let depth = 0
+  let inString = false
+  let escaped = false
+  for (let i = start; i < s.length; i++) {
+    const ch = s[i]
+    if (inString) {
+      if (escaped) {
+        escaped = false
+      } else if (ch === '\\') {
+        escaped = true
+      } else if (ch === '"') {
+        inString = false
+      }
+      continue
+    }
+    if (ch === '"') {
+      inString = true
+      continue
+    }
+    if (ch === '{' || ch === '[') {
+      depth++
+    } else if (ch === '}' || ch === ']') {
+      depth--
+      if (depth === 0) return i
+    }
+  }
+  return null
+}
+
+function findStringEnd(s: string, start: number): number | null {
+  let escaped = false
+  for (let i = start + 1; i < s.length; i++) {
+    const ch = s[i]
+    if (escaped) {
+      escaped = false
+      continue
+    }
+    if (ch === '\\') {
+      escaped = true
+      continue
+    }
+    if (ch === '"') return i
+  }
+  return null
+}
+
+function findLiteralEnd(s: string, start: number): number | null {
+  // Literals end at the first JSON delimiter. We can't tell from EOB alone
+  // whether a literal is complete (the next byte could extend the number),
+  // so we return null and let the caller wait for more data.
+  for (let i = start; i < s.length; i++) {
+    const c = s[i]
+    if (
+      c === ',' || c === ']' || c === '}' ||
+      c === ' ' || c === '\n' || c === '\r' || c === '\t'
+    ) {
+      return i - 1
+    }
+  }
+  return null
 }
