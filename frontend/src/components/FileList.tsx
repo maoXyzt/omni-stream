@@ -286,6 +286,24 @@ export function FileList() {
     [previewState, previewableEntries, openPreview],
   )
 
+  // Stable across re-renders so memoized `FileTile`s in the grid don't
+  // invalidate their cache every time the user types in the filter or flips
+  // sort direction.
+  const handleEntry = useCallback(
+    (entry: FileEntry) => {
+      if (entry.is_dir) {
+        goToPath(entry.key)
+        return
+      }
+      // Every file is previewable — known types via their dedicated previewer,
+      // unknown types via GenericPreview (icon + metadata + iframe fallback
+      // for PDFs). The preview modal's footer still exposes Open/Download for
+      // formats the user'd rather just grab.
+      openPreview(entry)
+    },
+    [goToPath, openPreview],
+  )
+
   // Split layout = list view on desktop with a preview open. Grid + mobile
   // continue to use the modal preview path.
   const splitView =
@@ -411,18 +429,6 @@ export function FileList() {
 
   function prevPage() {
     setTokenStack((stack) => (stack.length > 1 ? stack.slice(0, -1) : stack))
-  }
-
-  function handleEntry(entry: FileEntry) {
-    if (entry.is_dir) {
-      goToPath(entry.key)
-      return
-    }
-    // Every file is previewable — known types via their dedicated previewer,
-    // unknown types via GenericPreview (icon + metadata + iframe fallback for
-    // PDFs). The preview modal's footer still exposes Open/Download for
-    // formats the user'd rather just grab.
-    openPreview(entry)
   }
 
   const toggleMainSort = () => setSortDir(sortDir === 'asc' ? 'desc' : 'asc')

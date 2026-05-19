@@ -1,4 +1,4 @@
-import { useState, type ComponentType } from 'react'
+import { memo, useState, type ComponentType } from 'react'
 import { Folder, ImageOff } from 'lucide-react'
 
 import { proxyUrl, thumbUrl } from '@/api/storage'
@@ -9,12 +9,6 @@ import {
   iconForKey,
   previewableKind,
 } from '@/components/preview/registry'
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from '@/components/ui/tooltip'
-import { useOverflow } from '@/hooks/use-overflow'
 import { cn } from '@/lib/utils'
 import type { FileEntry } from '@/types/storage'
 
@@ -35,64 +29,65 @@ interface FileTileProps {
   onSelect: (entry: FileEntry) => void
 }
 
-export function FileTile({ entry, prefix, storageName, onSelect }: FileTileProps) {
+// Memoized: a directory with 10k+ entries renders a tile per row, and the
+// only props that ever change per-tile across a filter/sort/render cycle are
+// the entry itself (stable reference within a page) and the parent's callback
+// (now a useCallback in FileList). Memo + native title attribute together
+// drop the dominant cost — 10k Radix Tooltip + 10k ResizeObserver
+// subscriptions — to zero.
+export const FileTile = memo(function FileTile({
+  entry,
+  prefix,
+  storageName,
+  onSelect,
+}: FileTileProps) {
   const name = displayName(entry.key, prefix)
   const isImage = !entry.is_dir && previewableKind(entry.key) === 'image'
 
-  // Only show the name-tooltip when the filename is actually clipped by
-  // `truncate`. ref attached to the caption div; ResizeObserver re-checks on
-  // tile resize, and `name` as a dep re-checks on directory navigation.
-  const [nameRef, nameOverflow] = useOverflow<HTMLDivElement>(name)
-
   return (
-    <Tooltip>
-      <EntryContextMenu entry={entry} storageName={storageName}>
-        <TooltipTrigger asChild>
-          <button
-            type="button"
-            onClick={() => onSelect(entry)}
-            className="group flex flex-col gap-1.5 text-left focus-visible:outline-none"
-          >
-            {/* Hover state stacks four cues, each cheap on its own:
-                  - border tints to primary so the focused tile reads from a glance
-                  - shadow lifts the tile slightly off the grid background
-                  - background nudges from muted/40 -> muted (already present)
-                  - inner image / icon scales 1.05-1.10 inside `overflow-hidden`
-                Keyboard focus mirrors hover via `group-focus-visible:` so tabbing
-                through the grid is just as clear. */}
-            <div className="relative aspect-square overflow-hidden rounded-md border bg-muted/40 transition duration-200 group-hover:border-primary/40 group-hover:bg-muted group-hover:shadow-md group-focus-visible:border-primary group-focus-visible:ring-2 group-focus-visible:ring-primary/30">
-              {entry.is_dir ? (
-                <IconFill icon={Folder} color={FOLDER_COLOR} />
-              ) : isImage ? (
-                <ImageContent
-                  entry={entry}
-                  storageName={storageName}
-                  alt={name}
-                />
-              ) : (
-                <IconFill
-                  icon={iconForKey(entry.key)}
-                  color={colorForKey(entry.key)}
-                />
-              )}
-            </div>
-            <div
-              ref={nameRef}
-              className="truncate px-1 text-xs text-muted-foreground transition-colors group-hover:text-foreground group-focus-visible:text-foreground"
-            >
-              {name}
-            </div>
-          </button>
-        </TooltipTrigger>
-      </EntryContextMenu>
-      {nameOverflow && (
-        <TooltipContent side="bottom" className="max-w-sm break-all">
+    <EntryContextMenu entry={entry} storageName={storageName}>
+      <button
+        type="button"
+        onClick={() => onSelect(entry)}
+        // `title` gives us hover-tooltips for the (often) truncated caption
+        // without per-tile Radix Tooltip mounts or a ResizeObserver-based
+        // overflow check. Browsers only render the tooltip on hover delay, so
+        // tiles the user never hovers cost nothing extra. UX trade-off: short
+        // names that aren't actually truncated also get a redundant tooltip
+        // on long hovers, which is acceptable.
+        title={name}
+        className="group flex flex-col gap-1.5 text-left focus-visible:outline-none"
+      >
+        {/* Hover state stacks four cues, each cheap on its own:
+              - border tints to primary so the focused tile reads from a glance
+              - shadow lifts the tile slightly off the grid background
+              - background nudges from muted/40 -> muted (already present)
+              - inner image / icon scales 1.05-1.10 inside `overflow-hidden`
+            Keyboard focus mirrors hover via `group-focus-visible:` so tabbing
+            through the grid is just as clear. */}
+        <div className="relative aspect-square overflow-hidden rounded-md border bg-muted/40 transition duration-200 group-hover:border-primary/40 group-hover:bg-muted group-hover:shadow-md group-focus-visible:border-primary group-focus-visible:ring-2 group-focus-visible:ring-primary/30">
+          {entry.is_dir ? (
+            <IconFill icon={Folder} color={FOLDER_COLOR} />
+          ) : isImage ? (
+            <ImageContent
+              entry={entry}
+              storageName={storageName}
+              alt={name}
+            />
+          ) : (
+            <IconFill
+              icon={iconForKey(entry.key)}
+              color={colorForKey(entry.key)}
+            />
+          )}
+        </div>
+        <div className="truncate px-1 text-xs text-muted-foreground transition-colors group-hover:text-foreground group-focus-visible:text-foreground">
           {name}
-        </TooltipContent>
-      )}
-    </Tooltip>
+        </div>
+      </button>
+    </EntryContextMenu>
   )
-}
+})
 
 interface ImageContentProps {
   entry: FileEntry
