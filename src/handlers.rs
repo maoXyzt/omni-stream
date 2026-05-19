@@ -237,52 +237,14 @@ pub async fn list_handler(
 ) -> Result<Json<ListResult>, AppError> {
   let backend = state.resolve(q.storage.as_deref())?;
   let skip = q.skip_pages.unwrap_or(0).min(MAX_SKIP_PAGES);
-  let result = walk_list_files(backend.as_ref(), &q.prefix, q.page_token, skip).await?;
+  // `list_files_walking` has a sane default impl in the trait (naive
+  // sequential `list_files` calls) and a hot override on backends that can
+  // amortize — local fs reads all the walked pages in a single dir scan
+  // instead of repeating the same scan once per page.
+  let result = backend
+    .list_files_walking(&q.prefix, q.page_token, skip)
+    .await?;
   Ok(Json(result))
-}
-
-/// Walk the token chain `skip` pages forward, recording each step's
-/// `next_token` in the returned `walked_tokens`. The final `list_files` call
-/// produces the page handed back to the caller. Pulled out of `list_handler`
-/// so the loop can be unit-tested against a stub backend without spinning
-/// up `AppState`.
-async fn walk_list_files(
-  backend: &dyn StorageBackend,
-  prefix: &str,
-  page_token: Option<String>,
-  skip: u32,
-) -> Result<ListResult, AppError> {
-  let mut walked: Vec<String> = Vec::with_capacity(skip as usize);
-  let mut token = page_token;
-
-  // Walk `skip` pages forward. Each iteration discards the step's entries
-  // and keeps only its `next_token` — that's how the cursor advances. The
-  // post-loop call below fetches the page we actually return.
-  for _ in 0..skip {
-    let step = backend.list_files(prefix, token).await?;
-    match step.next_token {
-      Some(t) => {
-        walked.push(t.clone());
-        token = Some(t);
-      }
-      None => {
-        // Ran out of pages before reaching the requested offset. Hand back
-        // the last walked step's entries — that *is* the final page — so
-        // the client can snap its URL to the actual end instead of erroring.
-        // Preserve `total_pages` if the backend filled it on this step.
-        return Ok(ListResult {
-          entries: step.entries,
-          next_token: None,
-          walked_tokens: walked,
-          total_pages: step.total_pages,
-        });
-      }
-    }
-  }
-
-  let mut result = backend.list_files(prefix, token).await?;
-  result.walked_tokens = walked;
-  Ok(result)
 }
 
 pub async fn proxy_handler(
@@ -504,7 +466,7 @@ mod tests {
   #[tokio::test]
   async fn walk_skip_zero_is_a_single_list_call() {
     let backend = StubBackend::new(10, 3);
-    let res = walk_list_files(&backend, "", None, 0).await.unwrap();
+    let res = backend.list_files_walking("", None, 0).await.unwrap();
     assert_eq!(
       res
         .entries
@@ -524,7 +486,7 @@ mod tests {
     // skip=2 from start → land on page 3 (k6..k8), walked tokens point at
     // pages 2 and 3.
     let backend = StubBackend::new(10, 3);
-    let res = walk_list_files(&backend, "", None, 2).await.unwrap();
+    let res = backend.list_files_walking("", None, 2).await.unwrap();
     assert_eq!(
       res
         .entries
@@ -547,7 +509,7 @@ mod tests {
     // skip past the actual end → the EOF-early branch returns the last
     // page. Its `total_pages` should still flow through unchanged.
     let backend = StubBackend::new(10, 3);
-    let res = walk_list_files(&backend, "", None, 10).await.unwrap();
+    let res = backend.list_files_walking("", None, 10).await.unwrap();
     assert_eq!(res.total_pages, Some(4));
   }
 
@@ -555,7 +517,7 @@ mod tests {
   async fn walk_with_start_token_advances_from_that_position() {
     // Same fixture, but start from "3" (page 2). skip=1 → land on page 3.
     let backend = StubBackend::new(10, 3);
-    let res = walk_list_files(&backend, "", Some("3".into()), 1)
+    let res = backend.list_files_walking("", Some("3".into()), 1)
       .await
       .unwrap();
     assert_eq!(
@@ -574,7 +536,7 @@ mod tests {
     // 10 keys / 3 per page → 4 real pages. skip=10 → walk until EOF, return
     // the entries of whatever page hit `next_token = None`.
     let backend = StubBackend::new(10, 3);
-    let res = walk_list_files(&backend, "", None, 10).await.unwrap();
+    let res = backend.list_files_walking("", None, 10).await.unwrap();
     assert_eq!(
       res
         .entries
@@ -593,7 +555,7 @@ mod tests {
   #[tokio::test]
   async fn walk_skip_zero_on_empty_listing_works() {
     let backend = StubBackend::new(0, 3);
-    let res = walk_list_files(&backend, "", None, 0).await.unwrap();
+    let res = backend.list_files_walking("", None, 0).await.unwrap();
     assert!(res.entries.is_empty());
     assert!(res.next_token.is_none());
     assert!(res.walked_tokens.is_empty());

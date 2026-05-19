@@ -320,6 +320,127 @@ impl StorageBackend for LocalFsBackend {
     })
   }
 
+  async fn list_files_walking(
+    &self,
+    prefix: &str,
+    token: Option<String>,
+    skip: u32,
+  ) -> Result<ListResult, AppError> {
+    // The naïve trait default would call `list_files` `skip + 1` times, and
+    // each call here re-scans the entire directory — for ~30k entries that's
+    // 30 stat-heavy passes and easily a minute of wall time. This override
+    // reads the dir *once*, keeps the smallest `(skip + 1)` pages' worth of
+    // keys past the cursor in the bounded heap, then slices the sorted vec
+    // into pages.
+    let dir_path = self.resolve(prefix)?;
+    let metadata = match self.leaf_metadata(&dir_path).await {
+      Ok(m) => m,
+      Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+        return Err(AppError::NotFound(prefix.to_string()));
+      }
+      Err(e) => return Err(AppError::Io(e)),
+    };
+    if !metadata.is_dir() {
+      return Err(AppError::Unsupported(format!("not a directory: {prefix}")));
+    }
+
+    let cursor = token.as_deref().unwrap_or("");
+    // (skip + 1) full pages of entries + a lookahead element to detect
+    // whether there's anything after the target page. The heap stays bounded
+    // by request input — with `MAX_SKIP_PAGES = 100` the worst case is
+    // ~100k FileEntry records (~10 MB), comfortably fits per-request.
+    let cap = (skip as usize + 1) * LIST_PAGE_SIZE + 1;
+    let mut heap: BinaryHeap<ByKey> = BinaryHeap::with_capacity(cap);
+    let mut total_entries: u64 = 0;
+
+    let mut read = fs::read_dir(&dir_path).await?;
+    while let Some(entry) = read.next_entry().await? {
+      let entry_path = entry.path();
+      let m = if self.follow_symlinks {
+        match fs::metadata(&entry_path).await {
+          Ok(m) => m,
+          Err(_) => entry.metadata().await?,
+        }
+      } else {
+        entry.metadata().await?
+      };
+      let is_dir = m.is_dir();
+      let key = self.relative_key(&entry_path, is_dir);
+      total_entries += 1;
+      if key.as_str() <= cursor {
+        continue;
+      }
+      if heap.len() == cap
+        && let Some(top) = heap.peek()
+        && key >= top.0.key
+      {
+        continue;
+      }
+      let (size, last_modified) = if is_dir {
+        (0u64, None)
+      } else {
+        (
+          m.len(),
+          m.modified().ok().and_then(system_time_to_unix_string),
+        )
+      };
+      heap.push(ByKey(FileEntry {
+        key,
+        size,
+        last_modified,
+        is_dir,
+      }));
+      if heap.len() > cap {
+        heap.pop();
+      }
+    }
+
+    let entries: Vec<FileEntry> = heap.into_sorted_vec().into_iter().map(|w| w.0).collect();
+    let total_pages = total_entries.div_ceil(LIST_PAGE_SIZE as u64);
+
+    // Empty short-circuit: no entries past cursor at all.
+    if entries.is_empty() {
+      return Ok(ListResult {
+        entries: Vec::new(),
+        next_token: None,
+        walked_tokens: Vec::new(),
+        total_pages: Some(total_pages),
+      });
+    }
+
+    // Slice the sorted vec into pages. The last present page might be the
+    // target (skip-th) or — when the listing ran out before the target —
+    // a smaller index. Either way, walked_tokens lists one token per
+    // earlier page, and next_token is set only when the target was reached
+    // *and* there's lookahead beyond.
+    let last_present_page = (entries.len() - 1) / LIST_PAGE_SIZE;
+    let final_page_idx = last_present_page.min(skip as usize);
+    let final_start = final_page_idx * LIST_PAGE_SIZE;
+    let final_end = (final_start + LIST_PAGE_SIZE).min(entries.len());
+    let final_entries: Vec<FileEntry> = entries[final_start..final_end].to_vec();
+
+    let mut walked = Vec::with_capacity(final_page_idx);
+    for i in 0..final_page_idx {
+      // Token of page i+2 (1-indexed) = last key of page i+1.
+      walked.push(entries[(i + 1) * LIST_PAGE_SIZE - 1].key.clone());
+    }
+
+    let reached_target = final_page_idx == skip as usize;
+    let has_more_after_target = reached_target && entries.len() > final_end;
+    let next_token = if has_more_after_target {
+      Some(final_entries.last().unwrap().key.clone())
+    } else {
+      None
+    };
+
+    Ok(ListResult {
+      entries: final_entries,
+      next_token,
+      walked_tokens: walked,
+      total_pages: Some(total_pages),
+    })
+  }
+
   async fn stat(&self, path: &str) -> Result<FileMeta, AppError> {
     let full = self.resolve(path)?;
     let metadata = match self.leaf_metadata(&full).await {
@@ -408,6 +529,78 @@ mod tests {
       .await
       .unwrap();
     assert_eq!(second.total_pages, Some(2));
+  }
+
+  #[tokio::test]
+  async fn list_files_walking_matches_repeated_list_files() {
+    // 1500 files → 2 pages. Verify the single-scan override produces the
+    // same entries + tokens the naïve "call list_files twice" path would,
+    // but in one scan instead of two.
+    let dir = tempdir();
+    let total = LIST_PAGE_SIZE + LIST_PAGE_SIZE / 2;
+    for i in 0..total {
+      std::fs::write(dir.join(format!("f-{i:06}.bin")), b"x").unwrap();
+    }
+    let backend = LocalFsBackend::new(&dir, false);
+
+    // Baseline: walk via list_files twice.
+    let p1 = backend.list_files("", None).await.unwrap();
+    let p2 = backend
+      .list_files("", p1.next_token.clone())
+      .await
+      .unwrap();
+
+    // Same starting state, single shot.
+    let walked = backend.list_files_walking("", None, 1).await.unwrap();
+    assert_eq!(
+      walked.entries.iter().map(|e| &e.key).collect::<Vec<_>>(),
+      p2.entries.iter().map(|e| &e.key).collect::<Vec<_>>(),
+    );
+    assert_eq!(walked.next_token, p2.next_token);
+    assert_eq!(
+      walked.walked_tokens,
+      vec![p1.next_token.clone().unwrap()],
+    );
+    assert_eq!(walked.total_pages, Some(2));
+  }
+
+  #[tokio::test]
+  async fn list_files_walking_skip_zero_matches_list_files() {
+    let dir = tempdir();
+    seed_files(&dir, &["a.txt", "b.txt", "c.txt"]);
+    let backend = LocalFsBackend::new(&dir, false);
+
+    let one_shot = backend.list_files("", None).await.unwrap();
+    let walked = backend.list_files_walking("", None, 0).await.unwrap();
+    assert_eq!(
+      walked.entries.iter().map(|e| &e.key).collect::<Vec<_>>(),
+      one_shot.entries.iter().map(|e| &e.key).collect::<Vec<_>>(),
+    );
+    assert_eq!(walked.next_token, one_shot.next_token);
+    assert!(walked.walked_tokens.is_empty());
+    assert_eq!(walked.total_pages, one_shot.total_pages);
+  }
+
+  #[tokio::test]
+  async fn list_files_walking_truncates_when_listing_ends_early() {
+    // 1500 files → 2 pages. Asking to skip 5 should yield the last page
+    // (page 2) with walked_tokens = [token-of-page-1] (truncated).
+    let dir = tempdir();
+    let total = LIST_PAGE_SIZE + LIST_PAGE_SIZE / 2;
+    for i in 0..total {
+      std::fs::write(dir.join(format!("f-{i:06}.bin")), b"x").unwrap();
+    }
+    let backend = LocalFsBackend::new(&dir, false);
+    let p1_token = backend.list_files("", None).await.unwrap().next_token;
+
+    let walked = backend.list_files_walking("", None, 5).await.unwrap();
+    // Last actual page is page 2, half-full.
+    assert_eq!(walked.entries.len(), LIST_PAGE_SIZE / 2);
+    assert!(walked.next_token.is_none());
+    // We only walked off the end of one real page before running out.
+    assert_eq!(walked.walked_tokens.len(), 1);
+    assert_eq!(walked.walked_tokens[0], p1_token.unwrap());
+    assert_eq!(walked.total_pages, Some(2));
   }
 
   #[tokio::test]
