@@ -34,6 +34,7 @@ import { useMediaQuery } from '@/hooks/use-media-query'
 import { useResizableWidth } from '@/hooks/use-resizable-width'
 import { useSidebarCollapsed } from '@/hooks/use-sidebar-collapsed'
 import { useSortDir } from '@/hooks/use-sort-dir'
+import { useGridFit } from '@/hooks/use-grid-fit'
 import { useViewMode } from '@/hooks/use-view-mode'
 import { cn } from '@/lib/utils'
 import { formatBytes, formatTime } from '@/lib/format'
@@ -55,6 +56,7 @@ import {
 import type { PreviewKind } from '@/components/preview/types'
 import { StorageSwitcher } from '@/components/StorageSwitcher'
 import { TokenPrompt } from '@/components/TokenPrompt'
+import { GridFitToggle } from '@/components/GridFitToggle'
 import { ViewToggle } from '@/components/ViewToggle'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -108,6 +110,7 @@ export function FileList() {
   const storagesQuery = useStorages()
   const serverInfo = useServerInfo()
   const [viewMode, setViewMode] = useViewMode()
+  const [gridFit, setGridFit] = useGridFit()
   // Inline split layout (narrow file list + preview pane) needs horizontal
   // room. Below `md` we keep the full-width list and fall back to the modal.
   const isDesktop = useMediaQuery('(min-width: 768px)')
@@ -750,6 +753,9 @@ export function FileList() {
                 <TooltipContent>Refresh listing</TooltipContent>
               </Tooltip>
               <ViewToggle mode={viewMode} onChange={setViewMode} />
+              {viewMode === 'grid' && (
+                <GridFitToggle fit={gridFit} onChange={setGridFit} />
+              )}
               <ShareLinkButton />
               {hasToken && (
                 <Tooltip>
@@ -925,6 +931,7 @@ export function FileList() {
                 entries={filteredEntries}
                 prefix={prefix}
                 storageName={storageName}
+                fit={gridFit}
                 onSelect={handleEntry}
               />
             ) : (

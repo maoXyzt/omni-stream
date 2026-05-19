@@ -9,6 +9,7 @@ import {
   iconForKey,
   previewableKind,
 } from '@/components/preview/registry'
+import type { GridFit } from '@/hooks/use-grid-fit'
 import { cn } from '@/lib/utils'
 import type { FileEntry } from '@/types/storage'
 
@@ -26,6 +27,7 @@ interface FileTileProps {
   entry: FileEntry
   prefix: string
   storageName: string
+  fit: GridFit
   onSelect: (entry: FileEntry) => void
 }
 
@@ -39,6 +41,7 @@ export const FileTile = memo(function FileTile({
   entry,
   prefix,
   storageName,
+  fit,
   onSelect,
 }: FileTileProps) {
   const name = displayName(entry.key, prefix)
@@ -73,6 +76,7 @@ export const FileTile = memo(function FileTile({
               entry={entry}
               storageName={storageName}
               alt={name}
+              fit={fit}
             />
           ) : (
             <IconFill
@@ -93,9 +97,10 @@ interface ImageContentProps {
   entry: FileEntry
   storageName: string
   alt: string
+  fit: GridFit
 }
 
-function ImageContent({ entry, storageName, alt }: ImageContentProps) {
+function ImageContent({ entry, storageName, alt, fit }: ImageContentProps) {
   const [loaded, setLoaded] = useState(false)
   const [errored, setErrored] = useState(false)
   const [usingFallback, setUsingFallback] = useState(false)
@@ -135,7 +140,11 @@ function ImageContent({ entry, storageName, alt }: ImageContentProps) {
       className={cn(
         // `transition` (everything) instead of `transition-opacity` so the
         // hover-scale below animates alongside the fade-in.
-        'size-full object-cover transition duration-200',
+        'size-full transition duration-200',
+        // Tailwind has no runtime-dynamic `object-${fit}` form — the
+        // strings need to be literals so the JIT keeps them. Two states
+        // mean a simple ternary suffices.
+        fit === 'cover' ? 'object-cover' : 'object-contain',
         loaded ? 'opacity-100' : 'opacity-0',
         // `overflow-hidden` on the parent clips the overflow, so the image
         // zooms within the tile box without changing layout.
