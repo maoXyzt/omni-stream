@@ -121,6 +121,14 @@ export function FileList() {
     minPx: 200,
     maxPx: 600,
   })
+  // Folder-tree sidebar. Min keeps short folder names readable; max prevents
+  // it from eating the main pane on narrower viewports.
+  const sidebarResize = useResizableWidth({
+    key: 'sidebar',
+    defaultPx: 256,
+    minPx: 180,
+    maxPx: 480,
+  })
   const [tokenStack, setTokenStack] = useState<Array<string | undefined>>([
     undefined,
   ])
@@ -460,13 +468,22 @@ export function FileList() {
 
       <div className="flex min-h-0 flex-1">
         {storageName && !sidebarCollapsed && (
-          <aside className="hidden md:flex md:w-64 md:shrink-0 md:flex-col md:overflow-y-auto md:border-r md:border-border">
-            <Sidebar
-              prefix={prefix}
-              storageName={storageName}
-              onNavigate={goToPath}
+          <>
+            <aside
+              style={{ width: sidebarResize.width }}
+              className="hidden shrink-0 md:flex md:flex-col md:overflow-y-auto md:border-r md:border-border"
+            >
+              <Sidebar
+                prefix={prefix}
+                storageName={storageName}
+                onNavigate={goToPath}
+              />
+            </aside>
+            <ResizeHandle
+              onPointerDown={sidebarResize.startResize}
+              className="hidden md:block"
             />
-          </aside>
+          </>
         )}
         <main
           ref={mainRef}
@@ -845,19 +862,25 @@ function FileRow({ entry, prefix, storageName, onSelect }: FileRowProps) {
 
 interface ResizeHandleProps {
   onPointerDown: (e: ReactPointerEvent) => void
+  /// Extra utility classes — e.g. callers that need to hide the handle at
+  /// certain breakpoints (`hidden md:block`).
+  className?: string
 }
 
 // 4-px-wide column separator that captures pointer drags. `bg-border` matches
 // the existing border-color used elsewhere; the hover/active states tint it
 // with the primary color so the affordance is discoverable without being
 // noisy at rest.
-function ResizeHandle({ onPointerDown }: ResizeHandleProps) {
+function ResizeHandle({ onPointerDown, className }: ResizeHandleProps) {
   return (
     <div
       role="separator"
       aria-orientation="vertical"
       onPointerDown={onPointerDown}
-      className="group relative w-1 shrink-0 cursor-col-resize bg-border transition-colors hover:bg-primary/40 active:bg-primary/60"
+      className={cn(
+        'group relative w-1 shrink-0 cursor-col-resize bg-border transition-colors hover:bg-primary/40 active:bg-primary/60',
+        className,
+      )}
     >
       {/* Invisible 8-px-wide hit area centered over the visible bar so users
           don't need pixel-perfect aim to grab the handle. */}
