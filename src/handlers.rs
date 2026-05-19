@@ -517,7 +517,8 @@ mod tests {
   async fn walk_with_start_token_advances_from_that_position() {
     // Same fixture, but start from "3" (page 2). skip=1 → land on page 3.
     let backend = StubBackend::new(10, 3);
-    let res = backend.list_files_walking("", Some("3".into()), 1)
+    let res = backend
+      .list_files_walking("", Some("3".into()), 1)
       .await
       .unwrap();
     assert_eq!(

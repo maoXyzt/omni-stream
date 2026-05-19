@@ -109,14 +109,8 @@ async fn main() -> anyhow::Result<()> {
   let app = Router::new()
     .route("/api/server", get(server_info_handler))
     .route("/api/storages", get(list_storages_handler))
-    .route(
-      "/api/list",
-      get(list_handler).layer(catalog_timeout),
-    )
-    .route(
-      "/api/stat/{*key}",
-      get(stat_handler).layer(catalog_timeout),
-    )
+    .route("/api/list", get(list_handler).layer(catalog_timeout))
+    .route("/api/stat/{*key}", get(stat_handler).layer(catalog_timeout))
     .route("/api/proxy/{*key}", get(proxy_handler))
     .route(
       "/api/thumb/{*key}",
