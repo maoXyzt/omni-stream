@@ -147,7 +147,15 @@ export function FileList() {
   // walking and direct fetches share the same cache.
   const currentToken = tokenStack[currentPage - 1]
   const listQuery = useListFiles(prefix, currentToken, storageName || undefined)
+  // `walking` drives the UI (Pager spinner + skeleton); `walkingRef` is the
+  // re-entry guard for the walk effect. Two reasons it's a ref, not the
+  // state: (1) we can't put `walking` in the effect's dep array — setting
+  // it inside the effect would re-trigger the effect, fire its cleanup, and
+  // poison the in-flight async via `cancelled = true` so `setWalking(false)`
+  // never runs in `finally` and the skeleton sticks; (2) a ref reads its
+  // latest value synchronously, perfect for guarding concurrent starts.
   const [walking, setWalking] = useState(false)
+  const walkingRef = useRef(false)
 
   // Reset the token cache when the user navigates to a different listing —
   // tokens are scoped to (storage, prefix) and aren't portable across them.
@@ -194,15 +202,23 @@ export function FileList() {
   // listing cache for the landed page so the renderer below picks it up
   // without a second round-trip. Larger jumps re-enter this effect via the
   // server-side cap (MAX_SKIP_PAGES = 100).
+  //
+  // Note: `walking`/`setWalking` are NOT in the dep array. Putting them
+  // there would re-run the effect right after `setWalking(true)`, which
+  // would fire the cleanup → set `cancelled = true` → the in-flight async
+  // would skip both its state updates and the `setWalking(false)` in
+  // `finally`, sticking the skeleton on forever. `walkingRef` is the
+  // synchronous re-entry guard instead.
   useEffect(() => {
     if (!storageName) return
-    if (walking) return
+    if (walkingRef.current) return
     if (currentPage <= tokenStack.length) return
     const startIdx = tokenStack.length - 1
     const startToken = tokenStack[startIdx]
     const skip = currentPage - tokenStack.length
-    let cancelled = false
+    walkingRef.current = true
     setWalking(true)
+    let cancelled = false
     ;(async () => {
       try {
         const res = await listFiles(prefix, startToken, storageName, skip)
@@ -225,13 +241,14 @@ export function FileList() {
         const actualLastPage = newStack.length - (res.next_token ? 1 : 0)
         if (actualLastPage < currentPage) gotoPage(actualLastPage)
       } finally {
+        walkingRef.current = false
         if (!cancelled) setWalking(false)
       }
     })()
     return () => {
       cancelled = true
     }
-  }, [currentPage, tokenStack, prefix, storageName, walking, queryClient, gotoPage])
+  }, [currentPage, tokenStack, prefix, storageName, queryClient, gotoPage])
 
   // Client-side filters, scoped to the current page only. Filters reset on
   // prefix change (entering a new directory wants a fresh view); they
