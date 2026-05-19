@@ -482,9 +482,7 @@ mod tests {
         next_token,
         walked_tokens: Vec::new(),
         // Stub mirrors the local-fs convention: every page knows the total.
-        total_pages: Some(
-          (self.keys.len() as u64).div_ceil(self.page_size as u64),
-        ),
+        total_pages: Some((self.keys.len() as u64).div_ceil(self.page_size as u64)),
       })
     }
 
@@ -508,7 +506,11 @@ mod tests {
     let backend = StubBackend::new(10, 3);
     let res = walk_list_files(&backend, "", None, 0).await.unwrap();
     assert_eq!(
-      res.entries.iter().map(|e| e.key.as_str()).collect::<Vec<_>>(),
+      res
+        .entries
+        .iter()
+        .map(|e| e.key.as_str())
+        .collect::<Vec<_>>(),
       vec!["k0000", "k0001", "k0002"],
     );
     assert_eq!(res.next_token.as_deref(), Some("3"));
@@ -524,7 +526,11 @@ mod tests {
     let backend = StubBackend::new(10, 3);
     let res = walk_list_files(&backend, "", None, 2).await.unwrap();
     assert_eq!(
-      res.entries.iter().map(|e| e.key.as_str()).collect::<Vec<_>>(),
+      res
+        .entries
+        .iter()
+        .map(|e| e.key.as_str())
+        .collect::<Vec<_>>(),
       vec!["k0006", "k0007", "k0008"],
     );
     assert_eq!(res.next_token.as_deref(), Some("9"));
@@ -553,7 +559,11 @@ mod tests {
       .await
       .unwrap();
     assert_eq!(
-      res.entries.iter().map(|e| e.key.as_str()).collect::<Vec<_>>(),
+      res
+        .entries
+        .iter()
+        .map(|e| e.key.as_str())
+        .collect::<Vec<_>>(),
       vec!["k0006", "k0007", "k0008"],
     );
     assert_eq!(res.walked_tokens, vec!["6"]);
@@ -566,7 +576,11 @@ mod tests {
     let backend = StubBackend::new(10, 3);
     let res = walk_list_files(&backend, "", None, 10).await.unwrap();
     assert_eq!(
-      res.entries.iter().map(|e| e.key.as_str()).collect::<Vec<_>>(),
+      res
+        .entries
+        .iter()
+        .map(|e| e.key.as_str())
+        .collect::<Vec<_>>(),
       vec!["k0009"],
     );
     assert!(res.next_token.is_none());
