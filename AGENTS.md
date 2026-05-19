@@ -23,6 +23,7 @@
 * **异步生态**: 必须使用 `tokio` 运行时。所有 IO 操作均需在 `.await` 后执行，防止阻塞 Reactor。
 * **安全性**: 外部输入（如 `path` 参数）必须经过安全清理，防止“路径遍历” (Path Traversal) 攻击。
 * **日志**: 使用 `tracing`。在处理 API 请求时，必须使用 `instrument` 宏追踪请求生命周期。
+* **Clippy 校验**: 修改 Rust 代码后，必须通过 `cargo clippy` 校验（建议：`cargo clippy --all-targets -- -D warnings`）。
 
 ## 4. 任务处理规范
 
@@ -30,7 +31,7 @@
 
 1. **分析**: 判断该需求是否影响 `StorageBackend` trait 定义。若有影响，优先修改 trait 及所有后端实现。
 2. **实现**: 按照模块结构（`src/storage`, `src/handlers`, `src/config`）增量提交代码。
-3. **验证**: 检查代码是否包含 `unwrap()` 或 `expect()`。**严禁在生产代码中使用这些函数，必须使用 `?` 配合 `AppError`。**
+3. **验证**: 检查代码是否包含 `unwrap()` 或 `expect()`。**严禁在生产代码中使用这些函数，必须使用 `?` 配合 `AppError`。
 4. **测试**: 若是新增功能，请务必提供对应的测试模块（Unit Test）。
 
 ## 5. 项目模块映射
