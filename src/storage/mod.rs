@@ -50,14 +50,10 @@ pub struct FileEntry {
 pub struct ListResult {
   pub entries: Vec<FileEntry>,
   pub next_token: Option<String>,
-  /// Tokens discovered while walking — only populated by `list_handler` when
-  /// the caller passes `skip_pages > 0`. `walked_tokens[i]` is the
-  /// `next_token` of the i-th walk step (i.e. the token that fetches the
-  /// (i+1)-th page from the caller's starting point). Length ≤ `skip_pages`;
-  /// shorter when the listing ended before the target page.
-  ///
-  /// Backends populate this only via the handler's walk loop — direct
-  /// `StorageBackend::list_files` calls always return an empty vec here.
+  /// Intermediate page tokens from a `list_files_walking` call —
+  /// `walked_tokens[i]` is the token that fetches the (i+1)-th page from
+  /// the caller's starting point. Empty for plain `list_files`; shorter
+  /// than `skip_pages` when the listing ended before the target page.
   #[serde(default, skip_serializing_if = "Vec::is_empty")]
   pub walked_tokens: Vec<String>,
   /// Total page count when the backend can compute it cheaply. Populated by

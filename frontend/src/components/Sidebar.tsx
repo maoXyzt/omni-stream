@@ -111,11 +111,9 @@ function TreeLevel({
   onNavigate,
   onResolveEmpty,
 }: TreeLevelProps) {
-  // One query per expanded folder — staleTime + keepPreviousData in
-  // use-storage make repeat expansions instant. Pagination (`next_token`) is
-  // intentionally not consumed here in v1: a directory with >1000 children
-  // gets truncated. To extend, render a "Load more" leaf that re-calls
-  // useListFiles with the token and concatenates pages.
+  // One query per expanded folder, cached + sorted. Pagination is not
+  // consumed: directories with more than `LIST_PAGE_SIZE` children render
+  // truncated in the tree (a "Load more" leaf would be the way to extend).
   const query = useListFiles(parent, undefined, storageName)
 
   const folders = useMemo(() => {
@@ -189,11 +187,10 @@ function TreeNode({
   const isCurrent = entry.key === activePrefix
   const isExpanded = expand.isExpanded(entry.key)
   const rowRef = useRef<HTMLButtonElement | null>(null)
-  // Discovered post-fetch: once we've listed this folder and found no
-  // subdirectories we swap the chevron for a spacer + dim the folder icon,
-  // so leaf folders read distinctly from "collapsed branch I haven't opened".
-  // Session-local; not handled: a leaf that gains children server-side
-  // (would require an explicit invalidate to flip back).
+  // Flipped once we've listed this folder and found no subdirectories, so
+  // leaf folders render distinctly from "collapsed branch I haven't opened
+  // yet". Session-local: a leaf that gains children server-side stays
+  // visually leaf until an invalidate.
   const [knownLeaf, setKnownLeaf] = useState(false)
   const markLeaf = useCallback(() => setKnownLeaf(true), [])
 

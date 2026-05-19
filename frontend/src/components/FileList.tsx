@@ -153,28 +153,17 @@ export function FileList() {
   // walking and direct fetches share the same cache.
   const currentToken = tokenStack[currentPage - 1]
   const listQuery = useListFiles(prefix, currentToken, storageName || undefined)
-  // `walking` drives the UI (Pager spinner + skeleton); `walkingRef` is the
-  // re-entry guard for the walk effect. Two reasons it's a ref, not the
-  // state: (1) we can't put `walking` in the effect's dep array — setting
-  // it inside the effect would re-trigger the effect, fire its cleanup, and
-  // poison the in-flight async via `cancelled = true` so `setWalking(false)`
-  // never runs in `finally` and the skeleton sticks; (2) a ref reads its
-  // latest value synchronously, perfect for guarding concurrent starts.
+  // `walking` is the UI signal (Pager spinner + skeleton). `walkingRef`
+  // mirrors it as a ref so the walk effect can guard re-entry without
+  // listing `walking` in its dep array.
   const [walking, setWalking] = useState(false)
   const walkingRef = useRef(false)
 
-  // Reset the token cache when the user navigates to a different listing —
-  // tokens are scoped to (storage, prefix) and aren't portable across them.
-  // Covers browser back/forward and manual URL edits; `goToPath` /
-  // `switchStorage` still do an eager reset to avoid a one-render window
-  // where useListFiles would key the new prefix against an old token.
-  //
-  // Crucially the updater is no-op-aware: returning the *same* reference
-  // when the stack is already the singleton `[undefined]` stops React from
-  // bumping `tokenStack`'s identity on mount, which would otherwise change
-  // the walk effect's dep array mid-flight and fire its cleanup before the
-  // in-flight `listFiles(... skip_pages=N)` even resolves — sticking the
-  // skeleton on forever for direct loads of `?page=N`.
+  // Reset the token cache when (storage, prefix) changes — covers browser
+  // back/forward and manual URL edits. The updater returns `prev` when the
+  // stack is already `[undefined]` so the reference stays stable; otherwise
+  // the mount-time reset would bump `tokenStack`'s identity and cancel any
+  // in-flight walk via the walk effect's cleanup.
   useEffect(() => {
     setTokenStack((prev) =>
       prev.length === 1 && prev[0] === undefined ? prev : [undefined],
@@ -196,22 +185,11 @@ export function FileList() {
     [setSearchParams],
   )
 
-  // When a page arrives via direct fetch (Next click or first land), record
-  // its `next_token` at the right index so `tokenStack` keeps growing one
-  // page at a time. The walk effect below handles the multi-page case.
-  //
-  // Two guards prevent stale-token corruption mid-walk:
-  //   1. `walkingRef.current` — while a walk is in flight, the walk owns
-  //      `tokenStack` and will seed it atomically when it finishes; if we
-  //      let this effect run alongside, a parallel page-1 fetch (from
-  //      `useListFiles` keyed on the still-`undefined` currentToken) would
-  //      write page-1's `next_token` into `tokenStack[currentPage]`, which
-  //      is the wrong slot. The mutation would also bump `tokenStack`'s
-  //      reference → re-trigger the walk effect's cleanup → cancel the
-  //      in-flight walk → leave `walking` stuck `true` and the skeleton on.
-  //   2. `currentPage > tokenStack.length` — the URL points past everything
-  //      we know about, so the hook's data isn't actually for `currentPage`.
-  //      Wait for the walk to fill in the cache before recording anything.
+  // When a page lands via direct fetch (Next click or first paint), record
+  // its `next_token` at the right index so `tokenStack` grows one page at
+  // a time. Skipped while a walk is in flight (walk owns the stack and
+  // seeds it atomically) or while the URL points past the known range
+  // (`listQuery.data` is then for page 1, not for `currentPage`).
   useEffect(() => {
     if (walkingRef.current) return
     if (!listQuery.data) return
@@ -228,17 +206,12 @@ export function FileList() {
   }, [listQuery.data, currentPage, tokenStack.length])
 
   // Walk-on-cold-cache: URL says page N but tokenStack only knows up to
-  // page K (< N). Send one request with `skip_pages = N - K` and seed the
-  // listing cache for the landed page so the renderer below picks it up
-  // without a second round-trip. Larger jumps re-enter this effect via the
-  // server-side cap (MAX_SKIP_PAGES = 100).
-  //
-  // Note: `walking`/`setWalking` are NOT in the dep array. Putting them
-  // there would re-run the effect right after `setWalking(true)`, which
-  // would fire the cleanup → set `cancelled = true` → the in-flight async
-  // would skip both its state updates and the `setWalking(false)` in
-  // `finally`, sticking the skeleton on forever. `walkingRef` is the
-  // synchronous re-entry guard instead.
+  // page K (< N). One request with `skip_pages = N - K` returns the landed
+  // page plus every intermediate token; seeding React Query's cache lets
+  // the renderer below pick it up without a second round-trip. Larger
+  // jumps re-enter this effect once the stack grows (server caps at
+  // `MAX_SKIP_PAGES = 100`). `walkingRef` is the re-entry guard — see the
+  // `[walking, walkingRef]` declaration above for why a ref, not state.
   useEffect(() => {
     if (!storageName) return
     if (walkingRef.current) return
@@ -297,13 +270,9 @@ export function FileList() {
         }
         if (fallbackPage < currentPage) gotoPage(fallbackPage)
       } finally {
-        // Always release the spinner — `cancelled` gates the *body* so we
-        // skip state writes after a stale effect run, but the walking
-        // *flag* is a UI signal and the answer when this IIFE returns is
-        // always "no walk in flight from me". Gating this on `!cancelled`
-        // is how strict mode (or any mid-await dep change) leaves the
-        // skeleton stuck: cleanup sets cancelled, finally then skips the
-        // setter, walking stays true forever.
+        // `cancelled` gates state writes in the body, but the UI flag
+        // always releases — otherwise a cancelled walk would leave the
+        // skeleton stuck on.
         walkingRef.current = false
         setWalking(false)
       }

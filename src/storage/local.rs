@@ -118,7 +118,12 @@ impl LocalFsBackend {
       // Resolve the link to find the real type. Fall back to lstat (i.e.
       // is_dir = false because we already know it's a symlink) if the
       // target's gone, so the entry still appears.
-      return Ok(fs::metadata(entry_path).await.map(|m| m.is_dir()).unwrap_or(false));
+      return Ok(
+        fs::metadata(entry_path)
+          .await
+          .map(|m| m.is_dir())
+          .unwrap_or(false),
+      );
     }
     Ok(ft.is_dir())
   }
@@ -141,12 +146,9 @@ impl LocalFsBackend {
     Ok(dir_path)
   }
 
-  /// Return the sorted `(key, is_dir)` listing for `prefix`. Cache hit →
-  /// no fs touches. Cache miss → one full `read_dir` pass using only the
-  /// cheap `file_type()` probe (no per-entry stat), then sort + cache. The
-  /// cache is consulted from both `list_files` and `list_files_walking`,
-  /// which is the whole point — paging within the same prefix shares one
-  /// scan instead of redoing it for every page.
+  /// Return the sorted `(key, is_dir)` listing for `prefix`, hitting the
+  /// shared cache when fresh and falling back to one `read_dir` pass +
+  /// `quick_is_dir` probes (no per-entry stat) when not.
   async fn ensure_keys_cached(
     &self,
     prefix: &str,
@@ -366,10 +368,6 @@ impl StorageBackend for LocalFsBackend {
 
   async fn list_files(&self, prefix: &str, token: Option<String>) -> Result<ListResult, AppError> {
     let dir_path = self.validate_dir(prefix).await?;
-    // Cache-first path: subsequent pages within the same prefix share one
-    // `read_dir` scan instead of redoing it per page. With A's lazy stat,
-    // the cold scan is cheap; with the cache, warm hits are O(page_size)
-    // stats and no fs traversal at all.
     let keys = self.ensure_keys_cached(prefix, &dir_path).await?;
     let cursor = token.as_deref().unwrap_or("");
     let start = keys.partition_point(|(k, _)| k.as_str() <= cursor);
@@ -395,11 +393,9 @@ impl StorageBackend for LocalFsBackend {
     token: Option<String>,
     skip: u32,
   ) -> Result<ListResult, AppError> {
-    // The naïve trait default would `list_files` `skip + 1` times, and the
-    // previous override walked a bounded heap to amortize. This version
-    // shares the same sorted-keys cache that `list_files` uses, so warm
-    // hits walk to any page with O(skip × page_size) bookkeeping and a
-    // single stat pass over the returned slice — no per-page fs scans.
+    // Shares `list_files`'s sorted-keys cache, so walking to any page is
+    // bookkeeping over an already-sorted vec plus one stat pass over the
+    // returned slice — no per-page fs scans.
     let dir_path = self.validate_dir(prefix).await?;
     let keys = self.ensure_keys_cached(prefix, &dir_path).await?;
     let cursor = token.as_deref().unwrap_or("");
@@ -554,10 +550,7 @@ mod tests {
 
     // Baseline: walk via list_files twice.
     let p1 = backend.list_files("", None).await.unwrap();
-    let p2 = backend
-      .list_files("", p1.next_token.clone())
-      .await
-      .unwrap();
+    let p2 = backend.list_files("", p1.next_token.clone()).await.unwrap();
 
     // Same starting state, single shot.
     let walked = backend.list_files_walking("", None, 1).await.unwrap();
@@ -566,10 +559,7 @@ mod tests {
       p2.entries.iter().map(|e| &e.key).collect::<Vec<_>>(),
     );
     assert_eq!(walked.next_token, p2.next_token);
-    assert_eq!(
-      walked.walked_tokens,
-      vec![p1.next_token.clone().unwrap()],
-    );
+    assert_eq!(walked.walked_tokens, vec![p1.next_token.clone().unwrap()],);
     assert_eq!(walked.total_pages, Some(2));
   }
 
