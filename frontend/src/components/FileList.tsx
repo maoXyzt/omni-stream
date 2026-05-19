@@ -184,8 +184,23 @@ export function FileList() {
   // When a page arrives via direct fetch (Next click or first land), record
   // its `next_token` at the right index so `tokenStack` keeps growing one
   // page at a time. The walk effect below handles the multi-page case.
+  //
+  // Two guards prevent stale-token corruption mid-walk:
+  //   1. `walkingRef.current` — while a walk is in flight, the walk owns
+  //      `tokenStack` and will seed it atomically when it finishes; if we
+  //      let this effect run alongside, a parallel page-1 fetch (from
+  //      `useListFiles` keyed on the still-`undefined` currentToken) would
+  //      write page-1's `next_token` into `tokenStack[currentPage]`, which
+  //      is the wrong slot. The mutation would also bump `tokenStack`'s
+  //      reference → re-trigger the walk effect's cleanup → cancel the
+  //      in-flight walk → leave `walking` stuck `true` and the skeleton on.
+  //   2. `currentPage > tokenStack.length` — the URL points past everything
+  //      we know about, so the hook's data isn't actually for `currentPage`.
+  //      Wait for the walk to fill in the cache before recording anything.
   useEffect(() => {
+    if (walkingRef.current) return
     if (!listQuery.data) return
+    if (currentPage > tokenStack.length) return
     const nt = listQuery.data.next_token
     if (!nt) return
     setTokenStack((prev) => {
@@ -195,7 +210,7 @@ export function FileList() {
       next[currentPage] = nt
       return next
     })
-  }, [listQuery.data, currentPage])
+  }, [listQuery.data, currentPage, tokenStack.length])
 
   // Walk-on-cold-cache: URL says page N but tokenStack only knows up to
   // page K (< N). Send one request with `skip_pages = N - K` and seed the
@@ -764,30 +779,38 @@ export function FileList() {
               style={{ width: splitResize.width }}
               className="flex shrink-0 flex-col gap-2 overflow-hidden pr-3"
             >
-              {sortedEntries.length > 0 && (
-                <FilterBar
-                  nameValue={nameFilter}
-                  onNameChange={setNameFilter}
-                  typeValue={typeFilter}
-                  onTypeChange={setTypeFilter}
-                  availableTypes={availableTypes}
-                  filtersActive={filtersActive}
-                  onClear={clearFilters}
-                  shownCount={filteredEntries.length}
-                  totalCount={sortedEntries.length}
-                />
-              )}
-              <Pager
-                currentPage={currentPage}
-                totalPages={totalPages}
-                hasPrev={currentPage > 1}
-                hasNext={Boolean(listQuery.data.next_token)}
-                isFetching={listQuery.isFetching}
-                walking={walking}
-                onPrev={prevPage}
-                onNext={nextPage}
-                onGoto={gotoPage}
-              />
+              {/* Filter + pager share a row when they fit, then wrap to two
+                  lines when the column is too narrow. `ml-auto` on the pager
+                  keeps it right-aligned both when alone on a line and when
+                  the FilterBar sits to its left. */}
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                {sortedEntries.length > 0 && (
+                  <FilterBar
+                    nameValue={nameFilter}
+                    onNameChange={setNameFilter}
+                    typeValue={typeFilter}
+                    onTypeChange={setTypeFilter}
+                    availableTypes={availableTypes}
+                    filtersActive={filtersActive}
+                    onClear={clearFilters}
+                    shownCount={filteredEntries.length}
+                    totalCount={sortedEntries.length}
+                  />
+                )}
+                <div className="ml-auto">
+                  <Pager
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                    hasPrev={currentPage > 1}
+                    hasNext={Boolean(listQuery.data.next_token)}
+                    isFetching={listQuery.isFetching}
+                    walking={walking}
+                    onPrev={prevPage}
+                    onNext={nextPage}
+                    onGoto={gotoPage}
+                  />
+                </div>
+              </div>
               {/* Clicking the column's empty area (below the rows or in the
                   gap between Pager and rows) closes the preview. Row clicks
                   bubble up but `e.target !== currentTarget` so they don't
@@ -851,30 +874,34 @@ export function FileList() {
           </div>
         ) : (
           <>
-            {sortedEntries.length > 0 && (
-              <FilterBar
-                nameValue={nameFilter}
-                onNameChange={setNameFilter}
-                typeValue={typeFilter}
-                onTypeChange={setTypeFilter}
-                availableTypes={availableTypes}
-                filtersActive={filtersActive}
-                onClear={clearFilters}
-                shownCount={filteredEntries.length}
-                totalCount={sortedEntries.length}
-              />
-            )}
-            <Pager
-              currentPage={currentPage}
-              totalPages={totalPages}
-              hasPrev={currentPage > 1}
-              hasNext={Boolean(listQuery.data.next_token)}
-              isFetching={listQuery.isFetching}
-              walking={walking}
-              onPrev={prevPage}
-              onNext={nextPage}
-              onGoto={gotoPage}
-            />
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+              {sortedEntries.length > 0 && (
+                <FilterBar
+                  nameValue={nameFilter}
+                  onNameChange={setNameFilter}
+                  typeValue={typeFilter}
+                  onTypeChange={setTypeFilter}
+                  availableTypes={availableTypes}
+                  filtersActive={filtersActive}
+                  onClear={clearFilters}
+                  shownCount={filteredEntries.length}
+                  totalCount={sortedEntries.length}
+                />
+              )}
+              <div className="ml-auto">
+                <Pager
+                  currentPage={currentPage}
+                  totalPages={totalPages}
+                  hasPrev={currentPage > 1}
+                  hasNext={Boolean(listQuery.data.next_token)}
+                  isFetching={listQuery.isFetching}
+                  walking={walking}
+                  onPrev={prevPage}
+                  onNext={nextPage}
+                  onGoto={gotoPage}
+                />
+              </div>
+            </div>
 
             {viewMode === 'grid' ? (
               <FileGrid
