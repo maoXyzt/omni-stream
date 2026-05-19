@@ -248,7 +248,14 @@ function TreeNode({
           <button
             ref={rowRef}
             type="button"
-            onClick={() => onNavigate(entry.key)}
+            onClick={() => {
+              onNavigate(entry.key)
+              // Row click acts as both navigate + expand toggle so users can
+              // drill in without aiming at the small chevron. Skip on known
+              // leaves — they have no children to reveal, and the toggle
+              // would silently dirty the persisted expand set.
+              if (!knownLeaf) expand.toggle(entry.key)
+            }}
             aria-current={isCurrent ? 'page' : undefined}
             className="flex min-w-0 flex-1 items-center gap-2 py-1.5 pr-2 text-left"
             title={name}
