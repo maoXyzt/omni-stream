@@ -2,7 +2,6 @@
 
 set -euo pipefail
 
-export OMNI_CONFIG=${OMNI_CONFIG:-./config.toml}
 export OMNI_BACKEND_URL=${OMNI_BACKEND_URL:-http://127.0.0.1:28080}
 export CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-/tmp/cargo_build_target}
 
