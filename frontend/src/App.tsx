@@ -5,6 +5,7 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { FileList } from '@/components/FileList'
 import { RowsPage } from '@/components/RowsPage'
 import { StorageRedirect } from '@/components/StorageRedirect'
+import { Toaster } from '@/components/ui/sonner'
 import { useServerInfo, useStorages } from '@/hooks/use-storage'
 import { pruneOrphanTreeExpanded } from '@/hooks/use-tree-expanded'
 
@@ -22,6 +23,7 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <DocumentTitle />
       <TreeExpandedJanitor />
+      <Toaster />
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<StorageRedirect />} />

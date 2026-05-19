@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import {
   Navigate,
   useNavigate,
@@ -252,9 +253,16 @@ export function FileList() {
         if (res.next_token) newStack.push(res.next_token)
         setTokenStack(newStack)
         // If the listing ran out before we reached the URL's page, snap the
-        // URL back to whatever the actual last page turned out to be.
+        // URL back to whatever the actual last page turned out to be — and
+        // surface a toast so the user knows their input was clamped rather
+        // than wondering why the page number "snapped" silently.
         const actualLastPage = newStack.length - (res.next_token ? 1 : 0)
-        if (actualLastPage < currentPage) gotoPage(actualLastPage)
+        if (actualLastPage < currentPage) {
+          gotoPage(actualLastPage)
+          toast.info(
+            `Page ${currentPage.toLocaleString()} doesn't exist — showing last page (${actualLastPage.toLocaleString()}).`,
+          )
+        }
       } finally {
         walkingRef.current = false
         if (!cancelled) setWalking(false)
@@ -1295,8 +1303,21 @@ function Pager({
       setInput(String(currentPage))
       return
     }
-    const target = Math.floor(n)
-    if (target === currentPage) return
+    let target = Math.floor(n)
+    // When we know the total (local-fs has it on every response, S3 only
+    // after we've seen an EOF), clamp client-side and tell the user so
+    // their input isn't silently rewritten. The walk-EOF branch in
+    // FileList covers the case where we don't know the total yet.
+    if (totalPages !== null && target > totalPages) {
+      toast.info(
+        `Page ${target.toLocaleString()} doesn't exist — only ${totalPages.toLocaleString()} page${totalPages === 1 ? '' : 's'} available.`,
+      )
+      target = totalPages
+    }
+    if (target === currentPage) {
+      setInput(String(currentPage))
+      return
+    }
     onGoto(target)
   }
 
@@ -1316,6 +1337,7 @@ function Pager({
         <Input
           type="number"
           min={1}
+          max={totalPages ?? undefined}
           inputMode="numeric"
           value={input}
           onChange={(e) => setInput(e.target.value)}
