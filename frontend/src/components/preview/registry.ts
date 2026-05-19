@@ -10,6 +10,7 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 
+import { CsvPreview } from './CsvPreview'
 import { GenericPreview } from './GenericPreview'
 import { ImagePreview } from './ImagePreview'
 import { ParquetPreview } from './ParquetPreview'
@@ -38,7 +39,7 @@ export const PREVIEW_TYPES: readonly PreviewType[] = [
   {
     kind: 'text',
     extensions: [
-      'txt', 'md', 'markdown', 'rst', 'log', 'csv', 'tsv',
+      'txt', 'md', 'markdown', 'rst', 'log',
       // `jsonl` / `ndjson` route through TextPreview too — its Range-based
       // chunked loader kicks in above 1 MiB so large log dumps don't pull
       // the whole file before anything renders.
@@ -59,6 +60,15 @@ export const PREVIEW_TYPES: readonly PreviewType[] = [
     extensions: ['parquet', 'parq', 'pq'],
     icon: FileSpreadsheet,
     Component: ParquetPreview,
+  },
+  // CSV / TSV split off from `text` so they get a real tabular view (header
+  // + paginated rows + cell-expansion dialog) instead of being rendered as
+  // raw monospace text. Streaming RFC 4180 parser handles large files.
+  {
+    kind: 'csv',
+    extensions: ['csv', 'tsv'],
+    icon: FileSpreadsheet,
+    Component: CsvPreview,
   },
   // Fallback for any file the browser can't preview inline — shows the file
   // icon + metadata, plus an iframe for PDF/similar. Has no `extensions` of

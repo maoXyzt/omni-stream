@@ -4,6 +4,7 @@
 // header), and a way to read a row range. Anything format-specific —
 // parquet metadata, jsonl line offsets — stays behind this interface.
 
+import { CsvStream, csvSeparatorFor } from './csv-parser'
 import {
   type ParquetSource,
   extractTopLevelColumns,
@@ -50,7 +51,7 @@ export interface ReadRowsResult {
 }
 
 export interface RowsSource {
-  kind: 'parquet' | 'jsonl' | 'json'
+  kind: 'parquet' | 'jsonl' | 'json' | 'csv'
   columns: ColumnInfo[]
   /// Best-known row count at source-load time. Parquet's metadata gives the
   /// exact number; jsonl whole-file load knows it after parsing; jsonl
@@ -70,6 +71,7 @@ export interface RowsSource {
 ///   * .parquet / .parq / .pq → parquet, via hyparquet
 ///   * .jsonl / .ndjson       → jsonl, streaming line parser
 ///   * .json                  → json, streaming array-of-objects parser
+///   * .csv / .tsv            → csv, streaming RFC 4180 parser
 ///   * anything else          → throw, the route shouldn't be reachable for
 ///                              non-supported extensions
 export async function loadRowsSource(
@@ -84,12 +86,14 @@ export async function loadRowsSource(
       return loadJsonlRowsSource(src)
     case 'json':
       return loadJsonRowsSource(src)
+    case 'csv':
+      return loadCsvRowsSource(src, fileKey)
     case null:
       throw new Error(`unsupported format for rows view: ${fileKey}`)
   }
 }
 
-export type SourceFormat = 'parquet' | 'jsonl' | 'json'
+export type SourceFormat = 'parquet' | 'jsonl' | 'json' | 'csv'
 
 export function detectFormat(fileKey: string): SourceFormat | null {
   const dot = fileKey.lastIndexOf('.')
@@ -98,6 +102,7 @@ export function detectFormat(fileKey: string): SourceFormat | null {
   if (ext === 'parquet' || ext === 'parq' || ext === 'pq') return 'parquet'
   if (ext === 'jsonl' || ext === 'ndjson') return 'jsonl'
   if (ext === 'json') return 'json'
+  if (ext === 'csv' || ext === 'tsv') return 'csv'
   return null
 }
 
@@ -623,4 +628,56 @@ function findLiteralEnd(s: string, start: number): number | null {
     }
   }
   return null
+}
+
+// -----------------------------------------------------------------------
+// CSV / TSV impl — incremental streaming
+// -----------------------------------------------------------------------
+
+/// Row count to probe up-front so column inference + the initial render
+/// have data to work with. Matches JSONL_COLUMN_PROBE_ROWS.
+const CSV_COLUMN_PROBE_ROWS = 100
+
+async function loadCsvRowsSource(
+  src: string,
+  fileKey: string,
+): Promise<RowsSource> {
+  const res = await fetch(src)
+  if (!res.ok) {
+    throw new Error(
+      `failed to fetch CSV: ${res.status} ${res.statusText || ''}`.trim(),
+    )
+  }
+  if (!res.body) {
+    throw new Error('csv: response has no streaming body')
+  }
+  const separator = csvSeparatorFor(fileKey)
+  const stream = new CsvStream(res.body, separator)
+  // Header lives in the first row; probe ahead so the renderer has both the
+  // schema and a sample to display immediately.
+  await stream.ensureRowCount(CSV_COLUMN_PROBE_ROWS)
+  // All CSV cell values are strings — there is no embedded type system to
+  // sniff. Report the type as STRING uniformly; callers that want richer
+  // typing can post-process based on the column name.
+  const columns: ColumnInfo[] = stream.header.map((name) => ({
+    name,
+    type: 'STRING',
+  }))
+  return {
+    kind: 'csv',
+    columns,
+    totalRows: stream.done ? stream.rows.length : null,
+    diagnostics: stream.errors > 0 ? { skippedLines: stream.errors } : undefined,
+    readRows: async (rowStart, rowEnd) => {
+      await stream.ensureRowCount(rowEnd)
+      const clampedEnd = Math.min(rowEnd, stream.rows.length)
+      return {
+        rows: stream.rows.slice(rowStart, clampedEnd),
+        hasMore: !stream.done || clampedEnd < stream.rows.length,
+        totalRows: stream.done ? stream.rows.length : null,
+        diagnostics:
+          stream.errors > 0 ? { skippedLines: stream.errors } : undefined,
+      }
+    },
+  }
 }

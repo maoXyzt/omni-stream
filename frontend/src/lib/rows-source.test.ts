@@ -42,8 +42,12 @@ describe('detectFormat', () => {
     expect(detectFormat('manifest.JSON')).toBe('json')
   })
 
+  it('recognises csv + tsv', () => {
+    expect(detectFormat('logs.csv')).toBe('csv')
+    expect(detectFormat('data.TSV')).toBe('csv')
+  })
+
   it('returns null for unsupported and bare files', () => {
-    expect(detectFormat('logs.csv')).toBeNull()
     expect(detectFormat('README')).toBeNull()
     expect(detectFormat('archive.tar.gz')).toBeNull()
   })
