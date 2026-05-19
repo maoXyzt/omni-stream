@@ -8,6 +8,11 @@ export interface FileEntry {
 export interface ListResult {
   entries: FileEntry[]
   next_token: string | null
+  /// Populated only when the request used `skip_pages > 0`. Each entry is
+  /// the `next_token` of an intermediate walk step — i.e. `walked_tokens[i]`
+  /// fetches the (i+1)-th page from the caller's starting point. Lets the
+  /// client fill its page→token cache for every step in a single response.
+  walked_tokens?: string[]
 }
 
 export interface FileMeta {

@@ -20,11 +20,17 @@ export async function listFiles(
   prefix: string,
   pageToken?: string,
   storage?: string,
+  /// 0 / omitted → one list call from `pageToken`. N > 0 → server walks N
+  /// pages forward and returns the target page; intermediate `next_token`s
+  /// come back in `walked_tokens` so the client cache fills in one round
+  /// trip. Server caps the value; the backend constant is documented as 100.
+  skipPages?: number,
 ): Promise<ListResult> {
   const params: Record<string, string> = {}
   if (prefix) params.prefix = prefix
   if (pageToken) params.page_token = pageToken
   if (storage) params.storage = storage
+  if (skipPages && skipPages > 0) params.skip_pages = String(skipPages)
   const { data } = await apiClient.get<ListResult>('/api/list', { params })
   return data
 }

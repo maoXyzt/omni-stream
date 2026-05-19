@@ -246,6 +246,7 @@ impl S3Backend {
     Ok(ListResult {
       entries,
       next_token,
+      walked_tokens: Vec::new(),
     })
   }
 
@@ -292,6 +293,7 @@ impl S3Backend {
     Ok(ListResult {
       entries,
       next_token,
+      walked_tokens: Vec::new(),
     })
   }
 }

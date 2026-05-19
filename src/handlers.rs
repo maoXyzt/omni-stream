@@ -67,7 +67,18 @@ pub struct ListQuery {
   pub prefix: String,
   pub page_token: Option<String>,
   pub storage: Option<String>,
+  /// 0 / absent → behaves like before: one `list_files` call from
+  /// `page_token`. N > 0 → handler walks N more steps server-side and
+  /// returns the resulting page; the intermediate tokens come back in
+  /// `walked_tokens` so the client can fill its page→token cache atomically.
+  /// Clamped to `MAX_SKIP_PAGES` to bound worst-case server cost.
+  pub skip_pages: Option<u32>,
 }
+
+/// Upper bound on `skip_pages` per request. With 1000-key pages this lets
+/// one request advance ~100k entries; large enough for any realistic jump,
+/// small enough that a misuse can't run away with the server.
+const MAX_SKIP_PAGES: u32 = 100;
 
 /// Used by `stat` and `proxy` — both take the key in the path and only need
 /// to pick which backend to talk to.
@@ -225,8 +236,51 @@ pub async fn list_handler(
   Query(q): Query<ListQuery>,
 ) -> Result<Json<ListResult>, AppError> {
   let backend = state.resolve(q.storage.as_deref())?;
-  let result = backend.list_files(&q.prefix, q.page_token).await?;
+  let skip = q.skip_pages.unwrap_or(0).min(MAX_SKIP_PAGES);
+  let result = walk_list_files(backend.as_ref(), &q.prefix, q.page_token, skip).await?;
   Ok(Json(result))
+}
+
+/// Walk the token chain `skip` pages forward, recording each step's
+/// `next_token` in the returned `walked_tokens`. The final `list_files` call
+/// produces the page handed back to the caller. Pulled out of `list_handler`
+/// so the loop can be unit-tested against a stub backend without spinning
+/// up `AppState`.
+async fn walk_list_files(
+  backend: &dyn StorageBackend,
+  prefix: &str,
+  page_token: Option<String>,
+  skip: u32,
+) -> Result<ListResult, AppError> {
+  let mut walked: Vec<String> = Vec::with_capacity(skip as usize);
+  let mut token = page_token;
+
+  // Walk `skip` pages forward. Each iteration discards the step's entries
+  // and keeps only its `next_token` — that's how the cursor advances. The
+  // post-loop call below fetches the page we actually return.
+  for _ in 0..skip {
+    let step = backend.list_files(prefix, token).await?;
+    match step.next_token {
+      Some(t) => {
+        walked.push(t.clone());
+        token = Some(t);
+      }
+      None => {
+        // Ran out of pages before reaching the requested offset. Hand back
+        // the last walked step's entries — that *is* the final page — so
+        // the client can snap its URL to the actual end instead of erroring.
+        return Ok(ListResult {
+          entries: step.entries,
+          next_token: None,
+          walked_tokens: walked,
+        });
+      }
+    }
+  }
+
+  let mut result = backend.list_files(prefix, token).await?;
+  result.walked_tokens = walked;
+  Ok(result)
 }
 
 pub async fn proxy_handler(
@@ -361,4 +415,162 @@ pub async fn static_handler(uri: Uri) -> Response {
   }
 
   (StatusCode::NOT_FOUND, "not found").into_response()
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use crate::storage::{ByteStream, FileEntry, FileMeta, GetOptions, StorageResponse};
+  use async_trait::async_trait;
+  use std::sync::Mutex;
+
+  /// Stub backend that paginates a fixed key list in `page_size` chunks.
+  /// Tokens are stringified end-offsets — `Some("3")` means "resume from
+  /// the 4th key". `prefix` is ignored. Records every `list_files` call so
+  /// tests can assert the walk advanced.
+  struct StubBackend {
+    keys: Vec<String>,
+    page_size: usize,
+    calls: Mutex<Vec<Option<String>>>,
+  }
+
+  impl StubBackend {
+    fn new(n: usize, page_size: usize) -> Self {
+      Self {
+        keys: (0..n).map(|i| format!("k{i:04}")).collect(),
+        page_size,
+        calls: Mutex::new(Vec::new()),
+      }
+    }
+
+    fn call_count(&self) -> usize {
+      self.calls.lock().unwrap().len()
+    }
+  }
+
+  #[async_trait]
+  impl StorageBackend for StubBackend {
+    async fn list_files(
+      &self,
+      _prefix: &str,
+      token: Option<String>,
+    ) -> Result<ListResult, AppError> {
+      self.calls.lock().unwrap().push(token.clone());
+      let start: usize = token
+        .as_deref()
+        .map(|s| s.parse().unwrap_or(0))
+        .unwrap_or(0);
+      let end = (start + self.page_size).min(self.keys.len());
+      let entries: Vec<FileEntry> = self.keys[start..end]
+        .iter()
+        .map(|k| FileEntry {
+          key: k.clone(),
+          size: 0,
+          last_modified: None,
+          is_dir: false,
+        })
+        .collect();
+      let next_token = if end < self.keys.len() {
+        Some(end.to_string())
+      } else {
+        None
+      };
+      Ok(ListResult {
+        entries,
+        next_token,
+        walked_tokens: Vec::new(),
+      })
+    }
+
+    async fn get_file(&self, _: &str, _: GetOptions) -> Result<StorageResponse, AppError> {
+      unimplemented!("not exercised by walk tests")
+    }
+
+    async fn stat(&self, _: &str) -> Result<FileMeta, AppError> {
+      unimplemented!("not exercised by walk tests")
+    }
+  }
+
+  // Mute the unused-import warning for `ByteStream` — pulled in only to
+  // satisfy associated-type bounds when the unimplemented! arms are
+  // type-checked. (Keeping the explicit import documents the dependency.)
+  #[allow(dead_code)]
+  fn _ensure_bytestream_in_scope(_s: ByteStream) {}
+
+  #[tokio::test]
+  async fn walk_skip_zero_is_a_single_list_call() {
+    let backend = StubBackend::new(10, 3);
+    let res = walk_list_files(&backend, "", None, 0).await.unwrap();
+    assert_eq!(
+      res.entries.iter().map(|e| e.key.as_str()).collect::<Vec<_>>(),
+      vec!["k0000", "k0001", "k0002"],
+    );
+    assert_eq!(res.next_token.as_deref(), Some("3"));
+    assert!(res.walked_tokens.is_empty());
+    assert_eq!(backend.call_count(), 1);
+  }
+
+  #[tokio::test]
+  async fn walk_skip_n_returns_target_page_with_intermediate_tokens() {
+    // 10 keys / 3 per page → pages of [k0..k2] [k3..k5] [k6..k8] [k9].
+    // skip=2 from start → land on page 3 (k6..k8), walked tokens point at
+    // pages 2 and 3.
+    let backend = StubBackend::new(10, 3);
+    let res = walk_list_files(&backend, "", None, 2).await.unwrap();
+    assert_eq!(
+      res.entries.iter().map(|e| e.key.as_str()).collect::<Vec<_>>(),
+      vec!["k0006", "k0007", "k0008"],
+    );
+    assert_eq!(res.next_token.as_deref(), Some("9"));
+    assert_eq!(res.walked_tokens, vec!["3", "6"]);
+    // skip + 1 internal calls.
+    assert_eq!(backend.call_count(), 3);
+  }
+
+  #[tokio::test]
+  async fn walk_with_start_token_advances_from_that_position() {
+    // Same fixture, but start from "3" (page 2). skip=1 → land on page 3.
+    let backend = StubBackend::new(10, 3);
+    let res = walk_list_files(&backend, "", Some("3".into()), 1)
+      .await
+      .unwrap();
+    assert_eq!(
+      res.entries.iter().map(|e| e.key.as_str()).collect::<Vec<_>>(),
+      vec!["k0006", "k0007", "k0008"],
+    );
+    assert_eq!(res.walked_tokens, vec!["6"]);
+  }
+
+  #[tokio::test]
+  async fn walk_truncates_when_listing_ends_early() {
+    // 10 keys / 3 per page → 4 real pages. skip=10 → walk until EOF, return
+    // the entries of whatever page hit `next_token = None`.
+    let backend = StubBackend::new(10, 3);
+    let res = walk_list_files(&backend, "", None, 10).await.unwrap();
+    assert_eq!(
+      res.entries.iter().map(|e| e.key.as_str()).collect::<Vec<_>>(),
+      vec!["k0009"],
+    );
+    assert!(res.next_token.is_none());
+    // We discovered tokens for pages 2/3/4 before hitting EOF at page 4.
+    assert_eq!(res.walked_tokens, vec!["3", "6", "9"]);
+    // Stops the moment we see `None`, so 4 calls total (page1→2→3→4).
+    assert_eq!(backend.call_count(), 4);
+  }
+
+  #[tokio::test]
+  async fn walk_skip_zero_on_empty_listing_works() {
+    let backend = StubBackend::new(0, 3);
+    let res = walk_list_files(&backend, "", None, 0).await.unwrap();
+    assert!(res.entries.is_empty());
+    assert!(res.next_token.is_none());
+    assert!(res.walked_tokens.is_empty());
+  }
+
+  #[test]
+  fn max_skip_pages_is_within_a_reasonable_bound() {
+    // Pin the constant so an accidental bump (e.g. 100 → 100_000) shows up
+    // in review. The handler clamps `skip_pages` to this value.
+    assert_eq!(MAX_SKIP_PAGES, 100);
+  }
 }

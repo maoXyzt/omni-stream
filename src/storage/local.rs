@@ -301,6 +301,7 @@ impl StorageBackend for LocalFsBackend {
     Ok(ListResult {
       entries,
       next_token,
+      walked_tokens: Vec::new(),
     })
   }
 

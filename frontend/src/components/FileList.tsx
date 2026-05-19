@@ -27,7 +27,7 @@ import {
 } from 'lucide-react'
 
 import { ApiError, getStoredToken, setStoredToken } from '@/api/client'
-import { proxyUrl } from '@/api/storage'
+import { listFiles, proxyUrl } from '@/api/storage'
 import { useListFiles, useServerInfo, useStorages } from '@/hooks/use-storage'
 import { useMediaQuery } from '@/hooks/use-media-query'
 import { useResizableWidth } from '@/hooks/use-resizable-width'
@@ -75,6 +75,7 @@ import {
 import type { FileEntry } from '@/types/storage'
 
 const PREVIEW_PARAM = 'preview'
+const PAGE_PARAM = 'page'
 const REPO_URL = 'https://github.com/maoXyzt/omni-stream'
 
 // Inline GitHub mark. `lucide-react` is brand-neutral so the official octocat
@@ -129,11 +130,108 @@ export function FileList() {
     minPx: 180,
     maxPx: 480,
   })
+  // Cache of `page_token`s for the current prefix. Index `i` is the token
+  // that fetches page (i + 1); `tokenStack[0]` is always `undefined`. Grows
+  // as the user (or a server-side walk) discovers new pages. Reset on prefix
+  // or storage change.
   const [tokenStack, setTokenStack] = useState<Array<string | undefined>>([
     undefined,
   ])
-  const currentToken = tokenStack[tokenStack.length - 1]
+  // Current page is URL-driven so reload and shareable links work. 1-indexed
+  // in the URL to match the UX.
+  const pageParam = searchParams.get(PAGE_PARAM)
+  const currentPage = Math.max(1, Math.floor(Number(pageParam)) || 1)
+  // `undefined` in two cases: the URL points beyond what we've discovered
+  // (triggers a walk below) OR currentPage is 1 (no token = page 1, the
+  // existing behavior). useListFiles handles both: it keys on the token, so
+  // walking and direct fetches share the same cache.
+  const currentToken = tokenStack[currentPage - 1]
   const listQuery = useListFiles(prefix, currentToken, storageName || undefined)
+  const [walking, setWalking] = useState(false)
+
+  // Reset the token cache when the user navigates to a different listing —
+  // tokens are scoped to (storage, prefix) and aren't portable across them.
+  // Covers browser back/forward and manual URL edits; `goToPath` /
+  // `switchStorage` still do an eager reset to avoid a one-render window
+  // where useListFiles would key the new prefix against an old token.
+  useEffect(() => {
+    setTokenStack([undefined])
+  }, [prefix, storageName])
+
+  const gotoPage = useCallback(
+    (target: number) => {
+      const safe = Math.max(1, Math.floor(target))
+      setSearchParams(
+        (sp) => {
+          if (safe === 1) sp.delete(PAGE_PARAM)
+          else sp.set(PAGE_PARAM, String(safe))
+          return sp
+        },
+        { replace: true },
+      )
+    },
+    [setSearchParams],
+  )
+
+  // When a page arrives via direct fetch (Next click or first land), record
+  // its `next_token` at the right index so `tokenStack` keeps growing one
+  // page at a time. The walk effect below handles the multi-page case.
+  useEffect(() => {
+    if (!listQuery.data) return
+    const nt = listQuery.data.next_token
+    if (!nt) return
+    setTokenStack((prev) => {
+      // currentPage is 1-indexed; the next page's token lives at index N.
+      if (prev[currentPage] === nt) return prev
+      const next = prev.slice()
+      next[currentPage] = nt
+      return next
+    })
+  }, [listQuery.data, currentPage])
+
+  // Walk-on-cold-cache: URL says page N but tokenStack only knows up to
+  // page K (< N). Send one request with `skip_pages = N - K` and seed the
+  // listing cache for the landed page so the renderer below picks it up
+  // without a second round-trip. Larger jumps re-enter this effect via the
+  // server-side cap (MAX_SKIP_PAGES = 100).
+  useEffect(() => {
+    if (!storageName) return
+    if (walking) return
+    if (currentPage <= tokenStack.length) return
+    const startIdx = tokenStack.length - 1
+    const startToken = tokenStack[startIdx]
+    const skip = currentPage - tokenStack.length
+    let cancelled = false
+    setWalking(true)
+    ;(async () => {
+      try {
+        const res = await listFiles(prefix, startToken, storageName, skip)
+        if (cancelled) return
+        const walked = res.walked_tokens ?? []
+        const newStack = [...tokenStack, ...walked]
+        // Seed React Query's cache for the landed page so the existing
+        // useListFiles consumer renders immediately without an extra fetch.
+        // `landedToken` is the token that fetches the landed page itself —
+        // the last element of newStack after appending walked tokens.
+        const landedToken = newStack[newStack.length - 1]
+        queryClient.setQueryData(
+          ['list', storageName, prefix, landedToken ?? null],
+          { entries: res.entries, next_token: res.next_token },
+        )
+        if (res.next_token) newStack.push(res.next_token)
+        setTokenStack(newStack)
+        // If the listing ran out before we reached the URL's page, snap the
+        // URL back to whatever the actual last page turned out to be.
+        const actualLastPage = newStack.length - (res.next_token ? 1 : 0)
+        if (actualLastPage < currentPage) gotoPage(actualLastPage)
+      } finally {
+        if (!cancelled) setWalking(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [currentPage, tokenStack, prefix, storageName, walking, queryClient, gotoPage])
 
   // Client-side filters, scoped to the current page only. Filters reset on
   // prefix change (entering a new directory wants a fresh view); they
@@ -174,7 +272,10 @@ export function FileList() {
     const sample = listQuery.data?.entries[0]
     return Boolean(sample) && !sample!.key.startsWith(prefix)
   }, [listQuery.data, prefix])
-  const showListSkeleton = listQuery.isPending || isStaleForPrefix
+  // During a server-side walk we haven't populated `tokenStack[currentPage-1]`
+  // yet, so `useListFiles` is reading page 1's listing under the hood — render
+  // the skeleton until the walk seeds the cache + updates the stack.
+  const showListSkeleton = listQuery.isPending || isStaleForPrefix || walking
 
   // Ignore directory jumps fired within this window after a previous one.
   // Cached + `keepPreviousData` listings can re-render the row layout almost
@@ -434,13 +535,11 @@ export function FileList() {
   const hasToken = getStoredToken() !== null
 
   function nextPage() {
-    if (listQuery.data?.next_token) {
-      setTokenStack((stack) => [...stack, listQuery.data!.next_token!])
-    }
+    gotoPage(currentPage + 1)
   }
 
   function prevPage() {
-    setTokenStack((stack) => (stack.length > 1 ? stack.slice(0, -1) : stack))
+    gotoPage(currentPage - 1)
   }
 
   const toggleMainSort = () => setSortDir(sortDir === 'asc' ? 'desc' : 'asc')
@@ -648,11 +747,14 @@ export function FileList() {
                 />
               )}
               <Pager
-                hasPrev={tokenStack.length > 1}
+                currentPage={currentPage}
+                hasPrev={currentPage > 1}
                 hasNext={Boolean(listQuery.data.next_token)}
                 isFetching={listQuery.isFetching}
+                walking={walking}
                 onPrev={prevPage}
                 onNext={nextPage}
+                onGoto={gotoPage}
               />
               {/* Clicking the column's empty area (below the rows or in the
                   gap between Pager and rows) closes the preview. Row clicks
@@ -731,11 +833,14 @@ export function FileList() {
               />
             )}
             <Pager
-              hasPrev={tokenStack.length > 1}
+              currentPage={currentPage}
+              hasPrev={currentPage > 1}
               hasNext={Boolean(listQuery.data.next_token)}
               isFetching={listQuery.isFetching}
+              walking={walking}
               onPrev={prevPage}
               onNext={nextPage}
+              onGoto={gotoPage}
             />
 
             {viewMode === 'grid' ? (
@@ -1088,30 +1193,89 @@ function FilterBar({
 }
 
 interface PagerProps {
+  currentPage: number
   hasPrev: boolean
   hasNext: boolean
   isFetching: boolean
+  walking: boolean
   onPrev: () => void
   onNext: () => void
+  onGoto: (page: number) => void
 }
 
-function Pager({ hasPrev, hasNext, isFetching, onPrev, onNext }: PagerProps) {
-  if (!hasPrev && !hasNext) return null
+function Pager({
+  currentPage,
+  hasPrev,
+  hasNext,
+  isFetching,
+  walking,
+  onPrev,
+  onNext,
+  onGoto,
+}: PagerProps) {
+  // Local string state so the user can type a multi-digit number without
+  // each keystroke firing a navigation. Synced down from `currentPage`
+  // whenever the actual page changes (Prev/Next/Goto/back-forward).
+  const [input, setInput] = useState(String(currentPage))
+  useEffect(() => {
+    setInput(String(currentPage))
+  }, [currentPage])
+
+  if (!hasPrev && !hasNext && currentPage === 1) return null
+
+  const busy = isFetching || walking
+  const commit = () => {
+    const n = Number(input)
+    if (!Number.isFinite(n) || n < 1) {
+      setInput(String(currentPage))
+      return
+    }
+    const target = Math.floor(n)
+    if (target === currentPage) return
+    onGoto(target)
+  }
+
   return (
     <div className="flex justify-end gap-2">
       <Button
         variant="outline"
         size="sm"
-        disabled={!hasPrev || isFetching}
+        disabled={!hasPrev || busy}
         onClick={onPrev}
       >
         <ChevronLeft className="size-4" />
         Prev
       </Button>
+      <div className="flex items-center gap-1.5">
+        <span className="text-xs text-muted-foreground">Page</span>
+        <Input
+          type="number"
+          min={1}
+          inputMode="numeric"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          // Enter commits; blur also commits so users who tab away aren't
+          // surprised by a silently-discarded value.
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              commit()
+              ;(e.target as HTMLInputElement).blur()
+            }
+          }}
+          onBlur={commit}
+          disabled={busy}
+          aria-label="Jump to page"
+          className="h-8 w-16 text-center tabular-nums"
+        />
+        {walking && (
+          <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
+        )}
+      </div>
       <Button
         variant="outline"
         size="sm"
-        disabled={!hasNext || isFetching}
+        disabled={!hasNext || busy}
         onClick={onNext}
       >
         Next
