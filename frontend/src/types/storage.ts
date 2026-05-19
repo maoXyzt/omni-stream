@@ -13,6 +13,11 @@ export interface ListResult {
   /// fetches the (i+1)-th page from the caller's starting point. Lets the
   /// client fill its page→token cache for every step in a single response.
   walked_tokens?: string[]
+  /// Total page count when the backend can compute it cheaply. Present on
+  /// local-fs listings (the directory scan already runs); omitted by S3
+  /// (counting would require walking the full chain). The pager renders
+  /// `Page X / Y` when present, `Page X` otherwise.
+  total_pages?: number
 }
 
 export interface FileMeta {

@@ -240,6 +240,11 @@ impl StorageBackend for LocalFsBackend {
     let cursor = token.as_deref().unwrap_or("");
     let cap = LIST_PAGE_SIZE + 1;
     let mut heap: BinaryHeap<ByKey> = BinaryHeap::with_capacity(cap);
+    // Count every visible entry in the directory regardless of cursor, so
+    // the response can advertise the total page count. We scan the full dir
+    // anyway (the cursor only narrows the heap), so this is essentially
+    // free — one branch per entry, no allocations.
+    let mut total_entries: u64 = 0;
 
     let mut read = fs::read_dir(&dir_path).await?;
     while let Some(entry) = read.next_entry().await? {
@@ -257,6 +262,11 @@ impl StorageBackend for LocalFsBackend {
       };
       let is_dir = m.is_dir();
       let key = self.relative_key(&entry_path, is_dir);
+      // Count every entry — even ones the cursor filter will skip below —
+      // so the count reflects the directory total, not "remaining after
+      // cursor". Pagination's `next_token` is opaque to clients, but the
+      // total is shared metadata about the same listing.
+      total_entries += 1;
       if key.as_str() <= cursor {
         continue;
       }
@@ -298,10 +308,15 @@ impl StorageBackend for LocalFsBackend {
       None
     };
 
+    // ceil(total_entries / LIST_PAGE_SIZE), with 0 → 0 (`Pager` hides
+    // itself for empty dirs so 0 won't render).
+    let total_pages = total_entries.div_ceil(LIST_PAGE_SIZE as u64);
+
     Ok(ListResult {
       entries,
       next_token,
       walked_tokens: Vec::new(),
+      total_pages: Some(total_pages),
     })
   }
 
@@ -371,6 +386,38 @@ mod tests {
     let keys: Vec<&str> = res.entries.iter().map(|e| e.key.as_str()).collect();
     assert_eq!(keys, vec!["a.txt", "b.txt", "c.txt"]);
     assert!(res.next_token.is_none());
+    // 3 entries fit in one LIST_PAGE_SIZE-sized page.
+    assert_eq!(res.total_pages, Some(1));
+  }
+
+  #[tokio::test]
+  async fn list_files_total_pages_spans_multiple_pages() {
+    let dir = tempdir();
+    let total = LIST_PAGE_SIZE + LIST_PAGE_SIZE / 2; // 1500
+    for i in 0..total {
+      std::fs::write(dir.join(format!("f-{i:06}.bin")), b"x").unwrap();
+    }
+    let backend = LocalFsBackend::new(&dir, false);
+
+    let first = backend.list_files("", None).await.unwrap();
+    assert_eq!(first.total_pages, Some(2));
+    // Same count surfaces on subsequent pages so the client can render
+    // "Page X / Y" on any page, not just the first.
+    let second = backend
+      .list_files("", first.next_token.clone())
+      .await
+      .unwrap();
+    assert_eq!(second.total_pages, Some(2));
+  }
+
+  #[tokio::test]
+  async fn list_files_total_pages_zero_for_empty_dir() {
+    let dir = tempdir();
+    let backend = LocalFsBackend::new(&dir, false);
+
+    let res = backend.list_files("", None).await.unwrap();
+    assert!(res.entries.is_empty());
+    assert_eq!(res.total_pages, Some(0));
   }
 
   #[tokio::test]

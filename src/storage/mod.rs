@@ -60,6 +60,13 @@ pub struct ListResult {
   /// `StorageBackend::list_files` calls always return an empty vec here.
   #[serde(default, skip_serializing_if = "Vec::is_empty")]
   pub walked_tokens: Vec<String>,
+  /// Total page count when the backend can compute it cheaply. Populated by
+  /// backends whose `list_files` already does an O(dir) scan and just needs
+  /// to count alongside (local fs); left `None` by backends where counting
+  /// requires walking the full pagination chain (S3). The frontend renders
+  /// `Page X / Y` when present, falls back to `Page X` when `None`.
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub total_pages: Option<u64>,
 }
 
 #[async_trait]

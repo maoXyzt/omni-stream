@@ -47,7 +47,7 @@ pub trait StorageBackend: Send + Sync {
 | Trait 方法 | HTTP 端点 | 用途 |
 | --- | --- | --- |
 | `get_file` | `/api/proxy/{*key}` | 流式取文件，透传 `Range` |
-| `list_files` | `/api/list?prefix=&page_token=` | 目录列举，支持分页 |
+| `list_files` | `/api/list?prefix=&page_token=&skip_pages=` | 目录列举，支持分页;`skip_pages` 让 handler 服务端 walk N 页 |
 | `stat` | `/api/stat/{*key}` | 文件元信息 |
 
 ### 3.1 `Send + Sync`
@@ -127,7 +127,9 @@ pub struct FileEntry {      // list 中的单项
 
 pub struct ListResult {
     pub entries: Vec<FileEntry>,
-    pub next_token: Option<String>,   // None ⇒ 最后一页
+    pub next_token: Option<String>,        // None ⇒ 最后一页
+    pub walked_tokens: Vec<String>,        // 仅 handler walk 时填充，见 §4.4
+    pub total_pages: Option<u64>,          // 后端能廉价知道时填，否则 None
 }
 ```
 
@@ -140,16 +142,28 @@ pub struct ListResult {
   格式化，trait 层不强制日期表达式一致性。
 * **目录的 `size` 固定为 0**：S3 没有目录概念，CommonPrefix 没有大小；local
   目录大小语义模糊（含子项 vs 不含），统一记 0 避免给前端错觉。
+* **`total_pages` 由后端按性价比决定**：Local fs 在现有 `read_dir` 扫描里顺便
+  计数，几乎零成本；S3 没有便宜的 count API（数完整 chain = 拉到最后一页同
+  代价），永远填 `None`。前端在 `None` 时只显示 `Page X`，有值时显示 `Page X / Y`。
 
-### 4.4 分页 token：客户端不透明
+### 4.4 分页 token：客户端不透明 + 服务端可选 walk
 
 `next_token` 由后端定义、由后端解析，对客户端完全不透明：
 
-* S3 透传 `continuation_token`；
+* S3 透传 `continuation_token`（带一套 v2 → v1 marker 的兼容回退）；
 * Local 用上一页最后一个 key 当游标（"keyset pagination"，O(page_size) 内存）。
 
 客户端把 `next_token` 原样回传即可，无需理解其格式。这一约定让我们换实现
 不必动 API。
+
+**`skip_pages` 服务端 walk**：客户端跳到第 N 页时若手头没有对应的 token，
+可以传 `skip_pages = N - 已知页数`，handler 在 `list_handler` 里循环调用
+`list_files` N 次推进 cursor，把每一步的 `next_token` 记到响应的
+`walked_tokens` 数组里，最后再返回目标页的 entries。这样跳页只要 1 次 HTTP
+往返(后端内部仍是 N 次 list 调用 —— token chain 本质是顺序的,只是省了
+浏览器侧 N - 1 次往返)。Handler 把 `skip_pages` clamp 到
+`MAX_SKIP_PAGES = 100`,大跳由前端分批触发。trait 层不动 —— walk 是
+handler 层的循环,后端只需实现 `list_files`。
 
 ## 5. 现有后端
 

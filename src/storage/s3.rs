@@ -247,6 +247,11 @@ impl S3Backend {
       entries,
       next_token,
       walked_tokens: Vec::new(),
+      // S3 has no cheap object-count API under a prefix; populating this
+      // would require walking the full chain which is the same cost as
+      // visiting the last page. Leave it for the client to discover by
+      // walking when it cares.
+      total_pages: None,
     })
   }
 
@@ -294,6 +299,7 @@ impl S3Backend {
       entries,
       next_token,
       walked_tokens: Vec::new(),
+      total_pages: None,
     })
   }
 }

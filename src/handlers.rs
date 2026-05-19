@@ -269,10 +269,12 @@ async fn walk_list_files(
         // Ran out of pages before reaching the requested offset. Hand back
         // the last walked step's entries — that *is* the final page — so
         // the client can snap its URL to the actual end instead of erroring.
+        // Preserve `total_pages` if the backend filled it on this step.
         return Ok(ListResult {
           entries: step.entries,
           next_token: None,
           walked_tokens: walked,
+          total_pages: step.total_pages,
         });
       }
     }
@@ -479,6 +481,10 @@ mod tests {
         entries,
         next_token,
         walked_tokens: Vec::new(),
+        // Stub mirrors the local-fs convention: every page knows the total.
+        total_pages: Some(
+          (self.keys.len() as u64).div_ceil(self.page_size as u64),
+        ),
       })
     }
 
@@ -525,6 +531,18 @@ mod tests {
     assert_eq!(res.walked_tokens, vec!["3", "6"]);
     // skip + 1 internal calls.
     assert_eq!(backend.call_count(), 3);
+    // 10 keys / 3 per page → 4 pages. The handler propagates whatever the
+    // final list_files step reported.
+    assert_eq!(res.total_pages, Some(4));
+  }
+
+  #[tokio::test]
+  async fn walk_preserves_total_pages_on_eof_branch() {
+    // skip past the actual end → the EOF-early branch returns the last
+    // page. Its `total_pages` should still flow through unchanged.
+    let backend = StubBackend::new(10, 3);
+    let res = walk_list_files(&backend, "", None, 10).await.unwrap();
+    assert_eq!(res.total_pages, Some(4));
   }
 
   #[tokio::test]

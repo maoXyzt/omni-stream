@@ -294,6 +294,20 @@ export function FileList() {
   // the skeleton until the walk seeds the cache + updates the stack.
   const showListSkeleton = listQuery.isPending || isStaleForPrefix || walking
 
+  // Two sources of truth for the total: (1) the backend hint (local-fs has
+  // it cheap, S3 doesn't ship it), and (2) frontend-discovered EOF — when
+  // the current page's listing has `next_token === null`, `currentPage` IS
+  // the last page. We prefer the backend hint when present because it's
+  // available on page 1 already; we fall back to the EOF derivation so S3
+  // users still see "Page X / Y" once they've walked or paged to the end.
+  const totalPages = useMemo<number | null>(() => {
+    if (showListSkeleton) return null
+    const fromBackend = listQuery.data?.total_pages
+    if (typeof fromBackend === 'number') return fromBackend
+    if (listQuery.data && listQuery.data.next_token === null) return currentPage
+    return null
+  }, [listQuery.data, currentPage, showListSkeleton])
+
   // Ignore directory jumps fired within this window after a previous one.
   // Cached + `keepPreviousData` listings can re-render the row layout almost
   // instantly after a click, so the second tick of a double-click lands on a
@@ -765,6 +779,7 @@ export function FileList() {
               )}
               <Pager
                 currentPage={currentPage}
+                totalPages={totalPages}
                 hasPrev={currentPage > 1}
                 hasNext={Boolean(listQuery.data.next_token)}
                 isFetching={listQuery.isFetching}
@@ -851,6 +866,7 @@ export function FileList() {
             )}
             <Pager
               currentPage={currentPage}
+              totalPages={totalPages}
               hasPrev={currentPage > 1}
               hasNext={Boolean(listQuery.data.next_token)}
               isFetching={listQuery.isFetching}
@@ -1211,6 +1227,10 @@ function FilterBar({
 
 interface PagerProps {
   currentPage: number
+  /// Known total pages, or null when the backend didn't ship it and the
+  /// frontend hasn't yet seen an EOF response. When present, renders as
+  /// `Page X / Y`.
+  totalPages: number | null
   hasPrev: boolean
   hasNext: boolean
   isFetching: boolean
@@ -1222,6 +1242,7 @@ interface PagerProps {
 
 function Pager({
   currentPage,
+  totalPages,
   hasPrev,
   hasNext,
   isFetching,
@@ -1285,6 +1306,11 @@ function Pager({
           aria-label="Jump to page"
           className="h-8 w-16 text-center tabular-nums"
         />
+        {totalPages !== null && (
+          <span className="text-xs text-muted-foreground tabular-nums">
+            / {totalPages.toLocaleString()}
+          </span>
+        )}
         {walking && (
           <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
         )}
