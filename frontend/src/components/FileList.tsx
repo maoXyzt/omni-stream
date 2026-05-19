@@ -114,13 +114,18 @@ export function FileList() {
   const [sortDir, setSortDir] = useSortDir()
   const [sidebarCollapsed, setSidebarCollapsed] = useSidebarCollapsed()
   // Left-column width for the split layout — draggable, persisted per-user.
-  // Bounds chosen to keep both columns usable on a 1280-wide viewport: never
-  // less than ~200 px (enough for a short filename + icon) and never more
-  // than ~600 px (otherwise the preview column collapses).
+  // Bounds tuned so the filter+pager row sits comfortably:
+  //  - min ~360 px → the Pager (Prev / Page input / "/ N" / Next) renders
+  //    fully on one line even when it has to wrap below the FilterBar; below
+  //    this the Pager's own children start to wrap, which reads as broken.
+  //  - default ~420 px → on a typical 1440-wide viewport this fits an idle
+  //    FilterBar + Pager on a single row without overflow, and only wraps
+  //    to two rows when active-filter chips push the FilterBar wider.
+  //  - max 600 px → preserves room for the right-hand preview column.
   const splitResize = useResizableWidth({
     key: 'gallery-file-list',
-    defaultPx: 288,
-    minPx: 200,
+    defaultPx: 420,
+    minPx: 360,
     maxPx: 600,
   })
   // Folder-tree sidebar. Min keeps short folder names readable; max prevents
@@ -163,8 +168,17 @@ export function FileList() {
   // Covers browser back/forward and manual URL edits; `goToPath` /
   // `switchStorage` still do an eager reset to avoid a one-render window
   // where useListFiles would key the new prefix against an old token.
+  //
+  // Crucially the updater is no-op-aware: returning the *same* reference
+  // when the stack is already the singleton `[undefined]` stops React from
+  // bumping `tokenStack`'s identity on mount, which would otherwise change
+  // the walk effect's dep array mid-flight and fire its cleanup before the
+  // in-flight `listFiles(... skip_pages=N)` even resolves — sticking the
+  // skeleton on forever for direct loads of `?page=N`.
   useEffect(() => {
-    setTokenStack([undefined])
+    setTokenStack((prev) =>
+      prev.length === 1 && prev[0] === undefined ? prev : [undefined],
+    )
   }, [prefix, storageName])
 
   const gotoPage = useCallback(
@@ -283,8 +297,15 @@ export function FileList() {
         }
         if (fallbackPage < currentPage) gotoPage(fallbackPage)
       } finally {
+        // Always release the spinner — `cancelled` gates the *body* so we
+        // skip state writes after a stale effect run, but the walking
+        // *flag* is a UI signal and the answer when this IIFE returns is
+        // always "no walk in flight from me". Gating this on `!cancelled`
+        // is how strict mode (or any mid-await dep change) leaves the
+        // skeleton stuck: cleanup sets cancelled, finally then skips the
+        // setter, walking stays true forever.
         walkingRef.current = false
-        if (!cancelled) setWalking(false)
+        setWalking(false)
       }
     })()
     return () => {
