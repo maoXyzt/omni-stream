@@ -80,6 +80,7 @@ export function WidgetDefault({ value, maxHeight = '18rem' }: DefaultProps) {
 
 export const WidgetMarkdown = lazy(() => import('./widget-markdown'))
 export const WidgetHighlight = lazy(() => import('./widget-highlight'))
+export const WidgetText = lazy(() => import('./widget-text'))
 
 // -----------------------------------------------------------------------
 // Image / video / audio / link — all share the resolveSrc pipeline

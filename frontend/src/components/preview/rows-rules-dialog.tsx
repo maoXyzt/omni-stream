@@ -93,6 +93,11 @@ const TEMPLATES: Template[] = [
     snippet: '{ "highlight": "column_name", "lang": "json" }',
     placeholder: 'column_name',
   },
+  {
+    label: 'Text file',
+    snippet: '{ "text": "column_name" }',
+    placeholder: 'column_name',
+  },
   { label: 'Row', snippet: '{ "row": [] }' },
   { label: 'Column', snippet: '{ "column": [] }' },
   { label: 'Grid', snippet: '{ "grid": [], "columns": 2 }' },

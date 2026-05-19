@@ -26,12 +26,16 @@ Widgets (the value of \`show\`, or the tag-key in sugar form):
   audio       <audio controls>
   link        <a href>
   markdown    minimal markdown (no GFM tables, no raw HTML)
+  text        fetch the file at the cell's path and render its body inline.
+              Large files load in 1 MiB chunks with a "Load more" button.
+              Optional \`lang\` for syntax highlighting; auto-detected from the
+              filename extension when omitted.
 
 Atom options:
   label       text shown above the widget
   width       CSS dim when atom sits as a flex child: "1fr" | "320px" | "auto"
-  maxHeight   only on default / highlight / markdown
-  src         only on image/video/audio/link — URL template with {value} placeholder
+  maxHeight   only on default / highlight / markdown / text
+  src         only on image/video/audio/link/text — URL template with {value} placeholder
                 "{value}"                  ← default; cell value used as the storage path
                 "./images/{value}"         ← sibling dir
                 "https://cdn/{value}.png"  ← remote URL
@@ -83,6 +87,8 @@ Each image (grid 3-up):          [{ "image": "images.[*]", "layout": "grid", "co
 First image only:                [{ "image": "images.[0]" }]
 Nested struct field per element: [{ "image": "images.[*].[path]" }]
 Highlighted JSON cell:           [{ "highlight": "metadata", "lang": "json" }]
+Inline text file by path:        [{ "text": "transcript_path" }]
+Sibling .log inline w/ syntax:   [{ "text": "id", "src": "./logs/{value}.log", "lang": "bash" }]
 Forced one-line row:             [{ "row": ["prompt", { "image": "thumb" }] }]
 Mixed default flow:              ["prompt", { "image": "thumb", "width": "320px" }]
 Stack a chunk + flow:            [{ "column": ["prompt", { "image": "thumb" }] }, "metadata"]
@@ -92,7 +98,7 @@ Stack a chunk + flow:            [{ "column": ["prompt", { "image": "thumb" }] }
 - \`highlight\` widget without \`lang\` → ERROR. Always include \`"lang": "..."\`.
 - \`.[:]\` slice with no bounds → ERROR. Use \`.[*]\` for "every element".
 - Using \`pathPrefix\` (old name) → field is now \`src\`, with \`{value}\` template.
-- \`src\` on default / highlight / markdown → ERROR; only image/video/audio/link accept it.
+- \`src\` on default / highlight / markdown → ERROR; only image/video/audio/link/text accept it.
 - \`layout\` / \`columns\` / \`gap\` / \`empty\` without \`.[*]\` in selector → ERROR.
 - Column name with \`.\` written bare: \`image.path\` parses as \`column "image" → field "path"\`. To reference a column literally named "image.path" use backticks.
 `
