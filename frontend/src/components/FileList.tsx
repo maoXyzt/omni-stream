@@ -153,6 +153,18 @@ export function FileList() {
     return { key: prefix + previewName, kind }
   }, [previewName, prefix])
 
+  // Look up the entry currently being previewed so we can pass its
+  // last_modified into the previewer as a cache buster. Falls back to null
+  // when the listing hasn't loaded yet, or when the user shared a URL to a
+  // file that's no longer present.
+  const previewVersion = useMemo(() => {
+    if (!previewState || !listQuery.data) return null
+    return (
+      listQuery.data.entries.find((e) => e.key === previewState.key)
+        ?.last_modified ?? null
+    )
+  }, [previewState, listQuery.data])
+
   // `keepPreviousData` keeps the previous prefix's entries visible while
   // the new listing loads — useful for paginating within a prefix, but
   // when the user descends into a subfolder the carry-over entries don't
@@ -547,6 +559,34 @@ export function FileList() {
                     : 'Sort Z→A (click to flip to A→Z)'}
                 </TooltipContent>
               </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    aria-label="Refresh listing"
+                    onClick={() => {
+                      // Invalidate every page of the current prefix — pagination
+                      // tokens are S3-opaque and may not survive concurrent
+                      // server-side adds/removes, but invalidating across all
+                      // tokens is cheap and the user is already asking for a
+                      // fresh read. Sidebar siblings stay cached.
+                      void queryClient.invalidateQueries({
+                        queryKey: ['list', storageName, prefix],
+                      })
+                    }}
+                    disabled={listQuery.isFetching}
+                  >
+                    <RotateCw
+                      className={cn(
+                        'size-4',
+                        listQuery.isFetching && 'animate-spin',
+                      )}
+                    />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Refresh listing</TooltipContent>
+              </Tooltip>
               <ViewToggle mode={viewMode} onChange={setViewMode} />
               <ShareLinkButton />
               {hasToken && (
@@ -671,6 +711,7 @@ export function FileList() {
                 fileKey={previewState!.key}
                 kind={previewState!.kind}
                 storage={storageName || undefined}
+                version={previewVersion}
               />
             </div>
           </div>
@@ -774,6 +815,7 @@ export function FileList() {
           fileKey={previewState.key}
           kind={previewState.kind}
           storage={storageName || undefined}
+          version={previewVersion}
           onClose={closePreview}
           onNavigate={navigatePreview}
         />
@@ -956,10 +998,12 @@ interface InlinePreviewProps {
   fileKey: string
   kind: PreviewKind
   storage?: string
+  /// See PreviewModal — same cache-busting role for the inline split view.
+  version?: string | null
 }
 
-function InlinePreview({ fileKey, kind, storage }: InlinePreviewProps) {
-  const src = proxyUrl(fileKey, storage)
+function InlinePreview({ fileKey, kind, storage, version }: InlinePreviewProps) {
+  const src = proxyUrl(fileKey, storage, version)
   const Previewer = getPreviewType(kind)?.Component
   if (!Previewer) {
     return (

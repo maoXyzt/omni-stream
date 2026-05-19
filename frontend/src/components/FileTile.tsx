@@ -110,7 +110,7 @@ function ImageContent({ entry, storageName, alt }: ImageContentProps) {
           width: 320,
           version: entry.last_modified,
         })
-      : proxyUrl(entry.key, storageName || undefined)
+      : proxyUrl(entry.key, storageName || undefined, entry.last_modified)
 
   if (errored) return <IconFill icon={ImageOff} />
 

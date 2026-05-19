@@ -41,10 +41,23 @@ export async function statFile(
   return data
 }
 
-export function proxyUrl(key: string, storage?: string): string {
+/// Direct-bytes URL for a stored file. The optional `version` flips the
+/// URL into a cache-busting form when the caller knows the file's mtime —
+/// typically `entry.last_modified` from the listing. The backend ignores
+/// unknown query params, so this is purely a browser-cache key tweak; same
+/// pattern as `thumbUrl`'s `?v=…`. Callers building stable shareable URLs
+/// (copy-to-clipboard, "open in new tab") should omit `version`.
+export function proxyUrl(
+  key: string,
+  storage?: string,
+  version?: string | null,
+): string {
+  const params = new URLSearchParams()
+  if (storage) params.set('storage', storage)
+  if (version) params.set('v', version)
+  const qs = params.toString()
   const base = `/api/proxy/${encodeKey(key)}`
-  if (!storage) return base
-  return `${base}?storage=${encodeURIComponent(storage)}`
+  return qs ? `${base}?${qs}` : base
 }
 
 export interface ThumbOptions {
