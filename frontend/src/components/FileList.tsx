@@ -417,11 +417,6 @@ export function FileList() {
     openPreview(entry)
   }
 
-  // Keep sidebar visible even at the storage root so the main pane's width
-  // doesn't reflow on navigation. At root the up button is omitted but the
-  // panel still shows root-level folders for quick jumps.
-  const sidebarParent = parentInfo?.parent ?? ''
-  const sidebarCurrent = parentInfo?.currentName ?? ''
   const toggleMainSort = () => setSortDir(sortDir === 'asc' ? 'desc' : 'asc')
 
   return (
@@ -467,8 +462,7 @@ export function FileList() {
         {storageName && !sidebarCollapsed && (
           <aside className="hidden md:flex md:w-64 md:shrink-0 md:flex-col md:overflow-y-auto md:border-r md:border-border">
             <Sidebar
-              parent={sidebarParent}
-              currentName={sidebarCurrent}
+              prefix={prefix}
               storageName={storageName}
               onNavigate={goToPath}
             />
