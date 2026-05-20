@@ -109,6 +109,18 @@ export function FileList() {
 
   const storagesQuery = useStorages()
   const serverInfo = useServerInfo()
+  // For S3 storages configured in multi-bucket mode (`s3.bucket` omitted in
+  // the server config → backend reports `bucket: null`), the URL's first
+  // path segment IS the bucket name. Surface it to the navbar switcher so it
+  // can render "current bucket" instead of just an opaque "*".
+  const currentBucket = useMemo<string | null>(() => {
+    const active = storagesQuery.data?.storages.find((s) => s.name === storageName)
+    if (active?.type !== 's3' || !active.s3 || active.s3.bucket !== null) {
+      return null
+    }
+    const first = prefix.split('/')[0]
+    return first || null
+  }, [storagesQuery.data, storageName, prefix])
   const [viewMode, setViewMode] = useViewMode()
   const [gridFit, setGridFit] = useGridFit()
   // Inline split layout (narrow file list + preview pane) needs horizontal
@@ -626,6 +638,7 @@ export function FileList() {
             storages={storagesQuery.data.storages}
             active={storageName}
             onChange={switchStorage}
+            currentBucket={currentBucket}
           />
         )}
         {/* `ml-auto` floats this to the right edge regardless of how many

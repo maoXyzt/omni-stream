@@ -17,25 +17,43 @@ interface Props {
   storages: StorageDescriptor[]
   active: string
   onChange: (name: string) => void
+  /// Bucket the user is currently navigated into. Only meaningful when the
+  /// active storage is S3 in multi-bucket mode (`s3.bucket === null` in the
+  /// config) — in that case the first path segment in the URL *is* the
+  /// bucket, so the caller forwards it here. `null` / `undefined` in
+  /// multi-bucket mode means "at the storage root, listing all buckets".
+  currentBucket?: string | null
   className?: string
 }
 
-export function StorageSwitcher({ storages, active, onChange, className }: Props) {
+export function StorageSwitcher({
+  storages,
+  active,
+  onChange,
+  currentBucket,
+  className,
+}: Props) {
   const [open, setOpen] = useState(false)
   if (storages.length === 0) return null
 
   const activeEntry = storages.find((s) => s.name === active)
   const activeInvalid = activeEntry?.valid === false
+  const detail = activeEntry ? describeStorage(activeEntry, currentBucket) : null
 
   // Single-storage deployments: render a non-interactive label, same as
   // before. No dialog — there's nothing to switch to.
   if (storages.length === 1) {
     const only = storages[0]
+    const onlyDetail = describeStorage(only, currentBucket)
     return (
       <div
-        title={!only.valid ? only.error ?? 'storage failed to initialize' : undefined}
+        title={
+          !only.valid
+            ? (only.error ?? 'storage failed to initialize')
+            : (onlyDetail?.tooltip ?? undefined)
+        }
         className={cn(
-          'inline-flex h-7 items-center gap-1.5 rounded-md border px-2 text-xs',
+          'inline-flex h-7 max-w-full items-center gap-1.5 rounded-md border px-2 text-xs',
           only.valid
             ? 'border-border bg-muted/40 text-muted-foreground'
             : 'border-destructive/40 bg-destructive/10 text-destructive',
@@ -45,6 +63,7 @@ export function StorageSwitcher({ storages, active, onChange, className }: Props
         {only.valid ? <Database className="size-3.5" /> : <AlertTriangle className="size-3.5" />}
         <span>{only.name}</span>
         <TypeBadge type={only.type} />
+        {only.valid && onlyDetail && <DetailInline detail={onlyDetail} />}
         {!only.valid && <InvalidBadge />}
       </div>
     )
@@ -54,15 +73,18 @@ export function StorageSwitcher({ storages, active, onChange, className }: Props
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         {/* Trigger replaces the old <select>. Shows the active storage name +
-            type so the user can see what's currently selected without opening
-            the dialog. Destructive palette when the active storage is invalid
-            (so a misconfigured deep-link doesn't render as "everything's
-            fine"). */}
+            type + a compact identifier (current bucket / endpoint host, or
+            local root path) so the operator can tell at a glance which
+            backend and which slice of it they're browsing without opening
+            the dialog. Destructive palette when the active storage is
+            invalid (so a misconfigured deep-link doesn't render as
+            "everything's fine"). */}
         <Button
           variant="outline"
           size="sm"
+          title={!activeInvalid ? (detail?.tooltip ?? undefined) : undefined}
           className={cn(
-            'h-7 gap-1.5 px-2 text-xs',
+            'h-7 max-w-full gap-1.5 px-2 text-xs',
             activeInvalid && 'border-destructive/60 bg-destructive/10 text-destructive',
             className,
           )}
@@ -75,7 +97,8 @@ export function StorageSwitcher({ storages, active, onChange, className }: Props
           )}
           <span className="font-medium">{activeEntry?.name ?? active}</span>
           {activeEntry && <TypeBadge type={activeEntry.type} />}
-          <ChevronDown className="size-3.5 text-muted-foreground" />
+          {!activeInvalid && detail && <DetailInline detail={detail} />}
+          <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
         </Button>
       </DialogTrigger>
       <DialogContent className="max-w-lg sm:max-w-2xl lg:max-w-3xl">
@@ -185,6 +208,62 @@ function StorageCard({ storage, active, onPick }: CardProps) {
         </div>
       )}
     </button>
+  )
+}
+
+/// Compact identifier shown inline in the navbar trigger / single-storage
+/// label, next to the storage name. Keeps the most useful "where am I
+/// connected" piece visible without a click — for S3 that's the bucket,
+/// for local FS the root path. Endpoint and region stay in the hover
+/// tooltip so the navbar doesn't get crowded; the full breakdown is also
+/// in the dialog. Returns `null` when the storage has no extra info worth
+/// surfacing (shouldn't happen for valid S3 / local entries).
+function describeStorage(
+  storage: StorageDescriptor,
+  currentBucket?: string | null,
+): { primary: string; tooltip: string } | null {
+  if (storage.type === 's3' && storage.s3) {
+    const configured = storage.s3.bucket
+    const isMulti = configured === null
+    // In multi-bucket mode the URL's first segment IS the bucket; if the
+    // user is at the storage root (no segment yet) we render "*" so the
+    // multi-bucket nature stays obvious instead of looking like an empty /
+    // unconfigured field.
+    const bucket = isMulti ? (currentBucket || '*') : configured
+    const endpoint = storage.s3.endpoint || 'AWS'
+    const tooltipBucket = isMulti
+      ? currentBucket
+        ? `${currentBucket} (multi-bucket mode)`
+        : '(all buckets — at storage root)'
+      : configured
+    const tooltipLines = [
+      `bucket: ${tooltipBucket}`,
+      `endpoint: ${endpoint}`,
+      storage.s3.region ? `region: ${storage.s3.region}` : null,
+    ].filter((line): line is string => line !== null)
+    return {
+      primary: bucket,
+      tooltip: tooltipLines.join('\n'),
+    }
+  }
+  if (storage.type === 'local' && storage.local) {
+    const root = storage.local.root_path || '—'
+    return {
+      primary: root,
+      tooltip: `root: ${root}`,
+    }
+  }
+  return null
+}
+
+function DetailInline({ detail }: { detail: { primary: string } }) {
+  return (
+    <>
+      <span aria-hidden className="text-muted-foreground/40">·</span>
+      <span className="max-w-[14rem] truncate font-mono text-[11px]">
+        {detail.primary}
+      </span>
+    </>
   )
 }
 
