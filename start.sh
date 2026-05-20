@@ -22,7 +22,7 @@ build_all() {
 }
 
 run_service() {
-    OMNI_CONFIG=./config.toml cargo run --bin omni-stream
+    cargo run --bin omni-stream
 }
 
 run_frontend() {
