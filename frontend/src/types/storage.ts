@@ -48,8 +48,13 @@ export interface StorageDescriptor {
   /// S3-specific identifying details. Set when `type === 's3'`. Excludes
   /// credentials — only fields a human would use to disambiguate one
   /// storage from another.
+  ///
+  /// `bucket` is `null` when the storage is in multi-bucket mode
+  /// (`bucket` omitted or set to `"*"` in the server config): the root
+  /// listing performs ListBuckets and each bucket appears as a top-level
+  /// directory. The UI surfaces this as "(all buckets)".
   s3?: {
-    bucket: string
+    bucket: string | null
     endpoint?: string | null
     region?: string | null
   } | null

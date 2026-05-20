@@ -12,7 +12,7 @@
   rs / ts / py / go / sql / shell / proto, and many more
 - **Anything else** — generic fallback: icon + metadata + the browser's built-in viewer
 
-> Previewing files on S3 / S3-compatible storage requires the configured access key to hold both **`s3:GetObject`** (preview / download / HEAD) and **`s3:ListBucket`** (directory browsing / thumbnail listing). Missing either yields a 403 on the corresponding action. The local filesystem backend has no such requirement, but is restricted to the directory configured as `local.root_path`.
+> Previewing files on S3 / S3-compatible storage requires the configured access key to hold both **`s3:GetObject`** (preview / download / HEAD) and **`s3:ListBucket`** (directory browsing / thumbnail listing). Missing either yields a 403 on the corresponding action. If you omit `s3.bucket` to use multi-bucket mode (see below), the credentials must additionally hold **`s3:ListAllMyBuckets`** so the root listing can enumerate every visible bucket. The local filesystem backend has no such requirement, but is restricted to the directory configured as `local.root_path`.
 
 HTTP API (the bundled SPA is built on top of these — `curl` or your own client works just as well):
 
@@ -69,6 +69,19 @@ name = "production-s3"
 type = "s3"
 active = true
 s3 = { endpoint = "http://minio.local:9000", bucket = "data", access_key = "...", secret_key = "...", region = "us-east-1" }
+```
+
+`s3.bucket` is optional. **Omit it (or set it to `"*"`) to enable multi-bucket
+mode**: the storage root performs `ListBuckets`, and every bucket the
+credentials can see appears as a top-level directory; navigating into one
+drills down with the usual prefix listing. The credentials must hold the
+`s3:ListAllMyBuckets` IAM permission. Example:
+
+```toml
+[[storages]]
+name = "all-prod-s3"
+type = "s3"
+s3 = { endpoint = "http://minio.local:9000", access_key = "...", secret_key = "...", region = "us-east-1" }
 ```
 
 > Multiple `[[storages]]` entries can coexist; on startup the one with `active = true` wins, and if none is active the first entry is used.

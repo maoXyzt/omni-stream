@@ -161,7 +161,12 @@ function StorageCard({ storage, active, onPick }: CardProps) {
       <dl className="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1 text-xs">
         {storage.type === 's3' && storage.s3 && (
           <>
-            <Field label="bucket" value={storage.s3.bucket || '—'} />
+            {/* Server emits `bucket: null` when the storage is in multi-bucket
+                mode (omitted or `"*"` in config). Render that explicitly as
+                "(all buckets)" so the operator can tell at a glance it's a
+                ListBuckets-backed root rather than a misconfigured empty
+                bucket name. */}
+            <Field label="bucket" value={storage.s3.bucket ?? '(all buckets)'} />
             <Field label="endpoint" value={storage.s3.endpoint ?? '(AWS default)'} />
             {storage.s3.region && <Field label="region" value={storage.s3.region} />}
           </>

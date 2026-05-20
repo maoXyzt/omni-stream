@@ -19,8 +19,9 @@
 
 > 预览 S3 / S3-兼容存储上的文件时，所配 access key 必须有 **`s3:GetObject`**
 > （文件预览 / 下载 / HEAD）和 **`s3:ListBucket`**（目录浏览 / 缩略图列表）
-> 权限——少一项对应操作就 403。本地文件系统后端无此要求，但只能访问
-> `local.root_path` 配置的根目录。
+> 权限——少一项对应操作就 403。如果省略 `s3.bucket` 走多 bucket 模式
+> （见下文），还需要 **`s3:ListAllMyBuckets`** 才能在根目录列出所有 bucket。
+> 本地文件系统后端无此要求，但只能访问 `local.root_path` 配置的根目录。
 
 HTTP 接口（前端 SPA 都基于此调用，也可以直接用 curl / 自写客户端）：
 
@@ -78,6 +79,18 @@ name = "production-s3"
 type = "s3"
 active = true
 s3 = { endpoint = "http://minio.local:9000", bucket = "data", access_key = "...", secret_key = "...", region = "us-east-1" }
+```
+
+`s3.bucket` 是可选字段。**省略它（或显式写成 `"*"`）会进入多 bucket 模式**：
+访问该 storage 的根目录时后端发起 `ListBuckets`，凭据可见的每个 bucket 都
+会作为一个顶层目录展示，点进去再按常规 prefix 列表浏览。需要凭据具备
+`s3:ListAllMyBuckets` 权限，配置如：
+
+```toml
+[[storages]]
+name = "all-prod-s3"
+type = "s3"
+s3 = { endpoint = "http://minio.local:9000", access_key = "...", secret_key = "...", region = "us-east-1" }
 ```
 
 > 多个 `[[storages]]` 表项可同时存在；启动时挑 `active = true` 的那一个，没配 active 就用第一个。

@@ -119,7 +119,14 @@ pub struct StorageConfig {
 pub struct S3Config {
   #[serde(default)]
   pub endpoint: Option<String>,
-  pub bucket: String,
+  /// Optional bucket pin. When set, the storage operates against this single
+  /// bucket exactly as before. When omitted (or set to the `"*"` sentinel),
+  /// the storage enters multi-bucket mode: the root listing performs
+  /// `ListBuckets` and each bucket appears as a top-level directory. See
+  /// [`S3Config::fixed_bucket`] for the canonical "is this multi-bucket?"
+  /// check.
+  #[serde(default)]
+  pub bucket: Option<String>,
   #[serde(default)]
   pub access_key: Option<String>,
   #[serde(default)]
@@ -137,11 +144,29 @@ fn default_force_path_style() -> bool {
   true
 }
 
+impl S3Config {
+  /// Returns the configured bucket name when this storage pins to a single
+  /// bucket, or `None` when it should operate in multi-bucket mode.
+  ///
+  /// Multi-bucket triggers when the field is absent, empty / whitespace, or
+  /// equal to the `"*"` sentinel. Callers use this both to decide which API
+  /// to call (ListBuckets vs. ListObjects) and to drive UI hints — the
+  /// storage card renders "(all buckets)" when this returns `None`.
+  pub fn fixed_bucket(&self) -> Option<&str> {
+    let raw = self.bucket.as_deref()?.trim();
+    if raw.is_empty() || raw == "*" {
+      None
+    } else {
+      Some(raw)
+    }
+  }
+}
+
 impl Default for S3Config {
   fn default() -> Self {
     Self {
       endpoint: None,
-      bucket: String::new(),
+      bucket: None,
       access_key: None,
       secret_key: None,
       region: None,
@@ -155,7 +180,7 @@ impl fmt::Debug for S3Config {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     f.debug_struct("S3Config")
       .field("endpoint", &self.endpoint)
-      .field("bucket", &self.bucket)
+      .field("bucket", &self.bucket.as_deref().unwrap_or("<multi-bucket>"))
       .field("access_key", &mask_secret(self.access_key.as_deref()))
       .field("secret_key", &mask_secret(self.secret_key.as_deref()))
       .field("region", &self.region)
@@ -441,8 +466,19 @@ impl Config {
               s.name
             )
           })?;
-          if s3.bucket.trim().is_empty() {
-            bail!("storage '{}': s3.bucket is required", s.name);
+          // bucket is now optional: omitted / "" / "*" all mean "multi-bucket
+          // mode" (root listing performs ListBuckets). When a literal name is
+          // supplied it must be a single S3 bucket — reject anything that
+          // looks like a bucket/prefix path so the operator gets a clear
+          // error instead of silently failing on every list.
+          if let Some(raw) = s3.bucket.as_deref()
+            && raw.contains('/')
+          {
+            bail!(
+              "storage '{}': s3.bucket must be a bare bucket name (no '/'); got '{}'",
+              s.name,
+              raw,
+            );
           }
         }
         StorageType::Local => {
@@ -655,7 +691,7 @@ local = { root_path = "/tmp" }
   fn debug_masks_s3_secrets() {
     let s3 = S3Config {
       endpoint: Some("https://example.com".into()),
-      bucket: "b".into(),
+      bucket: Some("b".into()),
       access_key: Some("AKIDsecret".into()),
       secret_key: Some("supersecret".into()),
       region: Some("us-east-1".into()),
@@ -802,5 +838,83 @@ s3 = { bucket = "b" }
 "#;
     let cfg: Config = toml::from_str(raw).expect("parse");
     assert_eq!(cfg.storages[0].r#type, StorageType::S3);
+  }
+
+  #[test]
+  fn s3_fixed_bucket_treats_star_and_empty_as_none() {
+    // None, "", whitespace-only, and the "*" sentinel all collapse to
+    // multi-bucket mode. Trim first so " * " also counts as the sentinel —
+    // copy-paste from docs shouldn't accidentally pin to a literal " * ".
+    for raw in [None, Some(""), Some("   "), Some("*"), Some(" * ")] {
+      let cfg = S3Config {
+        bucket: raw.map(str::to_string),
+        ..S3Config::default()
+      };
+      assert_eq!(
+        cfg.fixed_bucket(),
+        None,
+        "expected multi-bucket for bucket={raw:?}"
+      );
+    }
+  }
+
+  #[test]
+  fn s3_fixed_bucket_returns_value_when_set() {
+    let cfg = S3Config {
+      bucket: Some("my-bucket".into()),
+      ..S3Config::default()
+    };
+    assert_eq!(cfg.fixed_bucket(), Some("my-bucket"));
+    // Trim surrounding whitespace so a stray newline doesn't silently change
+    // the bucket name the AWS SDK sees.
+    let cfg = S3Config {
+      bucket: Some("  my-bucket  ".into()),
+      ..S3Config::default()
+    };
+    assert_eq!(cfg.fixed_bucket(), Some("my-bucket"));
+  }
+
+  #[test]
+  fn validate_accepts_s3_without_bucket() {
+    let raw = r#"
+[[storages]]
+name = "all"
+type = "s3"
+active = true
+s3 = { endpoint = "http://localhost:9000" }
+"#;
+    let cfg = parse(raw);
+    let s3 = cfg.storages[0].s3.as_ref().expect("s3");
+    assert_eq!(s3.fixed_bucket(), None);
+  }
+
+  #[test]
+  fn validate_accepts_s3_with_star_bucket() {
+    let raw = r#"
+[[storages]]
+name = "all"
+type = "s3"
+active = true
+s3 = { bucket = "*", endpoint = "http://localhost:9000" }
+"#;
+    let cfg = parse(raw);
+    let s3 = cfg.storages[0].s3.as_ref().expect("s3");
+    assert_eq!(s3.fixed_bucket(), None);
+  }
+
+  #[test]
+  fn validate_rejects_bucket_with_slash() {
+    // A '/' in the bucket name almost certainly means the operator pasted a
+    // bucket/prefix path. Surface that as a config error rather than letting
+    // every S3 call return a 400 from the gateway.
+    let raw = r#"
+[[storages]]
+name = "broken"
+type = "s3"
+active = true
+s3 = { bucket = "my-bucket/prefix" }
+"#;
+    let cfg: Config = toml::from_str(raw).expect("syntactic parse");
+    assert!(cfg.validate().is_err());
   }
 }

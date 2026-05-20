@@ -30,7 +30,13 @@ enabled = false
 #   endpoint          Optional override. Omit for real AWS; set for self-hosted
 #                     gateways. Use the *-internal variant when running inside
 #                     the same VPC to avoid public-endpoint quotas / throttling.
-#   bucket            Required. Bucket name only — no scheme, no slashes.
+#   bucket            Optional. When set, the storage pins to that bucket
+#                     (bucket name only — no scheme, no slashes). When omitted
+#                     or set to "*", the storage enters multi-bucket mode: the
+#                     root listing performs ListBuckets and each bucket the
+#                     credentials can see appears as a top-level directory.
+#                     Multi-bucket mode requires the `s3:ListAllMyBuckets`
+#                     IAM permission.
 #   access_key,
 #   secret_key        Static credentials. Prefer env-injected values over
 #                     committing plaintext here.
@@ -46,6 +52,15 @@ name = "production-s3"
 type = "s3"
 active = true
 s3 = { endpoint = "http://localhost:9000", bucket = "my-bucket", access_key = "minioadmin", secret_key = "minioadmin", force_path_style = true }
+
+# Multi-bucket variant: `bucket` is omitted, so the storage root performs
+# ListBuckets and each bucket shows up as a top-level folder in the UI.
+# Useful when the credentials grant access to many buckets and you don't
+# want a separate [[storages]] entry per bucket.
+# [[storages]]
+# name = "all-prod-s3"
+# type = "s3"
+# s3 = { endpoint = "http://localhost:9000", access_key = "minioadmin", secret_key = "minioadmin", force_path_style = true }
 
 # ---- Local filesystem backend -------------------------------------------
 # Serves files under a directory on the host.

@@ -111,7 +111,11 @@ pub struct StorageDescriptor {
 
 #[derive(Debug, Serialize)]
 pub struct S3Descriptor {
-  pub bucket: String,
+  /// `Some(name)` when the storage pins to a single bucket. Serialised as
+  /// JSON `null` (intentionally NOT skipped) when the storage is in
+  /// multi-bucket mode — the frontend uses the explicit null to render
+  /// "(all buckets)" instead of guessing from an empty string.
+  pub bucket: Option<String>,
   #[serde(skip_serializing_if = "Option::is_none")]
   pub endpoint: Option<String>,
   #[serde(skip_serializing_if = "Option::is_none")]
