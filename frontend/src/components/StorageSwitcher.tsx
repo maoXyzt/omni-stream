@@ -1,5 +1,13 @@
 import { useState } from 'react'
-import { AlertTriangle, Check, ChevronDown, Database, FolderOpen } from 'lucide-react'
+import {
+  AlertTriangle,
+  Check,
+  ChevronDown,
+  Copy as CopyIcon,
+  Database,
+  FolderOpen,
+} from 'lucide-react'
+import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
 import {
@@ -40,32 +48,63 @@ export function StorageSwitcher({
   const activeInvalid = activeEntry?.valid === false
   const detail = activeEntry ? describeStorage(activeEntry, currentBucket) : null
 
-  // Single-storage deployments: render a non-interactive label, same as
-  // before. No dialog — there's nothing to switch to.
+  // Single-storage deployments: previously a non-interactive label. Now it's
+  // a button that opens a small "Storage details" dialog, mirroring the
+  // multi-storage Dialog so operators have a consistent place to read /
+  // copy the endpoint / bucket / region / root_path. Invalid storages stay
+  // as a static label (nothing useful to show in the dialog — the error
+  // message is already inline via `title`).
   if (storages.length === 1) {
     const only = storages[0]
     const onlyDetail = describeStorage(only, currentBucket)
+    if (!only.valid) {
+      return (
+        <div
+          title={only.error ?? 'storage failed to initialize'}
+          className={cn(
+            'inline-flex h-7 max-w-full items-center gap-1.5 rounded-md border border-destructive/40 bg-destructive/10 px-2 text-xs text-destructive',
+            className,
+          )}
+        >
+          <AlertTriangle className="size-3.5" />
+          <span>{only.name}</span>
+          <TypeBadge type={only.type} />
+          <InvalidBadge />
+        </div>
+      )
+    }
     return (
-      <div
-        title={
-          !only.valid
-            ? (only.error ?? 'storage failed to initialize')
-            : (onlyDetail?.tooltip ?? undefined)
-        }
-        className={cn(
-          'inline-flex h-7 max-w-full items-center gap-1.5 rounded-md border px-2 text-xs',
-          only.valid
-            ? 'border-border bg-muted/40 text-muted-foreground'
-            : 'border-destructive/40 bg-destructive/10 text-destructive',
-          className,
-        )}
-      >
-        {only.valid ? <Database className="size-3.5" /> : <AlertTriangle className="size-3.5" />}
-        <span>{only.name}</span>
-        <TypeBadge type={only.type} />
-        {only.valid && onlyDetail && <DetailInline detail={onlyDetail} />}
-        {!only.valid && <InvalidBadge />}
-      </div>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogTrigger asChild>
+          <Button
+            variant="outline"
+            size="sm"
+            title={onlyDetail?.tooltip ?? undefined}
+            className={cn(
+              'h-7 max-w-full gap-1.5 border-border bg-muted/40 px-2 text-xs text-muted-foreground',
+              className,
+            )}
+            aria-label="Show storage details"
+          >
+            <Database className="size-3.5" />
+            <span>{only.name}</span>
+            <TypeBadge type={only.type} />
+            {onlyDetail && <DetailInline detail={onlyDetail} />}
+          </Button>
+        </DialogTrigger>
+        <DialogContent className="max-w-lg sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Storage details</DialogTitle>
+            <DialogDescription>
+              Click any value to copy it. To change which backend is exposed,
+              edit the server config — only one storage is currently configured.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-1">
+            <StorageCard storage={only} active onPick={() => setOpen(false)} />
+          </div>
+        </DialogContent>
+      </Dialog>
     )
   }
 
@@ -141,13 +180,25 @@ function StorageCard({ storage, active, onPick }: CardProps) {
   const disabled = !storage.valid
   const Icon = storage.type === 'local' ? FolderOpen : Database
 
+  // `<div role="button">` instead of `<button>` so the per-field copy buttons
+  // inside aren't nested inside another `<button>` (invalid HTML and an a11y
+  // hazard). Keyboard activation is added manually to keep parity with the
+  // native button semantics screen readers expect.
   return (
-    <button
-      type="button"
-      onClick={onPick}
-      disabled={disabled}
+    <div
+      role="button"
+      tabIndex={disabled ? -1 : 0}
+      aria-disabled={disabled || undefined}
+      onClick={disabled ? undefined : onPick}
+      onKeyDown={(e) => {
+        if (disabled) return
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onPick()
+        }
+      }}
       className={cn(
-        'group flex flex-col gap-2 rounded-md border p-3 text-left transition',
+        'group flex flex-col gap-2 rounded-md border p-3 text-left transition outline-none focus-visible:ring-2 focus-visible:ring-ring',
         // Three visual states: active (highlighted), invalid (destructive,
         // not clickable), and idle (hover-able).
         active
@@ -207,7 +258,7 @@ function StorageCard({ storage, active, onPick }: CardProps) {
           <span className="break-all">{storage.error}</span>
         </div>
       )}
-    </button>
+    </div>
   )
 }
 
@@ -268,10 +319,43 @@ function DetailInline({ detail }: { detail: { primary: string } }) {
 }
 
 function Field({ label, value }: { label: string; value: string }) {
+  async function copy(e: React.MouseEvent | React.KeyboardEvent) {
+    // Stop the outer StorageCard's click handler from firing — copying a
+    // field shouldn't double as "select this storage".
+    e.stopPropagation()
+    try {
+      await navigator.clipboard.writeText(value)
+      toast.success(`Copied ${label}`, { description: value })
+    } catch {
+      // Fallback for non-secure contexts / locked-down browsers where the
+      // Clipboard API is unavailable.
+      window.prompt(`Copy ${label}:`, value)
+    }
+  }
   return (
     <>
       <dt className="text-muted-foreground">{label}</dt>
-      <dd className="break-all font-mono">{value}</dd>
+      <dd className="min-w-0">
+        <button
+          type="button"
+          onClick={copy}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault()
+              void copy(e)
+            }
+          }}
+          title={`Copy ${label}`}
+          aria-label={`Copy ${label}: ${value}`}
+          className="group/copy inline-flex w-full min-w-0 items-center gap-1.5 rounded px-1 py-0.5 text-left transition hover:bg-muted focus-visible:bg-muted focus-visible:outline-none"
+        >
+          <span className="min-w-0 flex-1 break-all font-mono">{value}</span>
+          <CopyIcon
+            aria-hidden
+            className="size-3 shrink-0 text-muted-foreground/40 transition group-hover/copy:text-muted-foreground"
+          />
+        </button>
+      </dd>
     </>
   )
 }
