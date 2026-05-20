@@ -13,9 +13,11 @@ use std::time::{Duration, SystemTime};
 
 use anyhow::Context;
 use axum::Router;
+use axum::http::StatusCode;
 use axum::middleware;
 use axum::routing::get;
 use tokio::time::MissedTickBehavior;
+use tower_http::timeout::TimeoutLayer;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::layer::SubscriberExt;
@@ -92,13 +94,28 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("auth gate disabled (open API)");
   }
 
+  // Bounded per-route timeout for the catalog endpoints. Catalogs touch
+  // every entry under a prefix (especially `list` walking many pages), and
+  // an unbounded backend hang would leave the SPA stuck on a spinner. 25 s
+  // is generous enough that the single-scan local-fs path completes on any
+  // realistic directory but short enough that a stuck request fails fast
+  // and surfaces a 408 the frontend can react to.
+  //
+  // `proxy` is deliberately excluded — file streams can legitimately run
+  // for minutes on large downloads.
+  let catalog_timeout =
+    TimeoutLayer::with_status_code(StatusCode::REQUEST_TIMEOUT, Duration::from_secs(25));
+
   let app = Router::new()
     .route("/api/server", get(server_info_handler))
     .route("/api/storages", get(list_storages_handler))
-    .route("/api/list", get(list_handler))
-    .route("/api/stat/{*key}", get(stat_handler))
+    .route("/api/list", get(list_handler).layer(catalog_timeout))
+    .route("/api/stat/{*key}", get(stat_handler).layer(catalog_timeout))
     .route("/api/proxy/{*key}", get(proxy_handler))
-    .route("/api/thumb/{*key}", get(thumb_handler))
+    .route(
+      "/api/thumb/{*key}",
+      get(thumb_handler).layer(catalog_timeout),
+    )
     // route_layer applies only to routes registered above; fallback (SPA HTML/
     // JS/CSS) stays open so the browser can load the login UI.
     .route_layer(middleware::from_fn_with_state(auth_state, auth_middleware))

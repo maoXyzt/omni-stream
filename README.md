@@ -24,7 +24,7 @@
 
 HTTP 接口（前端 SPA 都基于此调用，也可以直接用 curl / 自写客户端）：
 
-- `GET /api/list?prefix=&page_token=` —— 浏览目录
+- `GET /api/list?prefix=&page_token=&skip_pages=` —— 浏览目录;可选 `skip_pages` 让后端服务端 walk N 页,响应会带回中间页的 token 数组,前端一次往返就能跳到第 N 页
 - `GET /api/stat/{*key}` —— 取文件元信息
 - `GET /api/proxy/{*key}` —— 流式拉取，全程透传 `Range`，自动 200 / 206
 - 嵌入式 SPA fallback —— 任何非 `/api/*` 路径回落到 `index.html`，前端路由自洽

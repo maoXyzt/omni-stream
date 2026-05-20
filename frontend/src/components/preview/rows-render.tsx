@@ -22,6 +22,7 @@ import {
   WidgetImage,
   WidgetLink,
   WidgetMarkdown,
+  WidgetText,
   WidgetVideo,
   type RenderContext,
 } from '@/components/preview/rows-widgets'
@@ -222,6 +223,16 @@ function WidgetBody({
       return <WidgetLink value={value} src={node.src ?? '{value}'} ctx={ctx} />
     case 'markdown':
       return <WidgetMarkdown value={value} maxHeight={node.maxHeight} />
+    case 'text':
+      return (
+        <WidgetText
+          value={value}
+          src={node.src ?? '{value}'}
+          lang={node.lang}
+          maxHeight={node.maxHeight}
+          ctx={ctx}
+        />
+      )
   }
 }
 

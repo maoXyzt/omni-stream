@@ -1,14 +1,16 @@
 import { FileTile } from '@/components/FileTile'
+import type { GridFit } from '@/hooks/use-grid-fit'
 import type { FileEntry } from '@/types/storage'
 
 interface FileGridProps {
   entries: FileEntry[]
   prefix: string
   storageName: string
+  fit: GridFit
   onSelect: (entry: FileEntry) => void
 }
 
-export function FileGrid({ entries, prefix, storageName, onSelect }: FileGridProps) {
+export function FileGrid({ entries, prefix, storageName, fit, onSelect }: FileGridProps) {
   if (entries.length === 0) {
     return (
       <div className="py-10 text-center text-muted-foreground">
@@ -34,6 +36,7 @@ export function FileGrid({ entries, prefix, storageName, onSelect }: FileGridPro
           entry={entry}
           prefix={prefix}
           storageName={storageName}
+          fit={fit}
           onSelect={onSelect}
         />
       ))}

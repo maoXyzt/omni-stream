@@ -20,11 +20,17 @@ export async function listFiles(
   prefix: string,
   pageToken?: string,
   storage?: string,
+  /// 0 / omitted → one list call from `pageToken`. N > 0 → server walks N
+  /// pages forward and returns the target page; intermediate `next_token`s
+  /// come back in `walked_tokens` so the client cache fills in one round
+  /// trip. Server caps the value; the backend constant is documented as 100.
+  skipPages?: number,
 ): Promise<ListResult> {
   const params: Record<string, string> = {}
   if (prefix) params.prefix = prefix
   if (pageToken) params.page_token = pageToken
   if (storage) params.storage = storage
+  if (skipPages && skipPages > 0) params.skip_pages = String(skipPages)
   const { data } = await apiClient.get<ListResult>('/api/list', { params })
   return data
 }
@@ -41,10 +47,23 @@ export async function statFile(
   return data
 }
 
-export function proxyUrl(key: string, storage?: string): string {
+/// Direct-bytes URL for a stored file. The optional `version` flips the
+/// URL into a cache-busting form when the caller knows the file's mtime —
+/// typically `entry.last_modified` from the listing. The backend ignores
+/// unknown query params, so this is purely a browser-cache key tweak; same
+/// pattern as `thumbUrl`'s `?v=…`. Callers building stable shareable URLs
+/// (copy-to-clipboard, "open in new tab") should omit `version`.
+export function proxyUrl(
+  key: string,
+  storage?: string,
+  version?: string | null,
+): string {
+  const params = new URLSearchParams()
+  if (storage) params.set('storage', storage)
+  if (version) params.set('v', version)
+  const qs = params.toString()
   const base = `/api/proxy/${encodeKey(key)}`
-  if (!storage) return base
-  return `${base}?storage=${encodeURIComponent(storage)}`
+  return qs ? `${base}?${qs}` : base
 }
 
 export interface ThumbOptions {

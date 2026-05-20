@@ -20,6 +20,11 @@ interface Props {
   fileKey: string
   kind: PreviewKind
   storage?: string
+  /// Optional cache-buster — typically `entry.last_modified` from the
+  /// listing. When the user clicks Refresh and the listing returns new
+  /// mtimes, this changes and the browser refetches instead of serving the
+  /// stale cached preview.
+  version?: string | null
   onClose: () => void
   onNavigate?: (dir: 'prev' | 'next') => void
 }
@@ -28,10 +33,11 @@ export function PreviewModal({
   fileKey,
   kind,
   storage,
+  version,
   onClose,
   onNavigate,
 }: Props) {
-  const src = proxyUrl(fileKey, storage)
+  const src = proxyUrl(fileKey, storage, version)
   const type = getPreviewType(kind)
   const Previewer = type?.Component
 

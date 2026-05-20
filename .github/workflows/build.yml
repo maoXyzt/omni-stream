@@ -7,8 +7,17 @@ on:
   # commit a Cargo.toml + Cargo.lock version bump, so a md-only release commit
   # never happens. If you ever hand-tag a doc-only commit, prefix with
   # `git commit --allow-empty -m "release prep"` to force the workflow to fire.
+  #
+  # `dev` is intentionally NOT in `push.branches`. With it included, every
+  # push to `dev` during an open PR fired two events (push + pull_request
+  # synchronize) for the same SHA; the concurrency group below cancels
+  # whichever started first, and the cancelled run shows up in the PR
+  # check list (sometimes blocking merge under branch protection). With
+  # only `pull_request` covering dev, each commit gets one clean run.
+  # The trade-off: a push to dev with no open PR runs no CI — open a
+  # draft PR early (or use workflow_dispatch) to validate.
   push:
-    branches: [main, dev]
+    branches: [main]
     tags: ['v*']
     paths-ignore: ['**/*.md', 'docs/**']
   pull_request:
@@ -16,11 +25,14 @@ on:
   workflow_dispatch:
 
 # Group by source branch (head_ref on PR events, ref_name on push / tag /
-# dispatch). Push to a branch with an open PR fires both `push` and
-# `pull_request` events; this collapses them into one effective run, and
-# also cancels stale in-flight runs when commits land in quick succession.
-# Tag and main pushes land in their own groups (`build-v0.1.0`, `build-main`),
-# so they're never cancelled by activity on feature branches.
+# dispatch). Cancels stale in-flight runs when newer commits land on the
+# same branch in quick succession. Since `dev` is no longer in
+# `push.branches` (see the trigger comment), there's no longer a
+# push+pull_request collision for dev iterations — every dev commit
+# flows through exactly one `pull_request: synchronize` run that this
+# concurrency group rolls forward. Tag and main pushes land in their own
+# groups (`build-v0.1.0`, `build-main`), so they're never cancelled by
+# activity on feature branches.
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
@@ -84,11 +96,20 @@ jobs:
             exit 1
           fi
 
-  # Decides which targets the backend matrix builds. The full 3-platform fan-out
-  # is reserved for events that produce shippable artifacts (push to main, v*
-  # tags, manual dispatch). PRs and pushes to dev only validate the cheapest
-  # target (linux-gnu) — dev is a long-running integration branch, not a
-  # release source, so paying for macOS runners on every push is wasted spend.
+  # Decides which targets the backend matrix builds. Full 3-platform fan-out
+  # for the events that either ship artifacts or gate the next thing that
+  # will: push to main, v* tags, manual dispatch, AND pull requests.
+  #
+  # PRs are included on purpose. The team's flow squash-merges dev into main
+  # and then deletes the dev branch — a platform-specific regression caught
+  # only after the post-merge main build would have to be fixed directly on
+  # main (no dev to push to). Validating all three targets at PR time keeps
+  # the gate honest and absorbs the macOS minute cost where it actually
+  # buys safety.
+  #
+  # Plain pushes to dev keep the minimal linux-gnu matrix — every commit on
+  # dev gets cheap validation, and the macOS / musl checks are deferred to
+  # the eventual PR run before the merge.
   matrix-config:
     name: Backend matrix config
     needs: preflight
@@ -106,7 +127,7 @@ jobs:
           set -euo pipefail
           full=false
           case "$EVENT:$REF" in
-            push:refs/heads/main|push:refs/tags/v*|workflow_dispatch:*)
+            push:refs/heads/main|push:refs/tags/v*|workflow_dispatch:*|pull_request:*)
               full=true ;;
           esac
           if $full; then
@@ -232,7 +253,13 @@ jobs:
           CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
         run: cargo build --release --locked --target ${{ matrix.target }} --bin omni-stream
 
+      # PR runs build the binary on all three targets to validate compile +
+      # link (that's the gate value), but no downstream job consumes the
+      # tarball — `release` only fires on tag pushes, never on PRs. Skip
+      # the package + upload pair so PR runs don't spend CI on tarring and
+      # don't churn the repo's artifact storage quota.
       - name: Package archive
+        if: github.event_name != 'pull_request'
         id: pkg
         shell: bash
         run: |
@@ -249,6 +276,7 @@ jobs:
           echo "artifact=${name}" >>"$GITHUB_OUTPUT"
 
       - name: Upload binary
+        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.pkg.outputs.artifact }}
@@ -302,10 +330,18 @@ jobs:
   publish-dry-run:
     name: cargo publish --dry-run
     needs: frontend
-    # Run on every event that isn't already pushing the real release —
-    # PRs, push to dev / main, manual dispatch — so metadata regressions
-    # are caught even if someone bypasses PR review and pushes directly.
-    if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+    # Run on the events that gate the next step toward crates.io:
+    #   - pull_request: gates the squash-merge into main
+    #   - push to main: gates the next tag / release
+    #   - workflow_dispatch: maintainer's manual safety check pre-tagging
+    # Skip on plain dev pushes — dev iterations don't need to revalidate
+    # package metadata on every commit; the PR run catches regressions
+    # before they reach main. Tag pushes are excluded too (the real
+    # `publish` job handles them).
+    if: |
+      github.event_name == 'pull_request' ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5

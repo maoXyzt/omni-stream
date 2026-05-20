@@ -16,7 +16,7 @@
 
 HTTP API (the bundled SPA is built on top of these — `curl` or your own client works just as well):
 
-- `GET /api/list?prefix=&page_token=` — browse a directory
+- `GET /api/list?prefix=&page_token=&skip_pages=` — browse a directory; optional `skip_pages` makes the server walk N pages internally and return the target page plus every intermediate token, so jumping to page N takes one round-trip instead of N
 - `GET /api/stat/{*key}` — fetch file metadata
 - `GET /api/proxy/{*key}` — stream the file, transparently forwarding `Range`, returning 200 / 206 as appropriate
 - Embedded SPA fallback — anything not under `/api/*` falls back to `index.html`, so client-side routing just works

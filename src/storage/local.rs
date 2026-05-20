@@ -1,8 +1,8 @@
-use std::cmp::Ordering;
-use std::collections::BinaryHeap;
+use std::collections::HashMap;
 use std::io::SeekFrom;
 use std::path::{Component, Path, PathBuf};
-use std::time::SystemTime;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant, SystemTime};
 
 use async_trait::async_trait;
 use tokio::fs;
@@ -14,34 +14,74 @@ use crate::error::AppError;
 
 const LIST_PAGE_SIZE: usize = 1000;
 
-/// Heap wrapper that orders `FileEntry` by `key` only, so a bounded max-heap
-/// can keep just the smallest `LIST_PAGE_SIZE + 1` keys greater than the
-/// cursor — memory stays O(page_size) instead of O(directory_size).
-struct ByKey(FileEntry);
+/// How long a sorted listing stays cached. Short enough that external file
+/// changes are visible within seconds; long enough to absorb the typical
+/// "click through pages 1..N" browsing pattern without re-scanning.
+const CACHE_TTL: Duration = Duration::from_secs(10);
 
-impl PartialEq for ByKey {
-  fn eq(&self, other: &Self) -> bool {
-    self.0.key == other.0.key
-  }
+/// Per-listing entry cap. Above this we still scan to serve the request but
+/// don't keep the result around — a million-entry dir's keys would consume
+/// ~80 MiB just in the cache, which is more than the cache is worth.
+const CACHE_MAX_ENTRIES_PER_PREFIX: usize = 50_000;
+
+/// How many distinct prefixes the cache holds at once. Insertion past this
+/// cap evicts the oldest. Browsing a few directories rarely exceeds this.
+const CACHE_MAX_PREFIXES: usize = 32;
+
+/// Cached sorted view of a directory. We keep only `(key, is_dir)` per
+/// entry — size and mtime are fetched on demand for the page actually
+/// returned, so the cache never holds N stat() results worth of memory.
+struct CachedListing {
+  keys: Arc<Vec<(String, bool)>>,
+  inserted_at: Instant,
 }
 
-impl Eq for ByKey {}
-
-impl PartialOrd for ByKey {
-  fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-    Some(self.cmp(other))
-  }
+#[derive(Default)]
+pub struct ListingCache {
+  inner: Mutex<HashMap<String, CachedListing>>,
 }
 
-impl Ord for ByKey {
-  fn cmp(&self, other: &Self) -> Ordering {
-    self.0.key.cmp(&other.0.key)
+impl ListingCache {
+  fn get(&self, prefix: &str) -> Option<Arc<Vec<(String, bool)>>> {
+    let guard = self.inner.lock().unwrap();
+    let entry = guard.get(prefix)?;
+    if entry.inserted_at.elapsed() >= CACHE_TTL {
+      return None;
+    }
+    Some(entry.keys.clone())
+  }
+
+  fn put(&self, prefix: &str, keys: Arc<Vec<(String, bool)>>) {
+    if keys.len() > CACHE_MAX_ENTRIES_PER_PREFIX {
+      return;
+    }
+    let mut guard = self.inner.lock().unwrap();
+    // Drop anything past TTL on every write — keeps the table from growing
+    // unbounded between requests, and the cost is bounded by `cap`.
+    guard.retain(|_, v| v.inserted_at.elapsed() < CACHE_TTL);
+    if guard.len() >= CACHE_MAX_PREFIXES {
+      let oldest = guard
+        .iter()
+        .min_by_key(|(_, v)| v.inserted_at)
+        .map(|(k, _)| k.clone());
+      if let Some(k) = oldest {
+        guard.remove(&k);
+      }
+    }
+    guard.insert(
+      prefix.to_string(),
+      CachedListing {
+        keys,
+        inserted_at: Instant::now(),
+      },
+    );
   }
 }
 
 pub struct LocalFsBackend {
   root: PathBuf,
   follow_symlinks: bool,
+  cache: Arc<ListingCache>,
 }
 
 impl LocalFsBackend {
@@ -49,6 +89,7 @@ impl LocalFsBackend {
     Self {
       root: root.into(),
       follow_symlinks,
+      cache: Arc::new(ListingCache::default()),
     }
   }
 
@@ -58,6 +99,117 @@ impl LocalFsBackend {
     } else {
       fs::symlink_metadata(full).await
     }
+  }
+
+  /// Cheap is_dir probe used during listing. Reads `d_type` from the
+  /// readdir buffer on Linux/macOS without a stat syscall on every entry —
+  /// dropping per-entry cost from "stat + open dirent" to "just dirent" when
+  /// the FS reports the type. Filesystems that hand back `DT_UNKNOWN` (NFS
+  /// over some servers, some FUSE backends) make `file_type()` fall back to
+  /// `stat` internally; we tolerate that, just no win.
+  ///
+  /// Symlinks: when `follow_symlinks=true` we need the target's type, which
+  /// `entry.file_type()` won't give us (it reports `Symlink`). Do a single
+  /// follow `stat` only in that case. Most entries aren't symlinks so the
+  /// extra branch costs nothing per file.
+  async fn quick_is_dir(&self, entry: &fs::DirEntry, entry_path: &Path) -> std::io::Result<bool> {
+    let ft = entry.file_type().await?;
+    if ft.is_symlink() && self.follow_symlinks {
+      // Resolve the link to find the real type. Fall back to lstat (i.e.
+      // is_dir = false because we already know it's a symlink) if the
+      // target's gone, so the entry still appears.
+      return Ok(
+        fs::metadata(entry_path)
+          .await
+          .map(|m| m.is_dir())
+          .unwrap_or(false),
+      );
+    }
+    Ok(ft.is_dir())
+  }
+
+  /// Resolve `prefix` to its filesystem path and confirm it's an existing
+  /// directory. Pulled out because both `list_files` and `list_files_walking`
+  /// need the same pre-flight check before they touch the cache or scan.
+  async fn validate_dir(&self, prefix: &str) -> Result<PathBuf, AppError> {
+    let dir_path = self.resolve(prefix)?;
+    let metadata = match self.leaf_metadata(&dir_path).await {
+      Ok(m) => m,
+      Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+        return Err(AppError::NotFound(prefix.to_string()));
+      }
+      Err(e) => return Err(AppError::Io(e)),
+    };
+    if !metadata.is_dir() {
+      return Err(AppError::Unsupported(format!("not a directory: {prefix}")));
+    }
+    Ok(dir_path)
+  }
+
+  /// Return the sorted `(key, is_dir)` listing for `prefix`, hitting the
+  /// shared cache when fresh and falling back to one `read_dir` pass +
+  /// `quick_is_dir` probes (no per-entry stat) when not.
+  async fn ensure_keys_cached(
+    &self,
+    prefix: &str,
+    dir_path: &Path,
+  ) -> Result<Arc<Vec<(String, bool)>>, AppError> {
+    if let Some(hit) = self.cache.get(prefix) {
+      return Ok(hit);
+    }
+    let mut keys: Vec<(String, bool)> = Vec::new();
+    let mut read = fs::read_dir(dir_path).await?;
+    while let Some(entry) = read.next_entry().await? {
+      let entry_path = entry.path();
+      let is_dir = self.quick_is_dir(&entry, &entry_path).await?;
+      let key = self.relative_key(&entry_path, is_dir);
+      keys.push((key, is_dir));
+    }
+    keys.sort_by(|a, b| a.0.cmp(&b.0));
+    let arc = Arc::new(keys);
+    self.cache.put(prefix, arc.clone());
+    Ok(arc)
+  }
+
+  /// Stat the entries in `slice` and assemble FileEntry values. Only the
+  /// entries we're about to return go through `stat` — the rest of the
+  /// listing stays as cheap (key, is_dir) pairs in the cache. Directories
+  /// don't need a stat (size + mtime are conventionally 0 / null).
+  ///
+  /// Vanished files (mtime stat fails between scan and now) are kept in
+  /// the listing with size=0 / mtime=null so the UI still shows them. The
+  /// next refresh will drop them.
+  async fn materialize_entries(
+    &self,
+    slice: &[(String, bool)],
+  ) -> Result<Vec<FileEntry>, AppError> {
+    let mut out = Vec::with_capacity(slice.len());
+    for (key, is_dir) in slice {
+      let (size, last_modified) = if *is_dir {
+        (0u64, None)
+      } else {
+        let entry_path = self.root.join(key.trim_end_matches('/'));
+        let meta = if self.follow_symlinks {
+          fs::metadata(&entry_path).await
+        } else {
+          fs::symlink_metadata(&entry_path).await
+        };
+        match meta {
+          Ok(m) => (
+            m.len(),
+            m.modified().ok().and_then(system_time_to_unix_string),
+          ),
+          Err(_) => (0, None),
+        }
+      };
+      out.push(FileEntry {
+        key: key.clone(),
+        size,
+        last_modified,
+        is_dir: *is_dir,
+      });
+    }
+    Ok(out)
   }
 
   fn resolve(&self, path: &str) -> Result<PathBuf, AppError> {
@@ -215,84 +367,72 @@ impl StorageBackend for LocalFsBackend {
   }
 
   async fn list_files(&self, prefix: &str, token: Option<String>) -> Result<ListResult, AppError> {
-    let dir_path = self.resolve(prefix)?;
-
-    // The directory we list at must itself be a directory. We follow it if
-    // configured to, so a symlinked root subdir works as expected.
-    let metadata = match self.leaf_metadata(&dir_path).await {
-      Ok(m) => m,
-      Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-        return Err(AppError::NotFound(prefix.to_string()));
-      }
-      Err(e) => return Err(AppError::Io(e)),
-    };
-
-    if !metadata.is_dir() {
-      return Err(AppError::Unsupported(format!("not a directory: {prefix}")));
-    }
-
-    // Keyset cursor: `token` is the last `key` from the previous page.
-    // We only admit entries whose key sorts strictly after it, then keep
-    // a bounded max-heap of the smallest LIST_PAGE_SIZE + 1 candidates.
-    // The +1 element tells us whether another page exists without a
-    // second scan. Tokens are opaque to clients, so changing the encoding
-    // (offset → key) is a backend-internal detail.
+    let dir_path = self.validate_dir(prefix).await?;
+    let keys = self.ensure_keys_cached(prefix, &dir_path).await?;
     let cursor = token.as_deref().unwrap_or("");
-    let cap = LIST_PAGE_SIZE + 1;
-    let mut heap: BinaryHeap<ByKey> = BinaryHeap::with_capacity(cap);
+    let start = keys.partition_point(|(k, _)| k.as_str() <= cursor);
+    let end = (start + LIST_PAGE_SIZE).min(keys.len());
+    let entries = self.materialize_entries(&keys[start..end]).await?;
+    let next_token = if end < keys.len() {
+      entries.last().map(|e| e.key.clone())
+    } else {
+      None
+    };
+    let total_pages = (keys.len() as u64).div_ceil(LIST_PAGE_SIZE as u64);
+    Ok(ListResult {
+      entries,
+      next_token,
+      walked_tokens: Vec::new(),
+      total_pages: Some(total_pages),
+    })
+  }
 
-    let mut read = fs::read_dir(&dir_path).await?;
-    while let Some(entry) = read.next_entry().await? {
-      let entry_path = entry.path();
-      // For each child resolve type with follow/no-follow semantics. On
-      // a dangling symlink with follow=true, fall back to lstat so the
-      // entry stays visible rather than disappearing from the listing.
-      let m = if self.follow_symlinks {
-        match fs::metadata(&entry_path).await {
-          Ok(m) => m,
-          Err(_) => entry.metadata().await?,
-        }
-      } else {
-        entry.metadata().await?
-      };
-      let is_dir = m.is_dir();
-      let key = self.relative_key(&entry_path, is_dir);
-      if key.as_str() <= cursor {
-        continue;
-      }
-      // Skip work for entries the heap would immediately evict.
-      if heap.len() == cap
-        && let Some(top) = heap.peek()
-        && key >= top.0.key
-      {
-        continue;
-      }
-      let (size, last_modified) = if is_dir {
-        (0u64, None)
-      } else {
-        (
-          m.len(),
-          m.modified().ok().and_then(system_time_to_unix_string),
-        )
-      };
-      heap.push(ByKey(FileEntry {
-        key,
-        size,
-        last_modified,
-        is_dir,
-      }));
-      if heap.len() > cap {
-        heap.pop();
-      }
+  async fn list_files_walking(
+    &self,
+    prefix: &str,
+    token: Option<String>,
+    skip: u32,
+  ) -> Result<ListResult, AppError> {
+    // Shares `list_files`'s sorted-keys cache, so walking to any page is
+    // bookkeeping over an already-sorted vec plus one stat pass over the
+    // returned slice — no per-page fs scans.
+    let dir_path = self.validate_dir(prefix).await?;
+    let keys = self.ensure_keys_cached(prefix, &dir_path).await?;
+    let cursor = token.as_deref().unwrap_or("");
+    let start = keys.partition_point(|(k, _)| k.as_str() <= cursor);
+    let total_pages = (keys.len() as u64).div_ceil(LIST_PAGE_SIZE as u64);
+    let after_cursor = &keys[start..];
+
+    if after_cursor.is_empty() {
+      return Ok(ListResult {
+        entries: Vec::new(),
+        next_token: None,
+        walked_tokens: Vec::new(),
+        total_pages: Some(total_pages),
+      });
     }
 
-    // into_sorted_vec yields ascending order by key.
-    let mut entries: Vec<FileEntry> = heap.into_sorted_vec().into_iter().map(|w| w.0).collect();
-    let has_more = entries.len() > LIST_PAGE_SIZE;
-    if has_more {
-      entries.truncate(LIST_PAGE_SIZE);
+    // The last present page might be the target (skip-th) or — when the
+    // listing ran out before the target — a smaller index. walked_tokens
+    // lists one token per earlier page; next_token is set only when we
+    // reached the target *and* there's a key past the page boundary.
+    let last_present_page = (after_cursor.len() - 1) / LIST_PAGE_SIZE;
+    let final_page_idx = last_present_page.min(skip as usize);
+    let final_start = final_page_idx * LIST_PAGE_SIZE;
+    let final_end = (final_start + LIST_PAGE_SIZE).min(after_cursor.len());
+    let entries = self
+      .materialize_entries(&after_cursor[final_start..final_end])
+      .await?;
+
+    let mut walked = Vec::with_capacity(final_page_idx);
+    for i in 0..final_page_idx {
+      // Token of page i+2 (1-indexed) = last key of page i+1.
+      walked.push(after_cursor[(i + 1) * LIST_PAGE_SIZE - 1].0.clone());
     }
-    let next_token = if has_more {
+
+    let reached_target = final_page_idx == skip as usize;
+    let has_more_after_target = reached_target && after_cursor.len() > final_end;
+    let next_token = if has_more_after_target {
       entries.last().map(|e| e.key.clone())
     } else {
       None
@@ -301,6 +441,8 @@ impl StorageBackend for LocalFsBackend {
     Ok(ListResult {
       entries,
       next_token,
+      walked_tokens: walked,
+      total_pages: Some(total_pages),
     })
   }
 
@@ -370,6 +512,176 @@ mod tests {
     let keys: Vec<&str> = res.entries.iter().map(|e| e.key.as_str()).collect();
     assert_eq!(keys, vec!["a.txt", "b.txt", "c.txt"]);
     assert!(res.next_token.is_none());
+    // 3 entries fit in one LIST_PAGE_SIZE-sized page.
+    assert_eq!(res.total_pages, Some(1));
+  }
+
+  #[tokio::test]
+  async fn list_files_total_pages_spans_multiple_pages() {
+    let dir = tempdir();
+    let total = LIST_PAGE_SIZE + LIST_PAGE_SIZE / 2; // 1500
+    for i in 0..total {
+      std::fs::write(dir.join(format!("f-{i:06}.bin")), b"x").unwrap();
+    }
+    let backend = LocalFsBackend::new(&dir, false);
+
+    let first = backend.list_files("", None).await.unwrap();
+    assert_eq!(first.total_pages, Some(2));
+    // Same count surfaces on subsequent pages so the client can render
+    // "Page X / Y" on any page, not just the first.
+    let second = backend
+      .list_files("", first.next_token.clone())
+      .await
+      .unwrap();
+    assert_eq!(second.total_pages, Some(2));
+  }
+
+  #[tokio::test]
+  async fn list_files_walking_matches_repeated_list_files() {
+    // 1500 files → 2 pages. Verify the single-scan override produces the
+    // same entries + tokens the naïve "call list_files twice" path would,
+    // but in one scan instead of two.
+    let dir = tempdir();
+    let total = LIST_PAGE_SIZE + LIST_PAGE_SIZE / 2;
+    for i in 0..total {
+      std::fs::write(dir.join(format!("f-{i:06}.bin")), b"x").unwrap();
+    }
+    let backend = LocalFsBackend::new(&dir, false);
+
+    // Baseline: walk via list_files twice.
+    let p1 = backend.list_files("", None).await.unwrap();
+    let p2 = backend.list_files("", p1.next_token.clone()).await.unwrap();
+
+    // Same starting state, single shot.
+    let walked = backend.list_files_walking("", None, 1).await.unwrap();
+    assert_eq!(
+      walked.entries.iter().map(|e| &e.key).collect::<Vec<_>>(),
+      p2.entries.iter().map(|e| &e.key).collect::<Vec<_>>(),
+    );
+    assert_eq!(walked.next_token, p2.next_token);
+    assert_eq!(walked.walked_tokens, vec![p1.next_token.clone().unwrap()],);
+    assert_eq!(walked.total_pages, Some(2));
+  }
+
+  #[tokio::test]
+  async fn list_files_walking_skip_zero_matches_list_files() {
+    let dir = tempdir();
+    seed_files(&dir, &["a.txt", "b.txt", "c.txt"]);
+    let backend = LocalFsBackend::new(&dir, false);
+
+    let one_shot = backend.list_files("", None).await.unwrap();
+    let walked = backend.list_files_walking("", None, 0).await.unwrap();
+    assert_eq!(
+      walked.entries.iter().map(|e| &e.key).collect::<Vec<_>>(),
+      one_shot.entries.iter().map(|e| &e.key).collect::<Vec<_>>(),
+    );
+    assert_eq!(walked.next_token, one_shot.next_token);
+    assert!(walked.walked_tokens.is_empty());
+    assert_eq!(walked.total_pages, one_shot.total_pages);
+  }
+
+  #[tokio::test]
+  async fn list_files_walking_truncates_when_listing_ends_early() {
+    // 1500 files → 2 pages. Asking to skip 5 should yield the last page
+    // (page 2) with walked_tokens = [token-of-page-1] (truncated).
+    let dir = tempdir();
+    let total = LIST_PAGE_SIZE + LIST_PAGE_SIZE / 2;
+    for i in 0..total {
+      std::fs::write(dir.join(format!("f-{i:06}.bin")), b"x").unwrap();
+    }
+    let backend = LocalFsBackend::new(&dir, false);
+    let p1_token = backend.list_files("", None).await.unwrap().next_token;
+
+    let walked = backend.list_files_walking("", None, 5).await.unwrap();
+    // Last actual page is page 2, half-full.
+    assert_eq!(walked.entries.len(), LIST_PAGE_SIZE / 2);
+    assert!(walked.next_token.is_none());
+    // We only walked off the end of one real page before running out.
+    assert_eq!(walked.walked_tokens.len(), 1);
+    assert_eq!(walked.walked_tokens[0], p1_token.unwrap());
+    assert_eq!(walked.total_pages, Some(2));
+  }
+
+  #[tokio::test]
+  async fn list_files_total_pages_zero_for_empty_dir() {
+    let dir = tempdir();
+    let backend = LocalFsBackend::new(&dir, false);
+
+    let res = backend.list_files("", None).await.unwrap();
+    assert!(res.entries.is_empty());
+    assert_eq!(res.total_pages, Some(0));
+  }
+
+  #[tokio::test]
+  async fn listing_cache_serves_a_second_call_from_memory() {
+    // The first call scans the dir and primes the cache; the second call
+    // shouldn't touch the dir at all. We verify that by mutating the dir
+    // *between* the two calls — the second call's entries should still
+    // reflect the pre-mutation state (cache hit), proving the second call
+    // never re-scanned. This is a stronger assertion than just comparing
+    // results, which would pass even if both calls re-scanned independently.
+    let dir = tempdir();
+    seed_files(&dir, &["a.txt", "b.txt", "c.txt"]);
+    let backend = LocalFsBackend::new(&dir, false);
+
+    let first = backend.list_files("", None).await.unwrap();
+    assert_eq!(first.entries.len(), 3);
+
+    // Add a file *after* the cache was warmed.
+    std::fs::write(dir.join("d.txt"), b"x").unwrap();
+
+    let second = backend.list_files("", None).await.unwrap();
+    // Cache hit: still 3 entries, no `d.txt`.
+    assert_eq!(second.entries.len(), 3);
+    assert!(second.entries.iter().all(|e| e.key != "d.txt"));
+  }
+
+  #[tokio::test]
+  async fn listing_cache_shared_between_list_files_and_walking() {
+    // `ensure_keys_cached` is used by both APIs. Warming the cache via
+    // `list_files` should let `list_files_walking` reuse it — confirmed
+    // by mutating the dir between the two and observing the walk uses the
+    // pre-mutation snapshot.
+    let dir = tempdir();
+    let total = LIST_PAGE_SIZE + LIST_PAGE_SIZE / 2;
+    for i in 0..total {
+      std::fs::write(dir.join(format!("f-{i:06}.bin")), b"x").unwrap();
+    }
+    let backend = LocalFsBackend::new(&dir, false);
+
+    let _warm = backend.list_files("", None).await.unwrap();
+    // Drop a single file to invalidate the snapshot for the would-be live
+    // listing. The cache still holds the original 1500-entry view.
+    std::fs::remove_file(dir.join("f-000000.bin")).unwrap();
+
+    let walked = backend.list_files_walking("", None, 1).await.unwrap();
+    // Total pages still derives from the cached 1500 entries, not the
+    // current 1499.
+    assert_eq!(walked.total_pages, Some(2));
+    assert_eq!(walked.walked_tokens.len(), 1);
+  }
+
+  #[tokio::test]
+  async fn listing_cache_each_prefix_is_independent() {
+    // Two different prefixes don't share cache state. Mutating one mustn't
+    // shadow the other.
+    let dir = tempdir();
+    std::fs::create_dir_all(dir.join("a")).unwrap();
+    std::fs::create_dir_all(dir.join("b")).unwrap();
+    std::fs::write(dir.join("a").join("x.txt"), b"x").unwrap();
+    let backend = LocalFsBackend::new(&dir, false);
+
+    // Warm cache for both prefixes.
+    let a1 = backend.list_files("a/", None).await.unwrap();
+    let b1 = backend.list_files("b/", None).await.unwrap();
+    assert_eq!(a1.entries.len(), 1);
+    assert!(b1.entries.is_empty());
+
+    // Add a file under `b/` — `a`'s cache and `b`'s cache are separate so
+    // `a`'s next call still hits its own (unchanged) snapshot.
+    std::fs::write(dir.join("b").join("y.txt"), b"y").unwrap();
+    let a2 = backend.list_files("a/", None).await.unwrap();
+    assert_eq!(a2.entries.len(), 1);
   }
 
   #[tokio::test]

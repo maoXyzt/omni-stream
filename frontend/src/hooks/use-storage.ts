@@ -30,10 +30,15 @@ export function useListFiles(
     queryKey: ['list', storage ?? null, prefix, pageToken ?? null] as const,
     queryFn: () => listFiles(prefix, pageToken, storage),
     placeholderData: keepPreviousData,
-    // 5 minutes: long enough that navigating between sibling dirs (and the
-    // sidebar's parent-dir read) reuses the cache without refetching. Short
-    // enough that a user returning after a break sees a fresh listing.
+    // 5 minutes: long enough that paging within a prefix and re-expanding
+    // sidebar nodes reuses the cache without refetching, short enough that
+    // a user returning after a break sees a fresh listing.
     staleTime: 5 * 60_000,
+    // Refetch when the tab regains focus, but only if the data is already
+    // stale (cheap by construction — staleTime gates it). Catches the case
+    // where the user updates files in another tool and tabs back expecting
+    // to see the change. Overrides the global default (`false` in App).
+    refetchOnWindowFocus: true,
     enabled: storage !== undefined,
   })
 }

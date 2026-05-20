@@ -17,6 +17,7 @@ export type Widget =
   | 'audio'
   | 'link'
   | 'markdown'
+  | 'text'
 
 export type ContainerKind = 'flow' | 'row' | 'column' | 'grid'
 
@@ -78,12 +79,23 @@ const WIDGETS = new Set<string>([
   'audio',
   'link',
   'markdown',
+  'text',
 ])
 
 const CONTAINER_KINDS = new Set<string>(['flow', 'row', 'column', 'grid'])
 // Widgets that produce a URL/path from the cell value via the `src` template.
-const SRC_WIDGETS = new Set<string>(['image', 'video', 'audio', 'link'])
-const MAX_HEIGHT_WIDGETS = new Set<string>(['default', 'highlight', 'markdown'])
+// `text` joins the media widgets because its cell value is also a storage
+// path (resolved the same way), the body just happens to be UTF-8 text.
+const SRC_WIDGETS = new Set<string>(['image', 'video', 'audio', 'link', 'text'])
+const MAX_HEIGHT_WIDGETS = new Set<string>([
+  'default',
+  'highlight',
+  'markdown',
+  'text',
+])
+// Widgets that accept the `lang` highlight hint. Required on `highlight`,
+// optional on `text` (auto-detected from the resolved filename when absent).
+const LANG_WIDGETS = new Set<string>(['highlight', 'text'])
 
 const ATOM_ALLOWED = new Set([
   'from',
@@ -300,8 +312,11 @@ function buildAtom(obj: Record<string, unknown>, path: string): AtomNode {
   }
 
   if ('lang' in obj) {
-    if (show !== 'highlight') {
-      throw new SchemaError(path, `"lang" only allowed on show="highlight"`)
+    if (!LANG_WIDGETS.has(show)) {
+      throw new SchemaError(
+        path,
+        `"lang" only allowed on show="highlight" or show="text"`,
+      )
     }
     if (typeof obj.lang !== 'string' || obj.lang.length === 0) {
       throw new SchemaError(path, '"lang" must be a non-empty string')
