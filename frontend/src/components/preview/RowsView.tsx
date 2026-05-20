@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { AlertCircle, Loader2, RotateCw, Settings2 } from 'lucide-react'
+import { toast } from 'sonner'
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -13,6 +15,19 @@ import { RulesDialog } from '@/components/preview/rows-rules-dialog'
 
 const ROWS_PAGE = 20
 
+// URL param name for the current page. 1-indexed in the URL (human-friendly:
+// `?page=3` means page 3), 0-indexed internally. Omitted entirely when on
+// page 1 so default URLs stay clean.
+const PAGE_PARAM = 'page'
+
+function readPageIndex(sp: URLSearchParams): number {
+  const raw = sp.get(PAGE_PARAM)
+  if (!raw) return 0
+  const n = Number.parseInt(raw, 10)
+  if (!Number.isFinite(n) || n < 1) return 0
+  return n - 1
+}
+
 interface RowsViewProps {
   fileKey: string
   source: RowsSource
@@ -24,16 +39,51 @@ export function RowsView({ fileKey, source, storage }: RowsViewProps) {
   const renderCtx = useMemo(() => ({ fileKey, storage }), [fileKey, storage])
   const columns = source.columns
   const [dialogOpen, setDialogOpen] = useState(false)
-  const [pageIndex, setPageIndex] = useState(0)
+  // pageIndex lives in `?page=N` so reloads + shared links land on the
+  // same page. Navigating to a different file path drops the param
+  // automatically (it's part of the URL, not a hash), so file changes
+  // don't need an explicit reset.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const pageIndex = readPageIndex(searchParams)
+  const setPageIndex = useCallback(
+    (next: number | ((prev: number) => number)) => {
+      setSearchParams(
+        (sp) => {
+          const params = new URLSearchParams(sp)
+          // Read the current value out of the URL rather than closing
+          // over `pageIndex` — keeps `setPageIndex(p => p + 1)` correct
+          // across rapid back-to-back clicks where the closure would be
+          // stale by the second one.
+          const current = readPageIndex(params)
+          const resolved =
+            typeof next === 'function'
+              ? (next as (p: number) => number)(current)
+              : next
+          const target = Math.max(0, resolved)
+          if (target === 0) {
+            params.delete(PAGE_PARAM)
+          } else {
+            params.set(PAGE_PARAM, String(target + 1))
+          }
+          return params
+        },
+        // Pagination is in-view navigation — the back button should
+        // leave the file, not page back through history one step at a
+        // time. Same `replace` choice the rules editor makes.
+        { replace: true },
+      )
+    },
+    [setSearchParams],
+  )
   // Streaming sources surface the row count only through readRows results,
   // not the static `source.totalRows` snapshot. Lock the latest non-null
   // value in here so flipping back to a cached page (whose snapshot might
   // pre-date the count being known) doesn't lose the freshly-learned total.
   const [knownTotal, setKnownTotal] = useState<number | null>(source.totalRows)
 
-  // Reset page + memoised total when the user opens a different file.
+  // Reset memoised total when the user opens a different file. pageIndex
+  // resets via the URL change so it doesn't need an explicit reset here.
   useEffect(() => {
-    setPageIndex(0)
     setKnownTotal(source.totalRows)
   }, [storage, fileKey, source])
 
@@ -82,6 +132,35 @@ export function RowsView({ fileKey, source, storage }: RowsViewProps) {
     : totalRows !== null
       ? (pageIndex + 1) * ROWS_PAGE < totalRows
       : true
+
+  // Snap-back fallback for an URL ?page= that overshoots the actual data
+  // (shared link, bookmark, or a streaming source whose stream resolved
+  // smaller than the URL anticipated). Wait for the fetch to settle and
+  // the total to be known, then redirect to the last valid page and tell
+  // the user — silent snap would leave them wondering why their number
+  // got rewritten. Mirrors the FileList pager's clamp-on-EOF UX.
+  useEffect(() => {
+    if (rowsQuery.isFetching) return
+    // Streaming source still in flight — readRows hasn't surfaced a
+    // total yet. The next page render will re-trigger this effect once
+    // the stream drains and totalRows lands in `knownTotal`.
+    if (knownTotal === null) return
+    if (pageIndex === 0) return
+    if (rows.length > 0) return
+    const lastPageIndex =
+      knownTotal === 0
+        ? 0
+        : Math.max(0, Math.ceil(knownTotal / ROWS_PAGE) - 1)
+    if (pageIndex === lastPageIndex) return
+    if (knownTotal === 0) {
+      toast.info(`Page ${pageIndex + 1} doesn't exist — file is empty.`)
+    } else {
+      toast.info(
+        `Page ${pageIndex + 1} doesn't exist — showing last page (${lastPageIndex + 1}).`,
+      )
+    }
+    setPageIndex(lastPageIndex)
+  }, [rowsQuery.isFetching, knownTotal, rows.length, pageIndex, setPageIndex])
 
   const retry = () => {
     void rowsQuery.refetch()

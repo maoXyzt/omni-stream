@@ -5,6 +5,7 @@
 
 import { useEffect, useState } from 'react'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -95,8 +96,17 @@ function PageJumpInput({
       setDraft(String(pageIndex + 1))
       return
     }
-    // Streaming sources have no known cap; allow any positive integer and
-    // rely on the readRows side to clamp / return empty for over-shoots.
+    // Surface a toast when we clamp a user-typed value past the known
+    // total — silently snapping the input would leave them wondering
+    // why "Enter" didn't take them where they asked. Streaming sources
+    // (pageCount null) skip this branch and rely on the consumer's
+    // post-load fallback, since "out of range" can't be known until the
+    // stream resolves.
+    if (pageCount !== null && parsed > pageCount) {
+      toast.info(
+        `Page ${parsed.toLocaleString()} doesn't exist — only ${pageCount.toLocaleString()} page${pageCount === 1 ? '' : 's'} available.`,
+      )
+    }
     const upper = pageCount ?? Number.MAX_SAFE_INTEGER
     const target = Math.min(upper, Math.max(1, parsed)) - 1
     if (target !== pageIndex) onJump(target)
