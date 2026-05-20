@@ -24,6 +24,7 @@
 * **安全性**: 外部输入（如 `path` 参数）必须经过安全清理，防止“路径遍历” (Path Traversal) 攻击。
 * **日志**: 使用 `tracing`。在处理 API 请求时，必须使用 `instrument` 宏追踪请求生命周期。
 * **Clippy 校验**: 修改 Rust 代码后，必须通过 `cargo clippy` 校验（建议：`cargo clippy --all-targets -- -D warnings`）。
+* **提交前格式化**: 若 `git commit` 包含 Rust 代码变更，必须先执行 `cargo fmt` 进行格式化。
 
 ## 4. 任务处理规范
 
