@@ -40,8 +40,13 @@ enabled = false
 #   access_key,
 #   secret_key        Static credentials. Prefer env-injected values over
 #                     committing plaintext here.
-#   region            Optional. Defaults to "us-east-1", which satisfies SigV4
-#                     for MinIO / LocalStack and AWS us-east-1 buckets.
+#   region            Optional. Defaults to "us-east-1". Set this when:
+#                     (1) the target AWS bucket lives outside us-east-1 —
+#                         SigV4 has to match the bucket's actual region or
+#                         AWS returns AuthorizationHeaderMalformed; or
+#                     (2) an S3-compatible gateway validates the region
+#                         strictly (most don't — MinIO / LocalStack accept
+#                         any value, and the us-east-1 default is enough).
 #   force_path_style  Default true. Path-style URL = `endpoint/bucket/key`,
 #                     used by MinIO / LocalStack / Ceph. Set false to switch to
 #                     virtual-host style (`bucket.endpoint/key`), required by
