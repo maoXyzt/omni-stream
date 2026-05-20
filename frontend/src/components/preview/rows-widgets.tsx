@@ -20,6 +20,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { thumbUrl } from '@/api/storage'
 import { ImagePreview } from '@/components/preview/ImagePreview'
 import { formatCell, formatCellExpanded } from '@/lib/parquet'
 import { resolveSrc, type SrcResolution } from '@/lib/rows-paths'
@@ -93,12 +94,30 @@ interface MediaProps {
   ctx: RenderContext
 }
 
+// Width hint passed to the backend thumbnail pipeline. The widget's
+// rendered `<img>` is capped at `max-h-96` (~384 px); 640 px serves
+// crisp on retina and stays well under the original byte cost for
+// typical photos. Same pipeline FileTile uses, just sized for cards
+// rather than 1:1 grid squares.
+const IMAGE_THUMB_WIDTH = 640
+// Formats the backend's thumbnail pipeline either can't decode or
+// wouldn't shrink: SVG is its own thumbnail, ICO/AVIF would 415 from the
+// server. Match FileTile so behaviour stays consistent across the app.
+const IMAGE_THUMB_SKIP_EXTS = new Set(['svg', 'ico', 'avif'])
+
+function shouldThumb(key: string | undefined): boolean {
+  if (!key) return false
+  const ext = key.replace(/\/+$/, '').split('.').pop()?.toLowerCase()
+  return !!ext && !IMAGE_THUMB_SKIP_EXTS.has(ext)
+}
+
 export function WidgetImage({ value, src, ctx }: MediaProps) {
   const r = useMemo(
     () => resolveSrc(src, value, ctx.fileKey, ctx.storage),
     [src, value, ctx.fileKey, ctx.storage],
   )
   const url = r.ok ? r.url : ''
+  const key = r.ok ? r.key : undefined
   const [failed, setFailed] = useState(false)
   const [lightboxOpen, setLightboxOpen] = useState(false)
   // `everLoaded` keeps the initial render free of a spinner — the
@@ -109,9 +128,14 @@ export function WidgetImage({ value, src, ctx }: MediaProps) {
   // takes a beat to come down.
   const [everLoaded, setEverLoaded] = useState(false)
   const [loading, setLoading] = useState(false)
+  // Thumb-first, with fallback to the full proxy URL if the backend
+  // can't serve a thumbnail (404 / 415 / generator error). Mirrors
+  // FileTile's `usingFallback` flag.
+  const [usingFallback, setUsingFallback] = useState(false)
   useEffect(() => {
     setFailed(false)
     setLightboxOpen(false)
+    setUsingFallback(false)
     setLoading((prev) => (everLoaded ? true : prev))
     // Intentionally exclude `everLoaded` from deps: it's a one-shot latch
     // that should not retrigger the reset when it flips.
@@ -128,6 +152,15 @@ export function WidgetImage({ value, src, ctx }: MediaProps) {
       />
     )
   }
+  // Thumb only when the resolved URL goes through our storage proxy
+  // (`r.key` is set) AND the extension is one the thumb pipeline
+  // handles. External http(s) URLs and SVG/ICO/AVIF use `r.url`
+  // directly.
+  const useThumb = shouldThumb(key)
+  const displaySrc =
+    useThumb && !usingFallback && key !== undefined
+      ? thumbUrl(key, { storage: ctx.storage, width: IMAGE_THUMB_WIDTH })
+      : r.url
   return (
     <>
       {/* Wrapping the image in a real <button> rather than an onClick <div>
@@ -141,13 +174,21 @@ export function WidgetImage({ value, src, ctx }: MediaProps) {
         className="relative block w-fit overflow-hidden rounded-md border bg-muted/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         <img
-          src={r.url}
+          src={displaySrc}
           alt={resolutionDetail(r)}
           onLoad={() => {
             setEverLoaded(true)
             setLoading(false)
           }}
           onError={() => {
+            // First failure on the thumb URL — swap to the original via
+            // proxy. The src change re-fires onLoad / onError; keep
+            // `loading` true so the spinner stays up through the swap.
+            if (useThumb && !usingFallback) {
+              setUsingFallback(true)
+              setLoading(true)
+              return
+            }
             setLoading(false)
             setFailed(true)
           }}
