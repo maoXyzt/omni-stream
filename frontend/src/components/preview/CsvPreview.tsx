@@ -236,6 +236,8 @@ export function CsvPreview({ fileKey, src, storage }: PreviewerProps) {
           columns={columns}
           rows={rows}
           loading={rowsFirstLoading}
+          pageIndex={pageIndex}
+          pageSize={PAGE_SIZE}
         />
       )}
     </div>
@@ -318,6 +320,11 @@ interface DataTableProps {
   columns: ColumnInfo[]
   rows: Record<string, unknown>[]
   loading: boolean
+  /// Zero-based page index. Combined with `pageSize` so the row counter,
+  /// React keys, and the cell-expansion dialog all reference the row's
+  /// position in the full file rather than its position within this page.
+  pageIndex: number
+  pageSize: number
 }
 
 interface ExpandedCell {
@@ -326,7 +333,7 @@ interface ExpandedCell {
   text: string
 }
 
-function DataTable({ columns, rows, loading }: DataTableProps) {
+function DataTable({ columns, rows, loading, pageIndex, pageSize }: DataTableProps) {
   // Single dialog at the table level handles cell expansion for every cell
   // (vs. one Dialog per cell, which would be thousands of unmounted
   // dialogs).
@@ -368,30 +375,38 @@ function DataTable({ columns, rows, loading }: DataTableProps) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {rows.map((row, i) => (
-              <TableRow key={i} className="odd:bg-muted/30">
-                <TableCell className="bg-muted/40 text-right align-top text-muted-foreground tabular-nums">
-                  {i + 1}
-                </TableCell>
-                {columns.map((c) => {
-                  const value = row[c.name]
-                  const text = typeof value === 'string' ? value : String(value ?? '')
-                  return (
-                    <DataCell
-                      key={c.name}
-                      text={text}
-                      onExpand={() =>
-                        setExpanded({
-                          rowIndex: i,
-                          column: c.name,
-                          text,
-                        })
-                      }
-                    />
-                  )
-                })}
-              </TableRow>
-            ))}
+            {rows.map((row, i) => {
+              // Absolute index keeps row numbering ("row 101" on page 2,
+              // not restarting at 1), gives stable React keys across
+              // paginations, and lets the cell-expansion dialog report
+              // the row's actual position in the file.
+              const absoluteIndex = pageIndex * pageSize + i
+              return (
+                <TableRow key={absoluteIndex} className="odd:bg-muted/30">
+                  <TableCell className="bg-muted/40 text-right align-top text-muted-foreground tabular-nums">
+                    {absoluteIndex + 1}
+                  </TableCell>
+                  {columns.map((c) => {
+                    const value = row[c.name]
+                    const text =
+                      typeof value === 'string' ? value : String(value ?? '')
+                    return (
+                      <DataCell
+                        key={c.name}
+                        text={text}
+                        onExpand={() =>
+                          setExpanded({
+                            rowIndex: absoluteIndex,
+                            column: c.name,
+                            text,
+                          })
+                        }
+                      />
+                    )
+                  })}
+                </TableRow>
+              )
+            })}
           </TableBody>
         </Table>
       </div>

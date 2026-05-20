@@ -318,6 +318,8 @@ export function ParquetPreview({ fileKey, src, storage }: PreviewerProps) {
               columns={columns}
               rows={rows}
               loading={rowsFirstLoading}
+              pageIndex={clampedPage}
+              pageSize={PAGE_SIZE}
             />
           )}
         </TabsContent>
@@ -498,6 +500,11 @@ interface DataTableProps {
   columns: ParquetColumnInfo[]
   rows: Record<string, unknown>[]
   loading: boolean
+  /// Zero-based page index. Combined with `pageSize` so the row counter,
+  /// React keys, and the cell-expansion dialog all reference the row's
+  /// position in the full file rather than its position within this page.
+  pageIndex: number
+  pageSize: number
 }
 
 interface ExpandedCell {
@@ -506,7 +513,7 @@ interface ExpandedCell {
   text: string
 }
 
-function DataTable({ columns, rows, loading }: DataTableProps) {
+function DataTable({ columns, rows, loading, pageIndex, pageSize }: DataTableProps) {
   // Single dialog instance for the whole table — beats wiring up Dialog +
   // state inside every cell (which would be hundreds of unmounted dialogs).
   const [expanded, setExpanded] = useState<ExpandedCell | null>(null)
@@ -557,13 +564,19 @@ function DataTable({ columns, rows, loading }: DataTableProps) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {rows.map((row, i) => (
+            {rows.map((row, i) => {
+              // Absolute index keeps row numbering ("row 101" on page 2,
+              // not restarting at 1), gives stable React keys across
+              // paginations, and lets the cell-expansion dialog report
+              // the row's actual position in the file.
+              const absoluteIndex = pageIndex * pageSize + i
+              return (
               // Zebra striping (odd rows tinted) makes long-row scanning
               // dramatically easier. `hover:` wins thanks to pseudo-class
               // precedence in browsers; explicit class kept on cells.
-              <TableRow key={i} className="odd:bg-muted/30">
+              <TableRow key={absoluteIndex} className="odd:bg-muted/30">
                 <TableCell className="bg-muted/40 text-right align-top text-muted-foreground tabular-nums">
-                  {i + 1}
+                  {absoluteIndex + 1}
                 </TableCell>
                 {columns.map((c) => {
                   const value = row[c.name]
@@ -575,7 +588,7 @@ function DataTable({ columns, rows, loading }: DataTableProps) {
                       text={text}
                       onExpand={() =>
                         setExpanded({
-                          rowIndex: i,
+                          rowIndex: absoluteIndex,
                           column: c.name,
                           // Dialog gets the pretty-printed JSON for composites
                           // so users see the full nested structure instead of
@@ -587,7 +600,8 @@ function DataTable({ columns, rows, loading }: DataTableProps) {
                   )
                 })}
               </TableRow>
-            ))}
+              )
+            })}
           </TableBody>
         </Table>
       </div>
