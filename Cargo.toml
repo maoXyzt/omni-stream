@@ -21,6 +21,7 @@ include = [
     "/Cargo.lock",
     "/pyproject.toml",
     "/README.md",
+    "/README-en.md",
     "/LICENSE-MIT",
     "/LICENSE-APACHE",
     "/config.example.toml",
