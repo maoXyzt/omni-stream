@@ -45,11 +45,76 @@ import { type Node, parseRules } from '@/lib/rows-schema'
 import { type ColumnInfo } from '@/lib/rows-source'
 import { cn } from '@/lib/utils'
 
+// Used only when the file has no detectable columns (corrupted schema, or
+// the dialog opened before a source resolved). Real templates are derived
+// from `columns` — see `defaultTemplateFor` below.
 const EXAMPLE_RULES = `[
   "prompt",
   { "image": "image" },
   { "image": "image_edit", "src": "../edits/{value}" }
 ]`
+
+// Substring hints used to map a column name to a widget. Conservative on
+// purpose — false positives are worse than no inference (a "url" column
+// rendered as a clickable link is fine; a "description" column rendered
+// as a link 404s). Order doesn't matter; the first match wins.
+const NAME_HINTS: ReadonlyArray<{ pattern: RegExp; widget: 'image' | 'video' | 'audio' | 'link' | 'markdown' }> = [
+  {
+    widget: 'image',
+    pattern: /(^|_)(image|img|thumb(?:nail)?|picture|photo|avatar|cover|poster|icon)(_|s?$)/i,
+  },
+  { widget: 'video', pattern: /(^|_)(video|clip|movie)(_|s?$)/i },
+  { widget: 'audio', pattern: /(^|_)(audio|sound|voice|music|mp3|wav)(_|s?$)/i },
+  { widget: 'link', pattern: /(^|_)(url|link|href|uri|homepage|website)(_|s?$)/i },
+  { widget: 'markdown', pattern: /(^|_)(markdown|readme)(_|s?$)/i },
+]
+
+// LIST-typed columns get a `.[*]` fan-out so every element renders. Covers
+// parquet's `LIST<…>` schema strings and the inferred `array` type that the
+// jsonl/json sources emit. Anything else (STRUCT, scalar) renders as-is.
+function isListType(type: string): boolean {
+  return /^list\b/i.test(type) || /\barray\b/i.test(type)
+}
+
+// Selector form of a column name. Plain identifiers can be inserted bare;
+// names with dots / spaces / other punctuation need backtick-wrapping so
+// the selector parser doesn't try to walk into a nested field. Names
+// containing a literal backtick are exotic enough that we punt — the
+// generated template will fail validation and the status line will tell
+// the user to wrap that one column themselves.
+function selectorFor(col: string): string {
+  if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(col)) return col
+  if (!col.includes('`')) return `\`${col}\``
+  return col
+}
+
+/// Best-effort default template: one node per column, widget inferred from
+/// the column name, LIST types fanned out via `.[*]`. Emits sugar JSON
+/// (matches how a human would write it) and goes through the same
+/// `JSON.stringify(_, null, 2)` formatter as saved rules so the output is
+/// idempotent — Save → reopen → no "modified" indicator.
+function defaultTemplateFor(columns: ColumnInfo[]): string {
+  if (columns.length === 0) return EXAMPLE_RULES
+  const nodes = columns.map((c) => {
+    const list = isListType(c.type)
+    const selector = selectorFor(c.name) + (list ? '.[*]' : '')
+    const widget = NAME_HINTS.find((h) => h.pattern.test(c.name))?.widget
+    if (!widget) {
+      // Sugar: bare string = default-widget atom on this selector.
+      return selector
+    }
+    const node: Record<string, unknown> = { [widget]: selector }
+    // Lists of images render best as a grid; a long horizontal flow row
+    // either truncates or wraps awkwardly. 3 columns is a reasonable
+    // starting point users tweak.
+    if (list && widget === 'image') {
+      node.layout = 'grid'
+      node.columns = 3
+    }
+    return node
+  })
+  return JSON.stringify(nodes, null, 2)
+}
 
 interface Template {
   label: string
@@ -127,8 +192,11 @@ export function RulesDialog({
   onSave,
 }: RulesDialogProps) {
   const seededDraft = useMemo(
-    () => (rules.length > 0 ? JSON.stringify(rules, null, 2) : EXAMPLE_RULES),
-    [rules],
+    () =>
+      rules.length > 0
+        ? JSON.stringify(rules, null, 2)
+        : defaultTemplateFor(columns),
+    [rules, columns],
   )
   const [draft, setDraft] = useState(seededDraft)
   // Reseed when the dialog reopens — the saved rules might have changed in
