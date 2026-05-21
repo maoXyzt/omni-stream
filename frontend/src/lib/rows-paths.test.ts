@@ -123,6 +123,7 @@ describe('resolveSrc — template handling', () => {
       ok: true,
       url: '/api/proxy/datasets/imagenet/00001.png',
       key: 'datasets/imagenet/00001.png',
+      rendered: '00001.png',
     })
   })
 
@@ -132,6 +133,7 @@ describe('resolveSrc — template handling', () => {
       ok: true,
       url: '/api/proxy/datasets/images/00001.png',
       key: 'datasets/images/00001.png',
+      rendered: '../images/00001.png',
     })
   })
 
@@ -141,6 +143,7 @@ describe('resolveSrc — template handling', () => {
       ok: true,
       url: '/api/proxy/static/logo.png',
       key: 'static/logo.png',
+      rendered: '/static/logo.png',
     })
   })
 
@@ -154,6 +157,7 @@ describe('resolveSrc — template handling', () => {
     expect(r).toEqual({
       ok: true,
       url: 'https://cdn.example.com/abc123.png',
+      rendered: 'https://cdn.example.com/abc123.png',
     })
   })
 
@@ -164,7 +168,11 @@ describe('resolveSrc — template handling', () => {
       FILE,
       undefined,
     )
-    expect(r).toEqual({ ok: true, url: 'https://example.com/img.png' })
+    expect(r).toEqual({
+      ok: true,
+      url: 'https://example.com/img.png',
+      rendered: 'https://example.com/img.png',
+    })
   })
 
   it('missing cell value with {value} template → error', () => {
@@ -178,6 +186,7 @@ describe('resolveSrc — template handling', () => {
       ok: true,
       url: '/api/proxy/static/logo.png',
       key: 'static/logo.png',
+      rendered: '/static/logo.png',
     })
   })
 
@@ -187,6 +196,7 @@ describe('resolveSrc — template handling', () => {
       ok: true,
       url: '/api/proxy/datasets/imagenet/a.png',
       key: 'datasets/imagenet/a.png',
+      rendered: 'a.png',
     })
   })
 
@@ -201,6 +211,7 @@ describe('resolveSrc — template handling', () => {
       ok: true,
       url: '/api/proxy/foo/bar.png?storage=mybucket',
       key: 'foo/bar.png',
+      rendered: '/foo/bar.png',
     })
   })
 
@@ -210,6 +221,7 @@ describe('resolveSrc — template handling', () => {
       ok: true,
       url: '/api/proxy/datasets/imagenet/a.png?storage=mybucket',
       key: 'datasets/imagenet/a.png',
+      rendered: 'a.png',
     })
   })
 
@@ -220,6 +232,7 @@ describe('resolveSrc — template handling', () => {
       ok: true,
       url: '/api/proxy/datasets/imagenet/abc/thumb-abc',
       key: 'datasets/imagenet/abc/thumb-abc',
+      rendered: 'abc/thumb-abc',
     })
   })
 

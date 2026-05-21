@@ -353,15 +353,20 @@ export function WidgetLink({ value, src, ctx }: MediaProps) {
     [src, value, ctx.fileKey, ctx.storage],
   )
   if (!r.ok) return <MediaError icon={LinkIcon} reason={r.reason} />
+  // Visible label is the rendered `src` template (cell value substituted in,
+  // verbatim otherwise) — that's what the rule author wrote and what they're
+  // looking at when scanning a row. `href` stays the resolved proxy/CDN URL
+  // so the click still navigates to the file.
   return (
     <a
       href={r.url}
       target="_blank"
       rel="noopener noreferrer"
+      title={r.rendered}
       className="inline-flex max-w-full items-center gap-1 break-all rounded-md border bg-muted/30 px-3 py-2 font-mono text-xs underline-offset-2 hover:underline"
     >
       <LinkIcon className="size-3.5 shrink-0" />
-      <span className="truncate">{r.url}</span>
+      <span className="truncate">{r.rendered}</span>
     </a>
   )
 }
@@ -393,5 +398,8 @@ function MediaError({ icon: Icon, reason, detail }: MediaErrorProps) {
 }
 
 function resolutionDetail(r: SrcResolution): string {
-  return r.ok ? r.url : ''
+  // Surface the user-written src template (with `{value}` substituted) rather
+  // than the resolved proxy URL — that's the form the rule author recognises
+  // when scanning a card.
+  return r.ok ? r.rendered : ''
 }
