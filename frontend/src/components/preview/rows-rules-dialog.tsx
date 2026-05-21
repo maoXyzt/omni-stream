@@ -15,6 +15,7 @@
 //     (wrapped in backticks when the column has special chars).
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import JSON5 from 'json5'
 import {
   AlertCircle,
   Check,
@@ -207,18 +208,23 @@ export function RulesDialog({
   }, [open, seededDraft])
 
   // Live validation: every keystroke parses + validates. Cheap enough that
-  // running on every change is fine (parseRules on a typical config is sub-ms).
+  // running on every change is fine (parseRules on a typical config is
+  // sub-ms). We accept JSON5 (comments, trailing commas, unquoted keys,
+  // single-quoted strings) — strict JSON still parses since JSON5 is a
+  // superset. Save canonicalises back to plain JSON before storing in the
+  // URL, so the JSON5 conveniences are editor-time helpers only and any
+  // comments are lost on save.
   const validation = useMemo<Validation>(() => {
     if (draft.trim().length === 0) {
       return { ok: false, error: 'empty config' }
     }
     let parsed: unknown
     try {
-      parsed = JSON.parse(draft)
+      parsed = JSON5.parse(draft)
     } catch (err) {
       return {
         ok: false,
-        error: `invalid JSON: ${err instanceof Error ? err.message : String(err)}`,
+        error: `invalid JSON5: ${err instanceof Error ? err.message : String(err)}`,
       }
     }
     const result = parseRules(parsed)
@@ -264,10 +270,14 @@ export function RulesDialog({
 
   const handleFormat = useCallback(() => {
     try {
-      const parsed = JSON.parse(draft)
+      // Parse with JSON5 (accept whatever the editor accepts), emit
+      // canonical JSON — Format gives the user a preview of what Save
+      // will actually persist, so comments / trailing commas / unquoted
+      // keys drop here just like on Save.
+      const parsed = JSON5.parse(draft)
       setDraft(JSON.stringify(parsed, null, 2))
     } catch {
-      // Invalid JSON can't be formatted — leave the draft alone so the
+      // Invalid input can't be formatted — leave the draft alone so the
       // user can see what's wrong without losing context.
     }
   }, [draft])
@@ -322,9 +332,13 @@ export function RulesDialog({
         </DialogHeader>
 
         <p className="text-xs text-muted-foreground">
-          JSON array of rule nodes. Sugar accepted: <span className="font-mono">"col"</span> (text atom),{' '}
+          JSON5 array of rule nodes. Sugar accepted: <span className="font-mono">"col"</span> (text atom),{' '}
           <span className="font-mono">{'{ "image": "col" }'}</span> (widget shortcut),{' '}
-          <span className="font-mono">{'{ "row": [...] }'}</span> (container).
+          <span className="font-mono">{'{ "row": [...] }'}</span> (container).{' '}
+          <span className="font-medium text-foreground/80">JSON5</span> means{' '}
+          <span className="font-mono">// comments</span>, trailing commas, unquoted keys, and single-quoted
+          strings are all valid; Save canonicalises to plain JSON so comments
+          are stripped on persist.{' '}
           See <span className="font-mono">docs/parquet_rows_view_user_guide.md</span> for the full reference.
         </p>
 
@@ -829,13 +843,13 @@ function PresetMatchBadge({ match }: { match: PresetMatch }) {
   )
 }
 
-// Cheap check: only run the Format button when JSON.parse will succeed.
+// Cheap check: only run the Format button when JSON5.parse will succeed.
 // Avoids enabling the button on a typo and silently dropping the user's
 // in-progress edits.
 function isFormattableJson(text: string): boolean {
   if (text.trim().length === 0) return false
   try {
-    JSON.parse(text)
+    JSON5.parse(text)
     return true
   } catch {
     return false
