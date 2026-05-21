@@ -3,6 +3,7 @@ import {
   Copy,
   Download,
   ExternalLink,
+  FolderTree,
   Link as LinkIcon,
 } from 'lucide-react'
 
@@ -14,7 +15,8 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu'
-import type { FileEntry } from '@/types/storage'
+import { useStorages } from '@/hooks/use-storage'
+import type { FileEntry, StorageDescriptor } from '@/types/storage'
 
 interface EntryContextMenuProps {
   entry: FileEntry
@@ -32,6 +34,10 @@ export function EntryContextMenu({
   children,
 }: EntryContextMenuProps) {
   const name = basenameOf(entry.key)
+  // Cached forever (see useStorages) — cheap to read from any tile / row.
+  const { data: storagesData } = useStorages()
+  const storage = storagesData?.storages.find((s) => s.name === storageName)
+  const absPath = storage ? absolutePathOf(storage, entry.key) : null
 
   function copyText(text: string) {
     void navigator.clipboard?.writeText(text)
@@ -80,6 +86,12 @@ export function EntryContextMenu({
           <Copy />
           Copy name
         </ContextMenuItem>
+        {absPath && (
+          <ContextMenuItem onClick={() => copyText(absPath)}>
+            <FolderTree />
+            Copy path
+          </ContextMenuItem>
+        )}
         <ContextMenuSeparator />
         <ContextMenuItem onClick={() => copyText(entryUrl())}>
           <LinkIcon />
@@ -106,4 +118,27 @@ function basenameOf(key: string): string {
   const stripped = key.replace(/\/+$/, '')
   const slash = stripped.lastIndexOf('/')
   return slash < 0 ? stripped : stripped.slice(slash + 1)
+}
+
+/// Absolute, human-pasteable location of an entry on its backing storage.
+///   S3 (single bucket):    `s3://<bucket>/<key>`
+///   S3 (multi-bucket):     `s3://<key>`  — first key segment IS the bucket
+///   Local FS:              `<root_path>/<key>`
+/// Trailing `/` on directory keys is preserved so it's obvious the path is
+/// a folder. Returns `null` when the storage lacks the identifying fields
+/// (invalid storages, or descriptor not yet loaded).
+function absolutePathOf(storage: StorageDescriptor, key: string): string | null {
+  if (storage.type === 's3' && storage.s3) {
+    if (storage.s3.bucket !== null) {
+      return `s3://${storage.s3.bucket}/${key}`
+    }
+    // Multi-bucket: the entry key already starts with `<bucket>/…`, so the
+    // bucket segment doesn't need to be re-attached.
+    return `s3://${key}`
+  }
+  if (storage.type === 'local' && storage.local?.root_path) {
+    const root = storage.local.root_path.replace(/\/+$/, '')
+    return `${root}/${key}`
+  }
+  return null
 }

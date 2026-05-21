@@ -56,6 +56,25 @@ export function parseSelector(src: string): ParsedSelector {
   return { ast, hasFanout: p.fanouts > 0 }
 }
 
+/// Walk a parsed selector chain back to its root and return the column
+/// name (unwrapped — no surrounding backticks or quotes).
+export function rootColumn(sel: Selector): string {
+  let cur = sel
+  while (cur.op !== 'root') cur = cur.from
+  return cur.column
+}
+
+/// Convenience: parse `src` and return the root column, or `null` if the
+/// source doesn't parse. Used by UI layers that want a default label
+/// derived from the selector — they don't care about the AST itself.
+export function selectorRootColumn(src: string): string | null {
+  try {
+    return rootColumn(parseSelector(src).ast)
+  } catch {
+    return null
+  }
+}
+
 class Parser {
   readonly src: string
   pos = 0

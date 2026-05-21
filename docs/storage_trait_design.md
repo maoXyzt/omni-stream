@@ -194,6 +194,17 @@ handler 层的循环,后端只需实现 `list_files`。
 * **错误映射**：`classify_s3_status()` 把 HTTP 状态码 + AWS 错误码合成
   `AppError`：404 → `NotFound`，403 / `AccessDenied` → `Forbidden`，
   416 / `InvalidRange` → `InvalidRange`，其余 → `Backend`。
+* **多 bucket 模式**（`S3Config::bucket` 缺省 / 空串 / `"*"` 哨兵）：backend
+  内部 `bucket` 字段记为 `Option<String>`，由 `split_path()` 把请求路径切成
+  `(bucket, key)`——
+  * 单 bucket 模式：直接返回配置的 bucket + 原 path，与历史行为一致。
+  * 多 bucket 模式：按首个 `/` 切分；`prefix = ""` 走 `ListBuckets` 把每个
+    bucket 渲染成顶层目录（`key = "<name>/"`、`is_dir = true`），其余请求
+    把 leading segment 当 bucket 名，剩余部分当 `ListObjectsV2` 的 prefix；
+    返回的 entries 会回填 `"<bucket>/"` 前缀，保持上层 API 看到的还是完整
+    路径，分页 token 仍是 bucket-local（同一个 `prefix` 反复回传即可）。
+  * `ListBuckets` 需要 `s3:ListAllMyBuckets` 权限；遇到 `AccessDenied` 时
+    错误信息会拼上提示，建议在配置里指定具体 bucket 绕过。
 
 ## 6. 工厂与注册表 (`factory.rs`)
 
@@ -220,7 +231,13 @@ pub struct InvalidStorageEntry {
 }
 
 pub enum StorageDetails {
-    S3 { bucket: String, endpoint: Option<String>, region: Option<String> },
+    S3 {
+        // None ⇒ 多 bucket 模式（配置里 bucket 缺省 / 空串 / "*"），
+        // 根目录展开为 ListBuckets 结果。前端据此渲染 "(all buckets)"。
+        bucket: Option<String>,
+        endpoint: Option<String>,
+        region: Option<String>,
+    },
     Local { root_path: String },
 }
 ```

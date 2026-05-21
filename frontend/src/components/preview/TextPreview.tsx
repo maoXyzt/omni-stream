@@ -30,6 +30,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { useLineNumbers } from '@/hooks/use-line-numbers'
+import { useRowsViewHint } from '@/hooks/use-rows-view-hint'
 import {
   SUPPORTED_LANGUAGES,
   detectLanguage,
@@ -50,6 +51,7 @@ import {
 } from '@/lib/text-chunks'
 import { cn } from '@/lib/utils'
 
+import { RowsViewHint } from './RowsViewHint'
 import type { PreviewerProps } from './types'
 
 // Query param key that the Rows view writes its rule config into. Forwarded
@@ -92,6 +94,11 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
     const query = rules ? `?${ROWS_PARAM}=${encodeURIComponent(rules)}` : ''
     navigate(`/r/${encodeURIComponent(storage)}/${trail}${query}`)
   }, [storage, rowsFormat, searchParams, fileKey, navigate])
+  // Gate the hint banner wrapper so dismissing it doesn't leave a phantom
+  // padding strip — RowsViewHint itself returns null when dismissed, but
+  // the surrounding spacing div would still take space without this check.
+  const { dismissed: rowsHintDismissed } = useRowsViewHint()
+  const showRowsHint = Boolean(rowsFormat) && !rowsHintDismissed
 
   // --- Chunked fetch -----------------------------------------------------
 
@@ -342,10 +349,9 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
                 <Button
                   type="button"
                   size="sm"
-                  variant="outline"
                   onClick={openRowsPage}
                   disabled={!storage}
-                  className="h-7"
+                  className="h-7 shadow-sm"
                 >
                   <LayoutList className="size-3.5" />
                   Browse as cards
@@ -370,6 +376,12 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
           </select>
         </div>
       </div>
+
+      {showRowsHint && (
+        <div className="px-3 pt-3">
+          <RowsViewHint onOpen={openRowsPage} disabled={!storage} />
+        </div>
+      )}
 
       {/* `relative` anchors the floating "Load more" overlay below. */}
       <div className="relative flex-1 overflow-hidden">

@@ -32,7 +32,10 @@ Widgets (the value of \`show\`, or the tag-key in sugar form):
               filename extension when omitted.
 
 Atom options:
-  label       text shown above the widget
+  label       text shown above the widget. OMIT to use the default — the
+              selector's root column name (e.g. "images", "prompt") is
+              shown automatically. Set \`label\` only when you want a
+              different heading (e.g. "Generated", "Inputs", "Preview").
   width       CSS dim when atom sits as a flex child: "1fr" | "320px" | "auto"
   maxHeight   only on default / highlight / markdown / text
   src         only on image/video/audio/link/text — URL template with {value} placeholder

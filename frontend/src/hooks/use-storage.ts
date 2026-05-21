@@ -1,4 +1,5 @@
-import { keepPreviousData, useQuery } from '@tanstack/react-query'
+import { useCallback } from 'react'
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { getServerInfo, listFiles, listStorages, statFile } from '@/api/storage'
 
@@ -41,6 +42,25 @@ export function useListFiles(
     refetchOnWindowFocus: true,
     enabled: storage !== undefined,
   })
+}
+
+/// Imperative companion to `useListFiles` for pre-warming the cache —
+/// FileList calls this once the current page has revealed its
+/// `next_token` so the user's "Next" click lands instantly. Query key
+/// + staleTime mirror `useListFiles` so the prefetched entry is the
+/// same cache slot the next mount will read from.
+export function usePrefetchListFiles() {
+  const queryClient = useQueryClient()
+  return useCallback(
+    (prefix: string, pageToken: string, storage: string | undefined) => {
+      void queryClient.prefetchQuery({
+        queryKey: ['list', storage ?? null, prefix, pageToken] as const,
+        queryFn: () => listFiles(prefix, pageToken, storage),
+        staleTime: 5 * 60_000,
+      })
+    },
+    [queryClient],
+  )
 }
 
 export function useFileStat(

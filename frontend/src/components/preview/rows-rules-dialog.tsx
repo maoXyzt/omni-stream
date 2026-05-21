@@ -15,6 +15,8 @@
 //     (wrapped in backticks when the column has special chars).
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import JSON5 from 'json5'
+import Editor from 'react-simple-code-editor'
 import {
   AlertCircle,
   Check,
@@ -41,15 +43,110 @@ import { RowNode } from '@/components/preview/rows-render'
 import { type RenderContext } from '@/components/preview/rows-widgets'
 import { buildAiPrompt } from '@/components/preview/rows-ai-prompt'
 import { type Preset, useRowsPresets } from '@/hooks/use-rows-presets'
+import { type PresetMatch, presetMatch } from '@/lib/rows-applicability'
+import { highlightJson5 } from '@/lib/highlight-json5'
 import { type Node, parseRules } from '@/lib/rows-schema'
 import { type ColumnInfo } from '@/lib/rows-source'
 import { cn } from '@/lib/utils'
 
+// Used only when the file has no detectable columns (corrupted schema, or
+// the dialog opened before a source resolved). Real templates are derived
+// from `columns` — see `defaultTemplateFor` below.
 const EXAMPLE_RULES = `[
   "prompt",
   { "image": "image" },
   { "image": "image_edit", "src": "../edits/{value}" }
 ]`
+
+// Substring hints used to map a column name to a widget. Conservative on
+// purpose — false positives are worse than no inference (a "url" column
+// rendered as a clickable link is fine; a "description" column rendered
+// as a link 404s). Order doesn't matter; the first match wins.
+const NAME_HINTS: ReadonlyArray<{ pattern: RegExp; widget: 'image' | 'video' | 'audio' | 'link' | 'markdown' }> = [
+  {
+    widget: 'image',
+    pattern: /(^|_)(image|img|thumb(?:nail)?|picture|photo|avatar|cover|poster|icon)(_|s?$)/i,
+  },
+  { widget: 'video', pattern: /(^|_)(video|clip|movie)(_|s?$)/i },
+  { widget: 'audio', pattern: /(^|_)(audio|sound|voice|music|mp3|wav)(_|s?$)/i },
+  { widget: 'link', pattern: /(^|_)(url|link|href|uri|homepage|website)(_|s?$)/i },
+  { widget: 'markdown', pattern: /(^|_)(markdown|readme)(_|s?$)/i },
+]
+
+// LIST-typed columns get a `.[*]` fan-out so every element renders. Covers
+// parquet's `LIST<…>` schema strings and the inferred `array` type that the
+// jsonl/json sources emit. Anything else (STRUCT, scalar) renders as-is.
+function isListType(type: string): boolean {
+  return /^list\b/i.test(type) || /\barray\b/i.test(type)
+}
+
+// Selector form of a column name. Plain identifiers can be inserted bare;
+// names with dots / spaces / other punctuation need backtick-wrapping so
+// the selector parser doesn't try to walk into a nested field. Names
+// containing a literal backtick are exotic enough that we punt — the
+// generated template will fail validation and the status line will tell
+// the user to wrap that one column themselves.
+function selectorFor(col: string): string {
+  if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(col)) return col
+  if (!col.includes('`')) return `\`${col}\``
+  return col
+}
+
+// Widgets whose default `src` ("{value}") deserves a heads-up when the
+// auto-generated template includes them. text widget intentionally
+// excluded — the template's name hints don't currently emit it.
+const SRC_AWARE_WIDGETS = new Set(['image', 'video', 'audio', 'link', 'text'])
+
+/// Best-effort default template: one node per column, widget inferred from
+/// the column name, LIST types fanned out via `.[*]`. Emits sugar JSON
+/// (matches how a human would write it) and goes through the same
+/// `JSON.stringify(_, null, 2)` formatter as saved rules so the output is
+/// idempotent — Save → reopen → no "modified" indicator. When the
+/// template contains any media widget, prepends a JSON5 comment block
+/// above the array explaining the implicit `src: "{value}"` default and
+/// how to override it; safe because the editor parses JSON5 and Save
+/// canonicalises the comments away.
+function defaultTemplateFor(columns: ColumnInfo[]): string {
+  if (columns.length === 0) return EXAMPLE_RULES
+  const nodes = columns.map((c) => {
+    const list = isListType(c.type)
+    const selector = selectorFor(c.name) + (list ? '.[*]' : '')
+    const widget = NAME_HINTS.find((h) => h.pattern.test(c.name))?.widget
+    if (!widget) {
+      // Sugar: bare string = default-widget atom on this selector.
+      return selector
+    }
+    const node: Record<string, unknown> = { [widget]: selector }
+    // Lists of images render best as a grid; a long horizontal flow row
+    // either truncates or wraps awkwardly. 3 columns is a reasonable
+    // starting point users tweak.
+    if (list && widget === 'image') {
+      node.layout = 'grid'
+      node.columns = 3
+    }
+    return node
+  })
+  const json = JSON.stringify(nodes, null, 2)
+  const hasMediaWidget = nodes.some(
+    (n) =>
+      typeof n === 'object' &&
+      n !== null &&
+      Object.keys(n).some((k) => SRC_AWARE_WIDGETS.has(k)),
+  )
+  if (!hasMediaWidget) return json
+  // Banner sits above the array — keeps the JSON body itself the canonical
+  // `JSON.stringify(_, null, 2)` form a Format round-trip would emit (and
+  // also reads more like a file-level docstring than an inline aside).
+  const banner = [
+    '// Each image / video / audio / link / text widget below omits "src",',
+    '// which defaults to "{value}" — the cell\'s value is treated as a',
+    '// storage path resolved relative to this data file. Override per-node:',
+    '//   { "image": "id", "src": "https://cdn/{value}.png" }   ← remote URL',
+    '//   { "image": "id", "src": "./images/{value}.jpg" }      ← sibling dir',
+    '//   { "image": "id", "src": "/shared/{value}" }           ← absolute key',
+  ].join('\n')
+  return `${banner}\n\n${json}`
+}
 
 interface Template {
   label: string
@@ -127,8 +224,11 @@ export function RulesDialog({
   onSave,
 }: RulesDialogProps) {
   const seededDraft = useMemo(
-    () => (rules.length > 0 ? JSON.stringify(rules, null, 2) : EXAMPLE_RULES),
-    [rules],
+    () =>
+      rules.length > 0
+        ? JSON.stringify(rules, null, 2)
+        : defaultTemplateFor(columns),
+    [rules, columns],
   )
   const [draft, setDraft] = useState(seededDraft)
   // Reseed when the dialog reopens — the saved rules might have changed in
@@ -138,18 +238,23 @@ export function RulesDialog({
   }, [open, seededDraft])
 
   // Live validation: every keystroke parses + validates. Cheap enough that
-  // running on every change is fine (parseRules on a typical config is sub-ms).
+  // running on every change is fine (parseRules on a typical config is
+  // sub-ms). We accept JSON5 (comments, trailing commas, unquoted keys,
+  // single-quoted strings) — strict JSON still parses since JSON5 is a
+  // superset. Save canonicalises back to plain JSON before storing in the
+  // URL, so the JSON5 conveniences are editor-time helpers only and any
+  // comments are lost on save.
   const validation = useMemo<Validation>(() => {
     if (draft.trim().length === 0) {
       return { ok: false, error: 'empty config' }
     }
     let parsed: unknown
     try {
-      parsed = JSON.parse(draft)
+      parsed = JSON5.parse(draft)
     } catch (err) {
       return {
         ok: false,
-        error: `invalid JSON: ${err instanceof Error ? err.message : String(err)}`,
+        error: `invalid JSON5: ${err instanceof Error ? err.message : String(err)}`,
       }
     }
     const result = parseRules(parsed)
@@ -159,11 +264,19 @@ export function RulesDialog({
 
   const modified = draft !== seededDraft
 
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null)
+  // The Editor component renders its own div + pre + textarea; we wrap it in
+  // our own div both to hang the border / focus-within styling on and to
+  // anchor a ref we can use to locate the underlying textarea (the lib
+  // doesn't expose a textarea ref directly).
+  const editorWrapperRef = useRef<HTMLDivElement | null>(null)
+  const getTextarea = useCallback(
+    () => editorWrapperRef.current?.querySelector('textarea') ?? null,
+    [],
+  )
 
   const insertAtCursor = useCallback(
     (snippet: string, selectPlaceholder?: string) => {
-      const ta = textareaRef.current
+      const ta = getTextarea()
       if (!ta) {
         setDraft((prev) => prev + snippet)
         return
@@ -185,7 +298,7 @@ export function RulesDialog({
         ta.setSelectionRange(start + snippet.length, start + snippet.length)
       })
     },
-    [draft],
+    [draft, getTextarea],
   )
 
   const handleSave = useCallback(() => {
@@ -195,10 +308,14 @@ export function RulesDialog({
 
   const handleFormat = useCallback(() => {
     try {
-      const parsed = JSON.parse(draft)
+      // Parse with JSON5 (accept whatever the editor accepts), emit
+      // canonical JSON — Format gives the user a preview of what Save
+      // will actually persist, so comments / trailing commas / unquoted
+      // keys drop here just like on Save.
+      const parsed = JSON5.parse(draft)
       setDraft(JSON.stringify(parsed, null, 2))
     } catch {
-      // Invalid JSON can't be formatted — leave the draft alone so the
+      // Invalid input can't be formatted — leave the draft alone so the
       // user can see what's wrong without losing context.
     }
   }, [draft])
@@ -253,26 +370,41 @@ export function RulesDialog({
         </DialogHeader>
 
         <p className="text-xs text-muted-foreground">
-          JSON array of rule nodes. Sugar accepted: <span className="font-mono">"col"</span> (text atom),{' '}
+          JSON5 array of rule nodes. Sugar accepted: <span className="font-mono">"col"</span> (text atom),{' '}
           <span className="font-mono">{'{ "image": "col" }'}</span> (widget shortcut),{' '}
-          <span className="font-mono">{'{ "row": [...] }'}</span> (container).
+          <span className="font-mono">{'{ "row": [...] }'}</span> (container).{' '}
+          <span className="font-medium text-foreground/80">JSON5</span> means{' '}
+          <span className="font-mono">// comments</span>, trailing commas, unquoted keys, and single-quoted
+          strings are all valid; Save canonicalises to plain JSON so comments
+          are stripped on persist.{' '}
           See <span className="font-mono">docs/parquet_rows_view_user_guide.md</span> for the full reference.
         </p>
 
         <div className="flex min-h-0 flex-1 gap-3">
           {/* Editor pane */}
           <div className="flex min-h-0 flex-1 flex-col gap-2">
-            <textarea
-              ref={textareaRef}
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              spellCheck={false}
+            <div
+              ref={editorWrapperRef}
               className={cn(
-                'min-h-0 flex-1 resize-none rounded-md border border-input bg-transparent p-3 font-mono text-xs leading-relaxed',
-                'transition-colors outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50',
+                // `json5-editor` scopes the prism token CSS to just this
+                // surface (see lib/highlight-json5.css).
+                'json5-editor min-h-0 flex-1 overflow-auto rounded-md border border-input bg-transparent font-mono text-xs leading-relaxed',
+                'transition-colors focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50',
                 'dark:bg-input/30',
               )}
-            />
+            >
+              <Editor
+                value={draft}
+                onValueChange={setDraft}
+                highlight={highlightJson5}
+                padding={12}
+                tabSize={2}
+                insertSpaces
+                textareaClassName="outline-none"
+                className="min-h-full"
+                style={{ fontFamily: 'inherit' }}
+              />
+            </div>
             <StatusLine validation={validation} />
           </div>
 
@@ -281,6 +413,7 @@ export function RulesDialog({
             <PresetsSection
               presets={presets}
               currentRules={validation.ok ? validation.rules : null}
+              columns={columns}
               onLoad={handleLoadPreset}
             />
 
@@ -588,15 +721,24 @@ function Section({
 // Presets stored in localStorage. Disabled save when the current draft is
 // invalid or the name is blank; loading a preset replaces the draft so it
 // flows through the same validation + modified-indicator path as typing.
+//
+// Each preset is annotated with its applicability against the current
+// file's columns (rows-applicability.ts). Fully-fitting presets float to
+// the top of the list with a green "fits" badge; partial matches show
+// `matched/total` in amber so the user can decide whether to load and
+// tweak. The applicability signal also drives the per-section summary
+// line right above the list.
 function PresetsSection({
   presets,
   currentRules,
+  columns,
   onLoad,
 }: {
   presets: ReturnType<typeof useRowsPresets>
   /// Canonical rules from the current draft, or null when the draft is
   /// invalid (Save is disabled in that case).
   currentRules: Node[] | null
+  columns: ColumnInfo[]
   onLoad: (preset: Preset) => void
 }) {
   const [name, setName] = useState('')
@@ -608,6 +750,25 @@ function PresetsSection({
     const saved = presets.save(trimmed, currentRules)
     if (saved) setName('')
   }
+
+  // Pair each preset with its match status against the open file. Sort
+  // fitting presets first, then partials (by matched-column count desc),
+  // then unrelated presets — the user's eye lands on what's relevant
+  // without us hiding anything.
+  const annotated = useMemo(() => {
+    const colNames = columns.map((c) => c.name)
+    return presets.presets
+      .map((preset) => ({ preset, match: presetMatch(preset.rules, colNames) }))
+      .sort((a, b) => {
+        if (a.match.fits !== b.match.fits) return a.match.fits ? -1 : 1
+        if (a.match.matched.size !== b.match.matched.size) {
+          return b.match.matched.size - a.match.matched.size
+        }
+        return b.preset.updatedAt - a.preset.updatedAt
+      })
+  }, [presets.presets, columns])
+
+  const fittingCount = annotated.filter((a) => a.match.fits).length
 
   return (
     <Section title={`Presets · ${presets.presets.length}`}>
@@ -646,13 +807,20 @@ function PresetsSection({
       {presets.error && (
         <p className="mt-1 text-[10px] text-destructive">{presets.error}</p>
       )}
+      {fittingCount > 0 && (
+        <p className="mt-1.5 flex items-center gap-1 text-[10px] text-emerald-700 dark:text-emerald-400">
+          <Check className="size-3" />
+          {fittingCount} preset{fittingCount === 1 ? '' : 's'} fit
+          {fittingCount === 1 ? 's' : ''} this file
+        </p>
+      )}
       {presets.presets.length === 0 ? (
         <p className="mt-2 text-[10px] italic text-muted-foreground">
           No saved presets. Save the current rules to reuse them later.
         </p>
       ) : (
         <ul className="mt-1.5 space-y-0.5">
-          {presets.presets.map((p) => (
+          {annotated.map(({ preset: p, match }) => (
             <li
               key={p.id}
               className="group flex items-center gap-1 rounded hover:bg-muted"
@@ -661,9 +829,10 @@ function PresetsSection({
                 type="button"
                 onClick={() => onLoad(p)}
                 title={`Load "${p.name}"`}
-                className="flex-1 truncate px-1.5 py-1 text-left text-xs focus:outline-none"
+                className="flex min-w-0 flex-1 items-center gap-1.5 px-1.5 py-1 text-left text-xs focus:outline-none"
               >
-                {p.name}
+                <span className="truncate">{p.name}</span>
+                <PresetMatchBadge match={match} />
               </button>
               <button
                 type="button"
@@ -682,13 +851,54 @@ function PresetsSection({
   )
 }
 
-// Cheap check: only run the Format button when JSON.parse will succeed.
+// Small per-row indicator. Three buckets keep the visual language tight:
+//   * fits     — green check, "fits"            (preset will render cleanly)
+//   * partial  — amber count, "N/M"             (some columns won't resolve)
+//   * none     — nothing (avoid noise on unrelated presets, but the tooltip
+//                still explains *why* it's grey when the user hovers)
+function PresetMatchBadge({ match }: { match: PresetMatch }) {
+  if (match.referenced.size === 0) return null
+  if (match.fits) {
+    return (
+      <span
+        className="inline-flex shrink-0 items-center gap-0.5 rounded-sm bg-emerald-500/15 px-1 py-0.5 text-[9px] font-medium uppercase tracking-wide text-emerald-700 dark:bg-emerald-400/15 dark:text-emerald-300"
+        title={`All ${match.matched.size} referenced columns are in this file`}
+      >
+        <Check className="size-2.5" />
+        fits
+      </span>
+    )
+  }
+  if (match.matched.size > 0) {
+    const missing = [...match.missing].slice(0, 6).join(', ')
+    const more =
+      match.missing.size > 6 ? `, +${match.missing.size - 6} more` : ''
+    return (
+      <span
+        className="inline-flex shrink-0 items-center rounded-sm bg-amber-500/15 px-1 py-0.5 font-mono text-[9px] font-medium text-amber-700 tabular-nums dark:bg-amber-400/15 dark:text-amber-300"
+        title={`Missing columns: ${missing}${more}`}
+      >
+        {match.matched.size}/{match.referenced.size}
+      </span>
+    )
+  }
+  return (
+    <span
+      className="inline-flex shrink-0 items-center rounded-sm bg-muted px-1 py-0.5 text-[9px] font-medium uppercase tracking-wide text-muted-foreground"
+      title={`None of the ${match.referenced.size} referenced column${match.referenced.size === 1 ? '' : 's'} (${[...match.referenced].slice(0, 6).join(', ')}) are in this file`}
+    >
+      other
+    </span>
+  )
+}
+
+// Cheap check: only run the Format button when JSON5.parse will succeed.
 // Avoids enabling the button on a typo and silently dropping the user's
 // in-progress edits.
 function isFormattableJson(text: string): boolean {
   if (text.trim().length === 0) return false
   try {
-    JSON.parse(text)
+    JSON5.parse(text)
     return true
   } catch {
     return false

@@ -11,7 +11,7 @@
 import { Suspense, useMemo } from 'react'
 
 import type { AtomNode, Node } from '@/lib/rows-schema'
-import { parseSelector } from '@/lib/rows-selector'
+import { parseSelector, selectorRootColumn } from '@/lib/rows-selector'
 import { evalSelector } from '@/lib/rows-selector-eval'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
@@ -35,14 +35,24 @@ interface RowNodeProps {
 
 export function RowNode({ node, row, ctx }: RowNodeProps) {
   if ('children' in node) {
+    // Containers don't bind to a single column, so they get no derived
+    // label — only the user's explicit `label` (which they may set when
+    // grouping under a heading like "Inputs" / "Outputs").
     return (
       <NodeFrame label={node.label}>
         <RowContainer node={node} row={row} ctx={ctx} />
       </NodeFrame>
     )
   }
+  // Atoms always get a label: explicit `label` wins, otherwise we derive
+  // it from the selector's root column so every widget reports which
+  // column it's reading. `node.from` is a safe fallback when the
+  // selector can't be parsed — `parseRules` would normally have rejected
+  // it upstream, but a stale URL with a since-changed grammar could
+  // theoretically slip through.
+  const label = node.label ?? selectorRootColumn(node.from) ?? node.from
   return (
-    <NodeFrame label={node.label}>
+    <NodeFrame label={label}>
       <RowAtom node={node} row={row} ctx={ctx} />
     </NodeFrame>
   )

@@ -12,6 +12,16 @@ export function formatBytes(n: number): string {
   return `${v.toFixed(v >= 10 ? 0 : 1)} ${units[i]}`
 }
 
+/// Compact a slash-separated path for a header label: shows the last two
+/// segments prefixed with `…/` once it would otherwise be longer than
+/// that. Callers should still hand the full path to the surrounding
+/// `title` attribute so hover reveals it intact.
+export function shortenPath(path: string): string {
+  const segs = path.split('/').filter((s) => s.length > 0)
+  if (segs.length <= 2) return path
+  return '…/' + segs.slice(-2).join('/')
+}
+
 /// Convert the storage backend's `last_modified` (HTTP-date from S3, or unix
 /// seconds string from local FS) into the user's locale. Returns "—" for
 /// missing values and the raw string for inputs we couldn't parse.

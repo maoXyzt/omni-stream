@@ -18,7 +18,11 @@ use crate::config::{Config, StorageConfig, StorageType};
 #[derive(Clone, Debug)]
 pub enum StorageDetails {
   S3 {
-    bucket: String,
+    /// `Some(name)` when the storage pins to a single bucket; `None` when
+    /// it's a multi-bucket storage (root listing performs `ListBuckets`).
+    /// Surfaced as JSON `null` to the SPA so it can render "(all buckets)"
+    /// for that case.
+    bucket: Option<String>,
     endpoint: Option<String>,
     region: Option<String>,
   },
@@ -60,12 +64,15 @@ fn extract_details(entry: &StorageConfig) -> StorageDetails {
       .s3
       .as_ref()
       .map(|s3| StorageDetails::S3 {
-        bucket: s3.bucket.clone(),
+        // Multi-bucket sentinels ("", "*", whitespace) collapse to `None`
+        // so the UI renders "(all buckets)" instead of leaking the literal
+        // config value.
+        bucket: s3.fixed_bucket().map(str::to_string),
         endpoint: s3.endpoint.clone(),
         region: s3.region.clone(),
       })
       .unwrap_or(StorageDetails::S3 {
-        bucket: String::new(),
+        bucket: None,
         endpoint: None,
         region: None,
       }),

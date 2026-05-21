@@ -22,7 +22,7 @@ build_all() {
 }
 
 run_service() {
-    cargo run --bin omni-stream
+    RUST_LOG=${RUST_LOG:-info,tower_http=debug} cargo run --bin omni-stream
 }
 
 run_frontend() {

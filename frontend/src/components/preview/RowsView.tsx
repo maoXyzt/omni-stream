@@ -1,15 +1,19 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { keepPreviousData, useQuery } from '@tanstack/react-query'
-import { AlertCircle, Loader2, RotateCw, Settings2 } from 'lucide-react'
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
+import { AlertCircle, Check, Loader2, RotateCw, Settings2 } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+import { useRowsPresets } from '@/hooks/use-rows-presets'
 import { useRowsViewConfig } from '@/hooks/use-rows-view-config'
-import { type RowsSource } from '@/lib/rows-source'
+import { presetMatch } from '@/lib/rows-applicability'
+import { type Node } from '@/lib/rows-schema'
+import { type ColumnInfo, type RowsSource } from '@/lib/rows-source'
 import { PageControls } from '@/components/preview/PageControls'
+import { PartialInfoNotice } from '@/components/preview/PartialInfoNotice'
 import { RowCard, RowNode } from '@/components/preview/rows-render'
 import { RulesDialog } from '@/components/preview/rows-rules-dialog'
 
@@ -39,6 +43,29 @@ export function RowsView({ fileKey, source, storage }: RowsViewProps) {
   const renderCtx = useMemo(() => ({ fileKey, storage }), [fileKey, storage])
   const columns = source.columns
   const [dialogOpen, setDialogOpen] = useState(false)
+
+  // Drop users straight into the rules editor the first time they land on
+  // an unconfigured file — the empty cards-view is a dead-end for someone
+  // who hasn't seen the feature before. Guarded per-fileKey via a ref so
+  // it doesn't re-trigger after the user cancels, clears the rules, or
+  // navigates back to the same file. A decode error means the URL had a
+  // `rows=` param that failed validation; in that case we surface the
+  // banner instead of opening the editor, since auto-opening would
+  // suggest the error is dismissed. Note: the decode-error visit *also*
+  // burns the one-shot — if the user later fixes the URL while still on
+  // the same fileKey, the editor won't auto-open again. That's
+  // intentional (the user has already engaged with the page) and not a
+  // real problem in practice because a successful fix-up populates
+  // `rules`, which then blocks auto-open via the `rules.length === 0`
+  // guard anyway.
+  const autoOpenedForFile = useRef<string | null>(null)
+  useEffect(() => {
+    if (autoOpenedForFile.current === fileKey) return
+    autoOpenedForFile.current = fileKey
+    if (rules.length === 0 && !decodeError) {
+      setDialogOpen(true)
+    }
+  }, [fileKey, rules.length, decodeError])
   // pageIndex lives in `?page=N` so reloads + shared links land on the
   // same page. Navigating to a different file path drops the param
   // automatically (it's part of the URL, not a hash), so file changes
@@ -109,6 +136,31 @@ export function RowsView({ fileKey, source, storage }: RowsViewProps) {
     }
   }, [rowsQuery.data])
 
+  // Prefetch the next page once the current one resolves so paging
+  // forward feels instant. `hasMore` from the current page's read
+  // result is the authoritative "next page actually has data" signal —
+  // for streaming sources the static `totalRows` may still be `null`.
+  const queryClient = useQueryClient()
+  useEffect(() => {
+    if (rowsQuery.isPending || rowsQuery.isFetching) return
+    if (!rowsQuery.data?.hasMore) return
+    const next = pageIndex + 1
+    void queryClient.prefetchQuery({
+      queryKey: ['rows-data', storage ?? null, fileKey, next] as const,
+      queryFn: () => source.readRows(next * ROWS_PAGE, (next + 1) * ROWS_PAGE),
+      staleTime: Infinity,
+    })
+  }, [
+    queryClient,
+    source,
+    storage,
+    fileKey,
+    pageIndex,
+    rowsQuery.data?.hasMore,
+    rowsQuery.isPending,
+    rowsQuery.isFetching,
+  ])
+
   const page = rowsQuery.data
   const rows = page?.rows ?? []
   const totalRows = knownTotal
@@ -168,6 +220,7 @@ export function RowsView({ fileKey, source, storage }: RowsViewProps) {
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3">
+      {source.kind !== 'parquet' && <PartialInfoNotice format={source.kind} />}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-baseline gap-x-2 text-sm text-muted-foreground">
           <span>
@@ -217,7 +270,11 @@ export function RowsView({ fileKey, source, storage }: RowsViewProps) {
 
       <div className="min-h-0 flex-1 overflow-auto">
         {rules.length === 0 ? (
-          <EmptyState onOpenRules={() => setDialogOpen(true)} />
+          <EmptyState
+            columns={columns}
+            onOpenRules={() => setDialogOpen(true)}
+            onApplyPreset={setRules}
+          />
         ) : (
           <div className="flex flex-col gap-4">
             {firstLoading ? (
@@ -287,15 +344,62 @@ export function RowsView({ fileKey, source, storage }: RowsViewProps) {
   )
 }
 
-function EmptyState({ onOpenRules }: { onOpenRules: () => void }) {
+interface EmptyStateProps {
+  columns: ColumnInfo[]
+  onOpenRules: () => void
+  onApplyPreset: (rules: Node[]) => void
+}
+
+function EmptyState({ columns, onOpenRules, onApplyPreset }: EmptyStateProps) {
+  // Read presets at render — useRowsPresets is cheap (localStorage read on
+  // mount + cross-tab sync subscription). We only need the cohort that
+  // actually fits the file's columns, capped so the empty state stays a
+  // single readable card instead of a wall of buttons.
+  const presets = useRowsPresets()
+  const fittingPresets = useMemo(() => {
+    const colNames = columns.map((c) => c.name)
+    return presets.presets
+      .map((preset) => ({ preset, match: presetMatch(preset.rules, colNames) }))
+      .filter((x) => x.match.fits && x.match.referenced.size > 0)
+      .slice(0, 6)
+  }, [presets.presets, columns])
+
   return (
     <div className="flex h-full items-center justify-center p-6">
-      <div className="max-w-md rounded-md border bg-muted/30 p-6 text-center">
+      <div className="w-full max-w-md rounded-md border bg-muted/30 p-6 text-center">
         <h3 className="text-base font-medium">No rules configured</h3>
         <p className="mt-2 text-sm text-muted-foreground">
           Describe how each row should be laid out using the rules editor.
           Rules live in the URL — share the link to share the view.
         </p>
+        {fittingPresets.length > 0 && (
+          <div className="mt-4 rounded-md border bg-card p-3 text-left">
+            <p className="flex items-center gap-1 text-xs font-medium text-emerald-700 dark:text-emerald-400">
+              <Check className="size-3" />
+              {fittingPresets.length} saved preset
+              {fittingPresets.length === 1 ? '' : 's'} fit
+              {fittingPresets.length === 1 ? 's' : ''} this file
+            </p>
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              Click to apply, or open the editor to tweak first.
+            </p>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {fittingPresets.map(({ preset }) => (
+                <Button
+                  key={preset.id}
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-7 max-w-full truncate"
+                  title={`Apply preset "${preset.name}"`}
+                  onClick={() => onApplyPreset(preset.rules)}
+                >
+                  <span className="truncate">{preset.name}</span>
+                </Button>
+              ))}
+            </div>
+          </div>
+        )}
         <Button className="mt-4" onClick={onOpenRules}>
           <Settings2 className="size-4" />
           Set up rules

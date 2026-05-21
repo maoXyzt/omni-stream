@@ -17,12 +17,22 @@ type = "s3"
 active = true
 s3 = { endpoint = "...", bucket = "...", access_key = "...", secret_key = "...", region = "..." }
 
+# 省略 bucket（或设为 "*"）开启多 bucket 模式：根目录展开 ListBuckets，
+# 每个可见 bucket 作为顶层目录显示。需要 s3:ListAllMyBuckets 权限。
+[[storages]]
+name = "all-prod-s3"
+type = "s3"
+s3 = { endpoint = "...", access_key = "...", secret_key = "...", region = "..." }
+
 [[storages]]
 name = "local-data"
 type = "local"
 active = false
 local = { root_path = "/data/files" }
 ```
+
+`s3.bucket` 为可选字段，缺省 / 空串 / `"*"` 三种写法语义等价：均触发多 bucket
+模式。给出具体 bucket 名时，`S3Backend` 行为与本特性引入前完全一致，无回归。
 
 ## 3. 加载逻辑与优先级
 

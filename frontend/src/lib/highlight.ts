@@ -9,15 +9,22 @@ import ini from 'highlight.js/lib/languages/ini'
 import 'highlight.js/styles/github-dark.css'
 
 // Eagerly bundled languages — load instantly, no network. The set is
-// intentionally small: the four most common config/script formats.
+// intentionally small: the most common config/script formats.
 // `ini` doubles as TOML — they're syntactically close enough that the visual
 // result is acceptable until highlight.js ships a real TOML grammar.
+// `json5` reuses the stock JSON grammar so `{ "highlight": "field", "lang":
+// "json5" }` in rules widgets gives the user *some* highlighting (comments
+// work; single-quoted strings / unquoted keys stay uncolored under
+// `ignoreIllegals: true` rather than break the output). The rows-view rules
+// editor itself goes through Prism (see `lib/highlight-json5.ts`) for proper
+// JSON5 tokenization.
 hljs.registerLanguage('json', json)
+hljs.registerLanguage('json5', json)
 hljs.registerLanguage('python', python)
 hljs.registerLanguage('yaml', yaml)
 hljs.registerLanguage('ini', ini)
 
-const BUNDLED = new Set(['json', 'python', 'yaml', 'ini'])
+const BUNDLED = new Set(['json', 'json5', 'python', 'yaml', 'ini'])
 const loaded = new Set<string>(BUNDLED)
 
 /// Dynamic loaders for non-bundled languages. Vite turns each `import()` into
@@ -64,6 +71,7 @@ export interface LanguageOption {
 export const SUPPORTED_LANGUAGES: readonly LanguageOption[] = [
   { value: 'plaintext', label: 'Plain text' },
   { value: 'json', label: 'JSON' },
+  { value: 'json5', label: 'JSON5' },
   { value: 'python', label: 'Python' },
   { value: 'yaml', label: 'YAML' },
   { value: 'ini', label: 'INI / TOML' },
@@ -100,6 +108,7 @@ export const SUPPORTED_LANGUAGES: readonly LanguageOption[] = [
 const EXT_TO_LANG: Record<string, string> = {
   // Bundled
   json: 'json', jsonl: 'json', ndjson: 'json',
+  json5: 'json5',
   py: 'python', pyw: 'python',
   yml: 'yaml', yaml: 'yaml',
   toml: 'ini', ini: 'ini', conf: 'ini', cfg: 'ini', env: 'ini',

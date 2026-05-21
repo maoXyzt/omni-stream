@@ -15,6 +15,7 @@ import { AlertCircle, Download, FileX, Loader2, RotateCw } from 'lucide-react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+import { shortenPath } from '@/lib/format'
 import {
   detectLanguage,
   ensureLanguage,
@@ -287,15 +288,6 @@ function ResolutionError({ reason }: { reason: string }) {
 
 function resolutionDetail(r: SrcResolution): string {
   return r.ok ? r.key ?? r.url : ''
-}
-
-// Path strings get long quickly; for the header label show just the last two
-// segments so the more-useful filename stays readable. Full path lives in
-// the `title` attribute for hover.
-function shortenPath(path: string): string {
-  const segs = path.split('/').filter((s) => s.length > 0)
-  if (segs.length <= 2) return path
-  return '…/' + segs.slice(-2).join('/')
 }
 
 export default WidgetText

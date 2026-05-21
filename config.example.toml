@@ -30,12 +30,23 @@ enabled = false
 #   endpoint          Optional override. Omit for real AWS; set for self-hosted
 #                     gateways. Use the *-internal variant when running inside
 #                     the same VPC to avoid public-endpoint quotas / throttling.
-#   bucket            Required. Bucket name only — no scheme, no slashes.
+#   bucket            Optional. When set, the storage pins to that bucket
+#                     (bucket name only — no scheme, no slashes). When omitted
+#                     or set to "*", the storage enters multi-bucket mode: the
+#                     root listing performs ListBuckets and each bucket the
+#                     credentials can see appears as a top-level directory.
+#                     Multi-bucket mode requires the `s3:ListAllMyBuckets`
+#                     IAM permission.
 #   access_key,
 #   secret_key        Static credentials. Prefer env-injected values over
 #                     committing plaintext here.
-#   region            Optional. Defaults to "us-east-1", which satisfies SigV4
-#                     for MinIO / LocalStack and AWS us-east-1 buckets.
+#   region            Optional. Defaults to "us-east-1". Set this when:
+#                     (1) the target AWS bucket lives outside us-east-1 —
+#                         SigV4 has to match the bucket's actual region or
+#                         AWS returns AuthorizationHeaderMalformed; or
+#                     (2) an S3-compatible gateway validates the region
+#                         strictly (most don't — MinIO / LocalStack accept
+#                         any value, and the us-east-1 default is enough).
 #   force_path_style  Default true. Path-style URL = `endpoint/bucket/key`,
 #                     used by MinIO / LocalStack / Ceph. Set false to switch to
 #                     virtual-host style (`bucket.endpoint/key`), required by
@@ -46,6 +57,15 @@ name = "production-s3"
 type = "s3"
 active = true
 s3 = { endpoint = "http://localhost:9000", bucket = "my-bucket", access_key = "minioadmin", secret_key = "minioadmin", force_path_style = true }
+
+# Multi-bucket variant: `bucket` is omitted, so the storage root performs
+# ListBuckets and each bucket shows up as a top-level folder in the UI.
+# Useful when the credentials grant access to many buckets and you don't
+# want a separate [[storages]] entry per bucket.
+# [[storages]]
+# name = "all-prod-s3"
+# type = "s3"
+# s3 = { endpoint = "http://localhost:9000", access_key = "minioadmin", secret_key = "minioadmin", force_path_style = true }
 
 # ---- Local filesystem backend -------------------------------------------
 # Serves files under a directory on the host.

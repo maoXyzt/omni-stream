@@ -5,6 +5,7 @@ use aws_sdk_s3::config::{Credentials, Region};
 use aws_sdk_s3::error::{ProvideErrorMetadata, SdkError};
 use aws_sdk_s3::operation::get_object::GetObjectError;
 use aws_sdk_s3::operation::head_object::HeadObjectError;
+use aws_sdk_s3::operation::list_buckets::ListBucketsError;
 use aws_sdk_s3::operation::list_objects::ListObjectsError;
 use aws_sdk_s3::operation::list_objects_v2::ListObjectsV2Error;
 use tokio_util::io::ReaderStream;
@@ -101,14 +102,20 @@ fn classify_s3_status(status: u16, code: &str, op: &str, raw: impl std::fmt::Dis
 
 pub struct S3Backend {
   client: Client,
-  bucket: String,
+  /// `Some(name)` pins the backend to a single bucket: every operation
+  /// targets it, and `prefix`/`path` are object keys (the legacy model).
+  /// `None` enables multi-bucket mode: the storage root performs
+  /// `ListBuckets`, and the first path segment of every subsequent request
+  /// names the bucket. See [`S3Backend::split_path`] for the routing rule.
+  bucket: Option<String>,
 }
 
 impl S3Backend {
   pub async fn new(cfg: &S3Config) -> Result<Self, AppError> {
-    if cfg.bucket.trim().is_empty() {
-      return Err(AppError::Backend("S3 bucket is required".into()));
-    }
+    // bucket is optional now — `S3Config::fixed_bucket()` reports `None` for
+    // omit / "" / "*" / whitespace. In that case the backend enters
+    // multi-bucket mode and routes via the path's first segment.
+    let pinned_bucket = cfg.fixed_bucket().map(str::to_string);
 
     let mut loader = aws_config::defaults(BehaviorVersion::latest());
 
@@ -143,8 +150,12 @@ impl S3Backend {
 
     Ok(Self {
       client,
-      bucket: cfg.bucket.clone(),
+      bucket: pinned_bucket,
     })
+  }
+
+  fn split_path<'a>(&self, path: &'a str) -> Result<(String, &'a str), AppError> {
+    split_path(self.bucket.as_deref(), path)
   }
 
   fn map_get_err(err: SdkError<GetObjectError>) -> AppError {
@@ -197,16 +208,44 @@ impl S3Backend {
     }
   }
 
-  async fn list_v2(&self, prefix: &str, token: Option<String>) -> Result<ListResult, AppError> {
+  /// Map a `ListBuckets` SDK error, attaching a one-line hint when it's an
+  /// auth denial — `s3:ListAllMyBuckets` is a separate IAM permission from
+  /// per-bucket listing, and "set an explicit bucket in config" is the
+  /// canonical workaround. Without the hint the operator only sees a raw
+  /// AccessDenied and has to guess.
+  fn map_list_buckets_err(err: SdkError<ListBucketsError>) -> AppError {
+    let mapped = match err {
+      SdkError::ServiceError(svc) => {
+        let status = svc.raw().status().as_u16();
+        let code = svc.err().code().unwrap_or_default();
+        classify_s3_status(status, code, "list_buckets", svc.err())
+      }
+      e => AppError::Backend(format!("S3 list_buckets sdk error: {e}")),
+    };
+    if let AppError::Forbidden(msg) = mapped {
+      return AppError::Forbidden(format!(
+        "{msg} (multi-bucket mode requires s3:ListAllMyBuckets — set an explicit `bucket` in the storage config to skip this call)"
+      ));
+    }
+    mapped
+  }
+
+  async fn list_v2(
+    &self,
+    bucket: &str,
+    sub_prefix: &str,
+    token: Option<String>,
+    bucket_prefix: Option<&str>,
+  ) -> Result<ListResult, AppError> {
     let mut req = self
       .client
       .list_objects_v2()
-      .bucket(&self.bucket)
+      .bucket(bucket)
       .delimiter("/")
       .max_keys(LIST_PAGE_SIZE);
 
-    if !prefix.is_empty() {
-      req = req.prefix(prefix);
+    if !sub_prefix.is_empty() {
+      req = req.prefix(sub_prefix);
     }
     if let Some(t) = token {
       req = req.continuation_token(t);
@@ -219,7 +258,7 @@ impl S3Backend {
     for cp in resp.common_prefixes() {
       if let Some(p) = cp.prefix() {
         entries.push(FileEntry {
-          key: p.to_string(),
+          key: join_bucket_prefix(bucket_prefix, p),
           size: 0,
           last_modified: None,
           is_dir: true,
@@ -230,7 +269,7 @@ impl S3Backend {
     for obj in resp.contents() {
       let Some(key) = obj.key() else { continue };
       entries.push(FileEntry {
-        key: key.to_string(),
+        key: join_bucket_prefix(bucket_prefix, key),
         size: obj.size().unwrap_or(0).max(0) as u64,
         last_modified: obj.last_modified().map(|t| t.to_string()),
         is_dir: false,
@@ -255,17 +294,23 @@ impl S3Backend {
     })
   }
 
-  async fn list_v1(&self, prefix: &str, marker: &str) -> Result<ListResult, AppError> {
+  async fn list_v1(
+    &self,
+    bucket: &str,
+    sub_prefix: &str,
+    marker: &str,
+    bucket_prefix: Option<&str>,
+  ) -> Result<ListResult, AppError> {
     let mut req = self
       .client
       .list_objects()
-      .bucket(&self.bucket)
+      .bucket(bucket)
       .delimiter("/")
       .max_keys(LIST_PAGE_SIZE)
       .marker(marker);
 
-    if !prefix.is_empty() {
-      req = req.prefix(prefix);
+    if !sub_prefix.is_empty() {
+      req = req.prefix(sub_prefix);
     }
 
     let resp = req.send().await.map_err(Self::map_list_v1_err)?;
@@ -275,7 +320,7 @@ impl S3Backend {
     for cp in resp.common_prefixes() {
       if let Some(p) = cp.prefix() {
         entries.push(FileEntry {
-          key: p.to_string(),
+          key: join_bucket_prefix(bucket_prefix, p),
           size: 0,
           last_modified: None,
           is_dir: true,
@@ -286,7 +331,7 @@ impl S3Backend {
     for obj in resp.contents() {
       let Some(key) = obj.key() else { continue };
       entries.push(FileEntry {
-        key: key.to_string(),
+        key: join_bucket_prefix(bucket_prefix, key),
         size: obj.size().unwrap_or(0).max(0) as u64,
         last_modified: obj.last_modified().map(|t| t.to_string()),
         is_dir: false,
@@ -302,12 +347,110 @@ impl S3Backend {
       total_pages: None,
     })
   }
+
+  /// Multi-bucket root listing — `ListBuckets` against the configured
+  /// credentials. Returns each bucket as a top-level "directory" entry so
+  /// the existing list/tree UI navigates into one with a normal prefix
+  /// request. The API returns the full roster in one shot, so we don't
+  /// paginate and we can report `total_pages = Some(1)`.
+  async fn list_buckets(&self) -> Result<ListResult, AppError> {
+    let resp = self
+      .client
+      .list_buckets()
+      .send()
+      .await
+      .map_err(Self::map_list_buckets_err)?;
+
+    let mut entries: Vec<FileEntry> = resp
+      .buckets()
+      .iter()
+      .filter_map(|b| {
+        let name = b.name()?;
+        Some(FileEntry {
+          key: format!("{name}/"),
+          size: 0,
+          last_modified: b.creation_date().map(|t| t.to_string()),
+          is_dir: true,
+        })
+      })
+      .collect();
+    // Stable, predictable order across calls — S3 doesn't guarantee
+    // ListBuckets order.
+    entries.sort_by(|a, b| a.key.cmp(&b.key));
+
+    Ok(ListResult {
+      entries,
+      next_token: None,
+      walked_tokens: Vec::new(),
+      total_pages: Some(1),
+    })
+  }
+}
+
+/// Prepend `"<bucket>/"` to an S3-returned key when the backend is in
+/// multi-bucket mode. In single-bucket mode `bucket_prefix` is `None` and
+/// the key passes through unchanged — same wire format as before this
+/// feature landed.
+fn join_bucket_prefix(bucket_prefix: Option<&str>, key: &str) -> String {
+  match bucket_prefix {
+    Some(p) => format!("{p}{key}"),
+    None => key.to_string(),
+  }
+}
+
+/// Resolve a request path into `(bucket, key)` for the S3 backend.
+///
+/// - Single-bucket mode (`pinned = Some(b)`): the bucket is the configured
+///   one, the key is the path verbatim — the legacy behaviour.
+/// - Multi-bucket mode (`pinned = None`): split on the first `/`. The bucket
+///   is the leading segment; the key is everything after. The frontend
+///   always emits prefixes with a trailing slash, so `"bucket/"` yields
+///   `("bucket", "")` and lists that bucket's root.
+///
+/// Errors with `InvalidPath` when the path is empty, lacks a `/`, or starts
+/// with `/` — none of those refer to a valid S3 object.
+fn split_path<'a>(pinned: Option<&str>, path: &'a str) -> Result<(String, &'a str), AppError> {
+  if let Some(b) = pinned {
+    return Ok((b.to_string(), path));
+  }
+  if path.is_empty() {
+    return Err(AppError::InvalidPath(
+      "S3 multi-bucket storage requires <bucket>/<key>".into(),
+    ));
+  }
+  let (bucket, rest) = match path.split_once('/') {
+    Some(pair) => pair,
+    // A bare segment without `/` can't address an object: the storage is
+    // multi-bucket so `"foo"` could only mean "the bucket foo", which is
+    // never the right answer for get / stat / nested list calls.
+    None => {
+      return Err(AppError::InvalidPath(format!(
+        "S3 multi-bucket path '{path}' is missing the '<bucket>/<key>' separator"
+      )));
+    }
+  };
+  if bucket.is_empty() {
+    return Err(AppError::InvalidPath(format!(
+      "S3 multi-bucket path '{path}' has an empty bucket segment"
+    )));
+  }
+  Ok((bucket.to_string(), rest))
 }
 
 #[async_trait]
 impl StorageBackend for S3Backend {
   async fn get_file(&self, path: &str, opts: GetOptions) -> Result<StorageResponse, AppError> {
-    let mut req = self.client.get_object().bucket(&self.bucket).key(path);
+    let (bucket, key) = self.split_path(path)?;
+    // An empty key means the path was `"bucket/"` — a directory in the
+    // navigation model, not a file. Forwarding to GetObject with an
+    // empty key surfaces as an opaque AWS InvalidArgument; return a
+    // clear error instead so callers see what actually happened.
+    if key.is_empty() {
+      return Err(AppError::InvalidPath(format!(
+        "S3 path '{path}' refers to a bucket root, not a file"
+      )));
+    }
+    let mut req = self.client.get_object().bucket(&bucket).key(key);
     if let Some(range) = opts.range {
       req = req.range(range);
     }
@@ -335,6 +478,41 @@ impl StorageBackend for S3Backend {
   }
 
   async fn list_files(&self, prefix: &str, token: Option<String>) -> Result<ListResult, AppError> {
+    // Multi-bucket root listing routes to ListBuckets — the only call where
+    // `prefix == ""` doesn't address a single bucket. Tokens never appear
+    // here (ListBuckets isn't paginated in this backend), so ignore them.
+    if self.bucket.is_none() && prefix.is_empty() {
+      return self.list_buckets().await;
+    }
+
+    // Multi-bucket bare-bucket form: a path like `"mybucket"` (no
+    // trailing slash) unambiguously means "list this bucket's root" in
+    // multi-bucket mode — there are no objects sitting alongside the
+    // bucket level. Normalise here so hand-typed URLs and any future
+    // client that forgets the trailing slash still work; `split_path`
+    // itself stays strict because `stat` / `get_file` can't fall back
+    // the same way (an empty key is never a valid object reference).
+    let normalised_owned;
+    let prefix = if self.bucket.is_none() && !prefix.is_empty() && !prefix.contains('/') {
+      normalised_owned = format!("{prefix}/");
+      normalised_owned.as_str()
+    } else {
+      prefix
+    };
+
+    // Otherwise we need to know which bucket to list. Split the prefix on
+    // its first `/`: in single-bucket mode the configured bucket is used
+    // and the prefix passes through verbatim; in multi-bucket mode the
+    // leading segment names the bucket and the rest is the sub-prefix.
+    let (bucket, sub_prefix) = self.split_path(prefix)?;
+    let bucket_prefix_owned;
+    let bucket_prefix = if self.bucket.is_some() {
+      None
+    } else {
+      bucket_prefix_owned = format!("{bucket}/");
+      Some(bucket_prefix_owned.as_str())
+    };
+
     // Tokens prefixed with "m:" mean a previous v2 page failed to issue a
     // working ContinuationToken — the rest of this listing rides on v1
     // Marker semantics, which uses a different server code path that holds
@@ -342,17 +520,30 @@ impl StorageBackend for S3Backend {
     if let Some(t) = token.as_deref()
       && let Some(marker) = t.strip_prefix(V1_MARKER_PREFIX)
     {
-      return self.list_v1(prefix, marker).await;
+      return self
+        .list_v1(&bucket, sub_prefix, marker, bucket_prefix)
+        .await;
     }
-    self.list_v2(prefix, token).await
+    self
+      .list_v2(&bucket, sub_prefix, token, bucket_prefix)
+      .await
   }
 
   async fn stat(&self, path: &str) -> Result<FileMeta, AppError> {
+    let (bucket, key) = self.split_path(path)?;
+    // Same rationale as `get_file`: HeadObject with an empty key
+    // returns an opaque AWS error. Stat-ing a bucket directory has no
+    // file metadata to surface, so reject early with a clear message.
+    if key.is_empty() {
+      return Err(AppError::InvalidPath(format!(
+        "S3 path '{path}' refers to a bucket root, not a file"
+      )));
+    }
     let resp = self
       .client
       .head_object()
-      .bucket(&self.bucket)
-      .key(path)
+      .bucket(&bucket)
+      .key(key)
       .send()
       .await
       .map_err(Self::map_head_err)?;
@@ -478,5 +669,64 @@ mod tests {
     let entries = vec![dir("dir1/"), dir("dir2/"), dir("dir3/")];
     let got = compute_next_token_v1(None, Some(true), &entries).expect("expected fallback token");
     assert_eq!(got, format!("{V1_MARKER_PREFIX}dir3/\u{10FFFF}"));
+  }
+
+  // --- multi-bucket path routing ----------------------------------------
+
+  #[test]
+  fn split_path_single_bucket_passes_through() {
+    // Pinned bucket short-circuits the split: path is treated as an opaque
+    // key, no parsing — preserves the pre-feature wire format.
+    assert_eq!(
+      split_path(Some("b"), "foo/bar").unwrap(),
+      ("b".to_string(), "foo/bar"),
+    );
+    assert_eq!(
+      split_path(Some("b"), "").unwrap(),
+      ("b".to_string(), ""),
+      "empty path stays empty in single-bucket mode (root listing)",
+    );
+  }
+
+  #[test]
+  fn split_path_multi_bucket_splits_on_first_slash() {
+    assert_eq!(split_path(None, "b/x/y").unwrap(), ("b".to_string(), "x/y"),);
+    assert_eq!(
+      split_path(None, "b/").unwrap(),
+      ("b".to_string(), ""),
+      "trailing-slash bucket prefix lists that bucket's root",
+    );
+  }
+
+  #[test]
+  fn split_path_multi_bucket_rejects_empty_and_bare_bucket() {
+    assert!(matches!(
+      split_path(None, ""),
+      Err(AppError::InvalidPath(_))
+    ));
+    assert!(
+      matches!(split_path(None, "b"), Err(AppError::InvalidPath(_))),
+      "a bare bucket name with no '/' can't address an object",
+    );
+  }
+
+  #[test]
+  fn split_path_multi_bucket_rejects_leading_slash() {
+    assert!(matches!(
+      split_path(None, "/b/x"),
+      Err(AppError::InvalidPath(_))
+    ));
+  }
+
+  #[test]
+  fn join_bucket_prefix_no_op_in_single_bucket() {
+    assert_eq!(join_bucket_prefix(None, "foo/bar"), "foo/bar");
+    assert_eq!(join_bucket_prefix(None, ""), "");
+  }
+
+  #[test]
+  fn join_bucket_prefix_prepends_in_multi_bucket() {
+    assert_eq!(join_bucket_prefix(Some("b/"), "foo/bar"), "b/foo/bar");
+    assert_eq!(join_bucket_prefix(Some("b/"), "sub/"), "b/sub/");
   }
 }

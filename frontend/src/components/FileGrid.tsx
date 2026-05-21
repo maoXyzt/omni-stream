@@ -6,11 +6,22 @@ interface FileGridProps {
   entries: FileEntry[]
   prefix: string
   storageName: string
+  /// True when the current listing is the root of an S3 multi-bucket
+  /// storage; tile renders use the bucket icon for directory entries
+  /// instead of the regular folder one.
+  inBucketRoot: boolean
   fit: GridFit
   onSelect: (entry: FileEntry) => void
 }
 
-export function FileGrid({ entries, prefix, storageName, fit, onSelect }: FileGridProps) {
+export function FileGrid({
+  entries,
+  prefix,
+  storageName,
+  inBucketRoot,
+  fit,
+  onSelect,
+}: FileGridProps) {
   if (entries.length === 0) {
     return (
       <div className="py-10 text-center text-muted-foreground">
@@ -36,6 +47,7 @@ export function FileGrid({ entries, prefix, storageName, fit, onSelect }: FileGr
           entry={entry}
           prefix={prefix}
           storageName={storageName}
+          inBucketRoot={inBucketRoot}
           fit={fit}
           onSelect={onSelect}
         />

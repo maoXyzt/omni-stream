@@ -16,7 +16,6 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
-  Folder,
   Loader2,
   LogOut,
   PanelLeft,
@@ -29,7 +28,13 @@ import {
 
 import { ApiError, getStoredToken, setStoredToken } from '@/api/client'
 import { listFiles, proxyUrl } from '@/api/storage'
-import { useListFiles, useServerInfo, useStorages } from '@/hooks/use-storage'
+import { isMultiBucketS3 } from '@/lib/storage-display'
+import {
+  useListFiles,
+  usePrefetchListFiles,
+  useServerInfo,
+  useStorages,
+} from '@/hooks/use-storage'
 import { useMediaQuery } from '@/hooks/use-media-query'
 import { useResizableWidth } from '@/hooks/use-resizable-width'
 import { useSidebarCollapsed } from '@/hooks/use-sidebar-collapsed'
@@ -46,8 +51,8 @@ import { PathNavigator } from '@/components/PathNavigator'
 import { PreviewModal } from '@/components/PreviewModal'
 import { Sidebar } from '@/components/Sidebar'
 import {
-  FOLDER_COLOR,
   colorForKey,
+  dirVisual,
   getPreviewType,
   iconForKey,
   previewableKind,
@@ -109,6 +114,24 @@ export function FileList() {
 
   const storagesQuery = useStorages()
   const serverInfo = useServerInfo()
+  const activeStorage = useMemo(
+    () => storagesQuery.data?.storages.find((s) => s.name === storageName),
+    [storagesQuery.data, storageName],
+  )
+  // True only when this storage hands out raw buckets at the root (S3
+  // multi-bucket mode). Threaded into the list / grid / sidebar so entry
+  // icons at the bucket level read as buckets, not folders.
+  const multiBucket = isMultiBucketS3(activeStorage)
+  const inBucketRoot = multiBucket && prefix === ''
+  // For S3 storages configured in multi-bucket mode (`s3.bucket` omitted in
+  // the server config → backend reports `bucket: null`), the URL's first
+  // path segment IS the bucket name. Surface it to the navbar switcher so it
+  // can render "current bucket" instead of just an opaque "*".
+  const currentBucket = useMemo<string | null>(() => {
+    if (!multiBucket) return null
+    const first = prefix.split('/')[0]
+    return first || null
+  }, [multiBucket, prefix])
   const [viewMode, setViewMode] = useViewMode()
   const [gridFit, setGridFit] = useGridFit()
   // Inline split layout (narrow file list + preview pane) needs horizontal
@@ -156,6 +179,7 @@ export function FileList() {
   // walking and direct fetches share the same cache.
   const currentToken = tokenStack[currentPage - 1]
   const listQuery = useListFiles(prefix, currentToken, storageName || undefined)
+  const prefetchListFiles = usePrefetchListFiles()
   // `walking` is the UI signal (Pager spinner + skeleton). `walkingRef`
   // mirrors it as a ref so the walk effect can guard re-entry without
   // listing `walking` in its dep array.
@@ -207,6 +231,23 @@ export function FileList() {
       return next
     })
   }, [listQuery.data, currentPage, tokenStack.length])
+
+  // Prefetch the next page once the current one resolves so Next-click
+  // navigation lands instantly. Skipped during a walk (the walker drives
+  // its own multi-page fetch) and when the URL points past the known
+  // range (`listQuery.data` is then page 1, not the user's target — the
+  // walk effect below will catch up first). Same staleTime as
+  // `useListFiles` so the prefetched entry survives until the consumer
+  // mounts.
+  const nextToken = listQuery.data?.next_token ?? null
+  const knownPages = tokenStack.length
+  useEffect(() => {
+    if (walkingRef.current) return
+    if (!storageName) return
+    if (!nextToken) return
+    if (currentPage > knownPages) return
+    prefetchListFiles(prefix, nextToken, storageName || undefined)
+  }, [nextToken, currentPage, knownPages, prefix, storageName, prefetchListFiles])
 
   // Walk-on-cold-cache: URL says page N but tokenStack only knows up to
   // page K (< N). One request with `skip_pages = N - K` returns the landed
@@ -419,22 +460,26 @@ export function FileList() {
         const name = displayName(e.key, prefix).toLowerCase()
         if (!name.includes(q)) return false
       }
-      if (typeFilter && typeLabelForEntry(e.key, e.is_dir) !== typeFilter) {
+      if (
+        typeFilter &&
+        typeLabelForEntry(e.key, e.is_dir, e.is_dir && inBucketRoot) !==
+          typeFilter
+      ) {
         return false
       }
       return true
     })
-  }, [sortedEntries, nameFilter, typeFilter, prefix])
+  }, [sortedEntries, nameFilter, typeFilter, prefix, inBucketRoot])
 
   // Types that actually appear in the current page — populated before
   // filtering so the dropdown stays stable as the user narrows down.
   const availableTypes = useMemo(() => {
     const set = new Set<string>()
     for (const e of sortedEntries) {
-      set.add(typeLabelForEntry(e.key, e.is_dir))
+      set.add(typeLabelForEntry(e.key, e.is_dir, e.is_dir && inBucketRoot))
     }
     return Array.from(set).sort()
-  }, [sortedEntries])
+  }, [sortedEntries, inBucketRoot])
 
   const filtersActive = nameFilter !== '' || typeFilter !== ''
   const clearFilters = () => {
@@ -626,6 +671,7 @@ export function FileList() {
             storages={storagesQuery.data.storages}
             active={storageName}
             onChange={switchStorage}
+            currentBucket={currentBucket}
           />
         )}
         {/* `ml-auto` floats this to the right edge regardless of how many
@@ -659,6 +705,7 @@ export function FileList() {
               <Sidebar
                 prefix={prefix}
                 storageName={storageName}
+                multiBucket={multiBucket}
                 onNavigate={goToPath}
               />
             </aside>
@@ -857,6 +904,7 @@ export function FileList() {
                       entry={entry}
                       prefix={prefix}
                       storageName={storageName}
+                      inBucketRoot={inBucketRoot}
                       selected={previewState?.key === entry.key}
                       onSelect={handleEntry}
                     />
@@ -931,6 +979,7 @@ export function FileList() {
                 entries={filteredEntries}
                 prefix={prefix}
                 storageName={storageName}
+                inBucketRoot={inBucketRoot}
                 fit={gridFit}
                 onSelect={handleEntry}
               />
@@ -963,6 +1012,7 @@ export function FileList() {
                       entry={entry}
                       prefix={prefix}
                       storageName={storageName}
+                      inBucketRoot={inBucketRoot}
                       onSelect={handleEntry}
                     />
                   ))}
@@ -1064,14 +1114,26 @@ interface FileRowProps {
   entry: FileEntry
   prefix: string
   storageName: string
+  /// True when the rendered listing is the root of an S3 multi-bucket
+  /// storage — in that case every directory entry IS a bucket and gets
+  /// the bucket visual instead of the folder one.
+  inBucketRoot: boolean
   onSelect: (entry: FileEntry) => void
 }
 
-function FileRow({ entry, prefix, storageName, onSelect }: FileRowProps) {
-  const Icon = entry.is_dir ? Folder : iconForKey(entry.key)
-  const color = entry.is_dir ? FOLDER_COLOR : colorForKey(entry.key)
+function FileRow({
+  entry,
+  prefix,
+  storageName,
+  inBucketRoot,
+  onSelect,
+}: FileRowProps) {
+  const isBucket = entry.is_dir && inBucketRoot
+  const dir = dirVisual(isBucket)
+  const Icon = entry.is_dir ? dir.Icon : iconForKey(entry.key)
+  const color = entry.is_dir ? dir.color : colorForKey(entry.key)
   const name = displayName(entry.key, prefix)
-  const typeLabel = typeLabelForEntry(entry.key, entry.is_dir)
+  const typeLabel = typeLabelForEntry(entry.key, entry.is_dir, isBucket)
 
   return (
     <EntryContextMenu entry={entry} storageName={storageName}>
@@ -1133,6 +1195,8 @@ interface GalleryRowProps {
   entry: FileEntry
   prefix: string
   storageName: string
+  /// See FileRowProps.inBucketRoot — same semantics.
+  inBucketRoot: boolean
   selected: boolean
   onSelect: (entry: FileEntry) => void
 }
@@ -1141,11 +1205,14 @@ function GalleryRow({
   entry,
   prefix,
   storageName,
+  inBucketRoot,
   selected,
   onSelect,
 }: GalleryRowProps) {
-  const Icon = entry.is_dir ? Folder : iconForKey(entry.key)
-  const color = entry.is_dir ? FOLDER_COLOR : colorForKey(entry.key)
+  const isBucket = entry.is_dir && inBucketRoot
+  const dir = dirVisual(isBucket)
+  const Icon = entry.is_dir ? dir.Icon : iconForKey(entry.key)
+  const color = entry.is_dir ? dir.color : colorForKey(entry.key)
   const name = displayName(entry.key, prefix)
   const ref = useRef<HTMLButtonElement>(null)
 

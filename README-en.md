@@ -2,9 +2,7 @@
 
 [中文](README.md) · **English**
 
-**A single-binary, streaming file browser and previewer** — point it at any local directory or S3-compatible object storage (MinIO / OSS / Ceph / R2 / …) and it instantly exposes them as a browsable, previewable HTTP service. Open it in a browser to walk directories, view images, stream video, and read code — no client to install, no extra frontend or reverse proxy to wire up. The backend is built on `axum + tokio + aws-sdk-s3`, with one `StorageBackend` trait abstracting over every supported backend.
-
-**A ready-to-use React SPA is bundled into the binary.** Once started, opening `http://<host>:<port>/` in a browser lets you walk directories, lazy-load thumbnails, and preview files in place — no extra static-file server or object browser required. Preview supports:
+**A single-binary, streaming file browser and previewer** — point it at any local directory or S3-compatible object storage (MinIO / OSS / Ceph / R2 / …) and it instantly exposes them as a browsable, previewable HTTP service. The backend is built on `axum + tokio + aws-sdk-s3`, with one `StorageBackend` trait abstracting over every supported backend; a React SPA is bundled in, so opening `http://<host>:<port>/` lets you walk directories, lazy-load thumbnails, and preview files in place. Preview supports:
 
 - **Images** — png / jpg / gif / webp / avif / bmp / svg / ico
 - **Video** — mp4 / webm / mov / mkv / m4v / ogv, with `Range`-based seeking
@@ -12,7 +10,7 @@
   rs / ts / py / go / sql / shell / proto, and many more
 - **Anything else** — generic fallback: icon + metadata + the browser's built-in viewer
 
-> Previewing files on S3 / S3-compatible storage requires the configured access key to hold both **`s3:GetObject`** (preview / download / HEAD) and **`s3:ListBucket`** (directory browsing / thumbnail listing). Missing either yields a 403 on the corresponding action. The local filesystem backend has no such requirement, but is restricted to the directory configured as `local.root_path`.
+> Previewing files on S3 / S3-compatible storage requires the configured access key to hold both **`s3:GetObject`** (preview / download / HEAD) and **`s3:ListBucket`** (directory browsing / thumbnail listing). Missing either yields a 403 on the corresponding action. If you omit `s3.bucket` to use multi-bucket mode (see below), the credentials must additionally hold **`s3:ListAllMyBuckets`** so the root listing can enumerate every visible bucket. The local filesystem backend has no such requirement, but is restricted to the directory configured as `local.root_path`.
 
 HTTP API (the bundled SPA is built on top of these — `curl` or your own client works just as well):
 
@@ -25,7 +23,7 @@ HTTP API (the bundled SPA is built on top of these — `curl` or your own client
 
 ## 1. Install
 
-**Recommended**: install via cargo. The binary lands in `~/.cargo/bin/` (already on `$PATH`), so you can invoke it directly as `omni-stream`:
+**Recommended**: install via cargo (lands in `~/.cargo/bin/`):
 
 ```bash
 cargo install omni-stream    # requires Rust 1.91+
@@ -68,7 +66,27 @@ Or S3 / S3-compatible (MinIO / OSS):
 name = "production-s3"
 type = "s3"
 active = true
-s3 = { endpoint = "http://minio.local:9000", bucket = "data", access_key = "...", secret_key = "...", region = "us-east-1" }
+s3 = { endpoint = "http://minio.local:9000", bucket = "data", access_key = "...", secret_key = "..." }
+```
+
+> `s3.region` defaults to `us-east-1`, which is fine for MinIO / LocalStack
+> and AWS us-east-1 buckets — leave it out by default. **Only set it when:**
+> (1) the target AWS bucket lives outside us-east-1, since SigV4 has to use
+> the bucket's actual region (otherwise AWS returns
+> `AuthorizationHeaderMalformed`); or (2) the S3-compatible gateway
+> validates the region strictly (most don't).
+
+`s3.bucket` is optional. **Omit it (or set it to `"*"`) to enable multi-bucket
+mode**: the storage root performs `ListBuckets`, and every bucket the
+credentials can see appears as a top-level directory; navigating into one
+drills down with the usual prefix listing. The credentials must hold the
+`s3:ListAllMyBuckets` IAM permission. Example:
+
+```toml
+[[storages]]
+name = "all-prod-s3"
+type = "s3"
+s3 = { endpoint = "http://minio.local:9000", access_key = "...", secret_key = "..." }
 ```
 
 > Multiple `[[storages]]` entries can coexist; on startup the one with `active = true` wins, and if none is active the first entry is used.
@@ -104,9 +122,8 @@ OMNI_AUTH_ENABLED=true OMNI_AUTH_TOKEN=$(openssl rand -hex 32) ./omni-stream
 Once enabled:
 
 - All `/api/*` requests must carry `Authorization: Bearer <token>`, otherwise the server returns `401` plus `WWW-Authenticate: Bearer realm="omni-stream"`.
-- Token comparison uses constant-time byte equality, so length / content differences cannot leak via timing.
 - The embedded SPA (`/`, `/assets/*`) stays open — the browser has to load the page first before the user can enter a token. The first API call gets a 401, the SPA pops up a token input, stores it in `localStorage`, and attaches it to subsequent requests.
-- TLS is intentionally out of scope for this process. To expose it on an untrusted network, put nginx / caddy / Cloudflare in front and let them handle HTTPS.
+- TLS is out of scope — put nginx / caddy in front for HTTPS.
 
 ### Config CLI
 
@@ -129,13 +146,7 @@ omni-stream config check ./my-config.toml
 ```
 
 The template `config init` writes is the verbatim `config.example.toml` from
-the repo, embedded into the binary at compile time via `include_str!` — no
-external file required.
-
-Subcommand output uses ANSI colours and emoji icons to keep interactive
-terminals scannable, but follows the [NO_COLOR](https://no-color.org/)
-convention — `NO_COLOR=1` or piping to a file / pipe automatically falls
-back to plain ASCII. Set `FORCE_COLOR=1` to force colour on inside scripts.
+the repo, embedded into the binary — no external file required.
 
 ## 3. Run
 
