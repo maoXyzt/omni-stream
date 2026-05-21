@@ -103,9 +103,9 @@ const SRC_AWARE_WIDGETS = new Set(['image', 'video', 'audio', 'link', 'text'])
 /// `JSON.stringify(_, null, 2)` formatter as saved rules so the output is
 /// idempotent — Save → reopen → no "modified" indicator. When the
 /// template contains any media widget, prepends a JSON5 comment block
-/// explaining the implicit `src: "{value}"` default and how to override
-/// it; safe because the editor parses JSON5 and Save canonicalises the
-/// comments away.
+/// above the array explaining the implicit `src: "{value}"` default and
+/// how to override it; safe because the editor parses JSON5 and Save
+/// canonicalises the comments away.
 function defaultTemplateFor(columns: ColumnInfo[]): string {
   if (columns.length === 0) return EXAMPLE_RULES
   const nodes = columns.map((c) => {
@@ -134,18 +134,18 @@ function defaultTemplateFor(columns: ColumnInfo[]): string {
       Object.keys(n).some((k) => SRC_AWARE_WIDGETS.has(k)),
   )
   if (!hasMediaWidget) return json
+  // Banner sits above the array — keeps the JSON body itself the canonical
+  // `JSON.stringify(_, null, 2)` form a Format round-trip would emit (and
+  // also reads more like a file-level docstring than an inline aside).
   const banner = [
-    '  // Each image / video / audio / link / text widget below omits "src",',
-    '  // which defaults to "{value}" — the cell\'s value is treated as a',
-    '  // storage path resolved relative to this data file. Override per-node:',
-    '  //   { "image": "id", "src": "https://cdn/{value}.png" }   ← remote URL',
-    '  //   { "image": "id", "src": "./images/{value}.jpg" }      ← sibling dir',
-    '  //   { "image": "id", "src": "/shared/{value}" }           ← absolute key',
-    '',
+    '// Each image / video / audio / link / text widget below omits "src",',
+    '// which defaults to "{value}" — the cell\'s value is treated as a',
+    '// storage path resolved relative to this data file. Override per-node:',
+    '//   { "image": "id", "src": "https://cdn/{value}.png" }   ← remote URL',
+    '//   { "image": "id", "src": "./images/{value}.jpg" }      ← sibling dir',
+    '//   { "image": "id", "src": "/shared/{value}" }           ← absolute key',
   ].join('\n')
-  // Splice the banner between the opening `[` and the first node so the
-  // body's existing indentation stays intact.
-  return json.replace(/^\[\n/, `[\n${banner}\n`)
+  return `${banner}\n\n${json}`
 }
 
 interface Template {
