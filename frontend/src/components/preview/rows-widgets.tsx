@@ -26,7 +26,7 @@ import { formatCell, formatCellExpanded } from '@/lib/parquet'
 import { resolveSrc, type SrcResolution } from '@/lib/rows-paths'
 import { cn } from '@/lib/utils'
 
-import { EmptyHint } from './widget-shared'
+import { EmptyHint, MediaFrame } from './widget-shared'
 
 export { EmptyHint } from './widget-shared'
 
@@ -163,47 +163,49 @@ export function WidgetImage({ value, src, ctx }: MediaProps) {
       : r.url
   return (
     <>
-      {/* Wrapping the image in a real <button> rather than an onClick <div>
-          so keyboard focus, Enter/Space activation, and focus-visible rings
-          all come for free. The image keeps cursor-zoom-in to signal what
-          clicking will do. `relative` anchors the loading overlay below. */}
-      <button
-        type="button"
-        onClick={() => setLightboxOpen(true)}
-        aria-label="Open image at full size"
-        className="relative block w-fit overflow-hidden rounded-md border bg-muted/30 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      >
-        <img
-          src={displaySrc}
-          alt={resolutionDetail(r)}
-          onLoad={() => {
-            setEverLoaded(true)
-            setLoading(false)
-          }}
-          onError={() => {
-            // First failure on the thumb URL — swap to the original via
-            // proxy. The src change re-fires onLoad / onError; keep
-            // `loading` true so the spinner stays up through the swap.
-            if (useThumb && !usingFallback) {
-              setUsingFallback(true)
-              setLoading(true)
-              return
-            }
-            setLoading(false)
-            setFailed(true)
-          }}
-          loading="lazy"
-          className={cn(
-            'max-h-96 w-auto max-w-full cursor-zoom-in object-contain transition-opacity duration-150',
-            loading && 'opacity-40',
+      <MediaFrame fitContent path={resolutionDetail(r)}>
+        {/* Wrapping the image in a real <button> rather than an onClick <div>
+            so keyboard focus, Enter/Space activation, and focus-visible rings
+            all come for free. The image keeps cursor-zoom-in to signal what
+            clicking will do. `relative` anchors the loading overlay below. */}
+        <button
+          type="button"
+          onClick={() => setLightboxOpen(true)}
+          aria-label="Open image at full size"
+          className="relative block focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+        >
+          <img
+            src={displaySrc}
+            alt={resolutionDetail(r)}
+            onLoad={() => {
+              setEverLoaded(true)
+              setLoading(false)
+            }}
+            onError={() => {
+              // First failure on the thumb URL — swap to the original via
+              // proxy. The src change re-fires onLoad / onError; keep
+              // `loading` true so the spinner stays up through the swap.
+              if (useThumb && !usingFallback) {
+                setUsingFallback(true)
+                setLoading(true)
+                return
+              }
+              setLoading(false)
+              setFailed(true)
+            }}
+            loading="lazy"
+            className={cn(
+              'max-h-96 w-auto max-w-full cursor-zoom-in object-contain transition-opacity duration-150',
+              loading && 'opacity-40',
+            )}
+          />
+          {loading && (
+            <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+              <Loader2 className="size-6 animate-spin text-foreground drop-shadow" />
+            </div>
           )}
-        />
-        {loading && (
-          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-            <Loader2 className="size-6 animate-spin text-foreground drop-shadow" />
-          </div>
-        )}
-      </button>
+        </button>
+      </MediaFrame>
       <Dialog open={lightboxOpen} onOpenChange={setLightboxOpen}>
         <DialogContent
           // Full-bleed lightbox: 95vw × 95vh, no padding, no default close
@@ -256,35 +258,37 @@ export function WidgetVideo({ value, src, ctx }: MediaProps) {
     )
   }
   return (
-    <div className="relative w-full">
-      <video
-        src={r.url}
-        controls
-        // `onLoadedData` fires when the first frame is ready to display —
-        // earlier than `canplay` but enough that the player is visually
-        // "loaded" rather than a black box. Falling back to fading the
-        // element so the old frame stays visible during the swap.
-        onLoadedData={() => {
-          setEverLoaded(true)
-          setLoading(false)
-        }}
-        onError={() => {
-          setLoading(false)
-          setFailed(true)
-        }}
-        className={cn(
-          'max-h-96 w-full rounded-md border bg-black transition-opacity duration-150',
-          loading && 'opacity-40',
+    <MediaFrame path={resolutionDetail(r)}>
+      <div className="relative w-full">
+        <video
+          src={r.url}
+          controls
+          // `onLoadedData` fires when the first frame is ready to display —
+          // earlier than `canplay` but enough that the player is visually
+          // "loaded" rather than a black box. Falling back to fading the
+          // element so the old frame stays visible during the swap.
+          onLoadedData={() => {
+            setEverLoaded(true)
+            setLoading(false)
+          }}
+          onError={() => {
+            setLoading(false)
+            setFailed(true)
+          }}
+          className={cn(
+            'max-h-96 w-full bg-black transition-opacity duration-150',
+            loading && 'opacity-40',
+          )}
+        />
+        {loading && (
+          // `pointer-events-none` keeps the playback controls clickable
+          // through the overlay if the user tries to interact mid-swap.
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+            <Loader2 className="size-7 animate-spin text-white drop-shadow-md" />
+          </div>
         )}
-      />
-      {loading && (
-        // `pointer-events-none` keeps the playback controls clickable
-        // through the overlay if the user tries to interact mid-swap.
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-          <Loader2 className="size-7 animate-spin text-white drop-shadow-md" />
-        </div>
-      )}
-    </div>
+      </div>
+    </MediaFrame>
   )
 }
 
@@ -317,27 +321,29 @@ export function WidgetAudio({ value, src, ctx }: MediaProps) {
   // them would block playback. Tuck the spinner inline beside the strip
   // instead so users see motion without losing access to Play/Pause.
   return (
-    <div className="flex w-full items-center gap-2">
-      <audio
-        src={r.url}
-        controls
-        onLoadedMetadata={() => {
-          setEverLoaded(true)
-          setLoading(false)
-        }}
-        onError={() => {
-          setLoading(false)
-          setFailed(true)
-        }}
-        className={cn(
-          'flex-1 transition-opacity duration-150',
-          loading && 'opacity-60',
+    <MediaFrame path={resolutionDetail(r)}>
+      <div className="flex w-full items-center gap-2 px-2 py-1.5">
+        <audio
+          src={r.url}
+          controls
+          onLoadedMetadata={() => {
+            setEverLoaded(true)
+            setLoading(false)
+          }}
+          onError={() => {
+            setLoading(false)
+            setFailed(true)
+          }}
+          className={cn(
+            'flex-1 transition-opacity duration-150',
+            loading && 'opacity-60',
+          )}
+        />
+        {loading && (
+          <Loader2 className="size-4 shrink-0 animate-spin text-muted-foreground" />
         )}
-      />
-      {loading && (
-        <Loader2 className="size-4 shrink-0 animate-spin text-muted-foreground" />
-      )}
-    </div>
+      </div>
+    </MediaFrame>
   )
 }
 
