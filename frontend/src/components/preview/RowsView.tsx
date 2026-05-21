@@ -51,7 +51,13 @@ export function RowsView({ fileKey, source, storage }: RowsViewProps) {
   // navigates back to the same file. A decode error means the URL had a
   // `rows=` param that failed validation; in that case we surface the
   // banner instead of opening the editor, since auto-opening would
-  // suggest the error is dismissed.
+  // suggest the error is dismissed. Note: the decode-error visit *also*
+  // burns the one-shot — if the user later fixes the URL while still on
+  // the same fileKey, the editor won't auto-open again. That's
+  // intentional (the user has already engaged with the page) and not a
+  // real problem in practice because a successful fix-up populates
+  // `rules`, which then blocks auto-open via the `rules.length === 0`
+  // guard anyway.
   const autoOpenedForFile = useRef<string | null>(null)
   useEffect(() => {
     if (autoOpenedForFile.current === fileKey) return
