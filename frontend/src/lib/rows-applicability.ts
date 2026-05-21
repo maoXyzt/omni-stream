@@ -10,11 +10,7 @@
 // errors in the editor anyway.
 
 import type { Node } from './rows-schema'
-import {
-  type Selector,
-  SelectorError,
-  parseSelector,
-} from './rows-selector'
+import { SelectorError, parseSelector, rootColumn } from './rows-selector'
 
 export interface PresetMatch {
   /// Distinct root columns referenced anywhere in the rules tree.
@@ -64,12 +60,4 @@ function collectColumns(nodes: Node[], out: Set<string>): void {
       throw err
     }
   }
-}
-
-function rootColumn(sel: Selector): string {
-  let cur = sel
-  while (cur.op !== 'root') {
-    cur = cur.from
-  }
-  return cur.column
 }
