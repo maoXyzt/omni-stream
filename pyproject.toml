@@ -1,0 +1,47 @@
+[build-system]
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "omni-stream"
+description = "Single-binary streaming storage proxy: serve local FS or S3-compatible object storage behind one HTTP port, with an embedded React SPA."
+readme = "README.md"
+license = "MIT OR Apache-2.0"
+requires-python = ">=3.8"
+keywords = ["s3", "proxy", "streaming", "storage", "cli"]
+authors = [{ name = "maoXyzt" }]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Environment :: Web Environment",
+    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Rust",
+    "Topic :: Internet :: WWW/HTTP :: HTTP Servers",
+    "Topic :: System :: Filesystems",
+]
+dynamic = ["version"]
+
+[project.urls]
+Homepage = "https://github.com/maoXyzt/omni-stream"
+Repository = "https://github.com/maoXyzt/omni-stream"
+Issues = "https://github.com/maoXyzt/omni-stream/issues"
+
+# Maturin packages the prebuilt Rust binary into a Python wheel — same approach
+# as ruff / uv / polars. `bindings = "bin"` produces wheels tagged
+# `py3-none-<platform>`; pip / pipx installs the wheel and drops the binary on
+# PATH as a console script. No Python wrapper code runs.
+#
+# Version is read from Cargo.toml (declared `dynamic = ["version"]` above), so
+# the existing `cargo release` flow remains the single source of version truth.
+#
+# Frontend dependency: src/main.rs embeds `frontend/dist/` via `rust-embed`, so
+# `pnpm build` in `frontend/` must run before `maturin build`. CI handles this
+# by downloading the `frontend-dist` artifact from the upstream `frontend` job;
+# locally, run `cd frontend && pnpm build` first.
+[tool.maturin]
+bindings = "bin"
+manifest-path = "Cargo.toml"
+strip = true

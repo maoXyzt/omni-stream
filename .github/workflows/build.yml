@@ -284,6 +284,63 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  # PyPI wheels — fans out across the same matrix as `backend` so a wheel-build
+  # regression blocks the same gates (PR merge, tag → release). `bindings =
+  # "bin"` in pyproject.toml tells maturin to package the prebuilt Rust binary
+  # into a `py3-none-<platform>` wheel; pip / pipx then drops the binary on
+  # PATH on install. Same approach as ruff / uv / polars.
+  #
+  # The frontend dist is pulled from the upstream `frontend` job's artifact
+  # (rust-embed reads it at compile time), and README-en.md is swapped over
+  # README.md so PyPI's long description matches crates.io.
+  wheels:
+    name: wheel (${{ matrix.target }})
+    needs: [frontend, matrix-config]
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.matrix-config.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Pull frontend dist
+        uses: actions/download-artifact@v8
+        with:
+          name: frontend-dist
+          path: frontend/dist
+
+      # Same swap as `publish-dry-run` / `publish` — see comments there. The
+      # PyPI project's long description is the README packaged into the wheel
+      # METADATA; we want English on PyPI, matching crates.io.
+      - name: Substitute English README for PyPI packaging
+        run: cp README-en.md README.md
+
+      # Build the wheel. The action's manylinux container ships a Rust
+      # toolchain, so we pin to MSRV for parity with the `backend` job.
+      # `manylinux: auto` picks manylinux_2_17 for the gnu target; for musl we
+      # force musllinux_1_2.
+      - name: Build wheel
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          args: --release --locked --strip
+          manylinux: ${{ matrix.target == 'x86_64-unknown-linux-musl' && 'musllinux_1_2' || 'auto' }}
+          rust-toolchain: '1.91'
+          sccache: 'true'
+
+      # Skip upload on PR for the same reason `backend` skips its tarball
+      # upload: no downstream job consumes the wheels on PR (`publish-pypi`
+      # only fires on tag), and skipping saves artifact storage. Tag and main
+      # runs upload so `publish-pypi` can collect them.
+      - name: Upload wheel
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v7
+        with:
+          name: omni-stream-wheel-${{ matrix.target }}
+          path: target/wheels/*.whl
+          if-no-files-found: error
+          retention-days: 14
+
   # Generates release notes from conventional commits between the previous and
   # current tag using `cliff.toml`. Only runs on tag pushes; `--latest` scopes
   # the output to the new tag and `--strip header` drops the "# Changelog"
@@ -404,3 +461,36 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: cargo publish --locked --allow-dirty --registry crates-io
+
+  # Uploads the wheels built in the `wheels` matrix to PyPI. Auth is via PyPI
+  # Trusted Publishers (OIDC) — there is no long-lived API token to rotate or
+  # leak; PyPA verifies the short-lived OIDC token GitHub mints for this run.
+  # One-time setup at https://pypi.org/manage/account/publishing/ — see
+  # docs/how_to_release.md.
+  #
+  # The `environment: pypi` declaration must match the environment registered
+  # with the PyPI Trusted Publisher; gating on a GitHub environment also lets
+  # the repo admin add required-reviewer rules before any upload runs.
+  publish-pypi:
+    name: PyPI publish
+    needs: [verify-tag, wheels, lint]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/omni-stream
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Download all wheels
+        uses: actions/download-artifact@v8
+        with:
+          pattern: omni-stream-wheel-*
+          path: dist
+          merge-multiple: true
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist

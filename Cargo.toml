@@ -19,6 +19,7 @@ include = [
     "/frontend/dist/**/*",
     "/Cargo.toml",
     "/Cargo.lock",
+    "/pyproject.toml",
     "/README.md",
     "/LICENSE-MIT",
     "/LICENSE-APACHE",

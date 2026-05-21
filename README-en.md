@@ -29,6 +29,25 @@ HTTP API (the bundled SPA is built on top of these — `curl` or your own client
 cargo install omni-stream    # requires Rust 1.91+
 ```
 
+**Python users** (no Rust toolchain required — install from PyPI):
+
+```bash
+uv tool install omni-stream  # recommended: global CLI in an isolated venv
+# or run one-off without installing
+uvx omni-stream --help
+# without uv, install into the active venv with plain pip
+pip install omni-stream
+```
+
+The PyPI wheels bundle the prebuilt binary directly, so once installed
+`omni-stream` runs as a normal CLI — Python is not invoked. Same three
+platforms as the GitHub Releases tarballs: `x86_64-unknown-linux-gnu`
+(manylinux), `x86_64-unknown-linux-musl` (musllinux), `aarch64-apple-darwin`.
+
+> Don't have uv yet? `curl -LsSf https://astral.sh/uv/install.sh | sh` (full
+> docs at <https://docs.astral.sh/uv/>). You can also use
+> `pipx install omni-stream` for an isolated global install — same wheel.
+
 Or download a pre-built binary from GitHub Releases: <https://github.com/maoXyzt/omni-stream/releases/latest>.
 Three targets are published — `x86_64-unknown-linux-gnu` / `x86_64-unknown-linux-musl` /
 `aarch64-apple-darwin`. (Windows users can build from source). For pre-built binaries,
