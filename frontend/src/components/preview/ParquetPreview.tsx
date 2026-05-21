@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { keepPreviousData, useQuery } from '@tanstack/react-query'
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   AlertCircle,
   Check,
@@ -170,6 +170,40 @@ export function ParquetPreview({ fileKey, src, storage }: PreviewerProps) {
     placeholderData: keepPreviousData,
     staleTime: Infinity,
   })
+
+  // Prefetch the next page so a click on "Next" lands instantly. Triggers
+  // once the current page resolves so we don't compete with the in-flight
+  // fetch for the same AsyncBuffer. prefetchQuery is a no-op when the
+  // target page is already cached, so re-entering this effect is cheap.
+  const queryClient = useQueryClient()
+  useEffect(() => {
+    if (!source || numRows === 0) return
+    if (rowsQuery.isPending || rowsQuery.isFetching) return
+    const next = clampedPage + 1
+    if (next >= pageCount) return
+    const rowStart = next * PAGE_SIZE
+    const rowEnd = Math.min(rowStart + PAGE_SIZE, numRows)
+    void queryClient.prefetchQuery({
+      queryKey: ['parquet-rows', src, next] as const,
+      queryFn: () =>
+        readParquetRows({
+          file: source.file,
+          metadata: source.metadata,
+          rowStart,
+          rowEnd,
+        }),
+      staleTime: Infinity,
+    })
+  }, [
+    queryClient,
+    source,
+    src,
+    clampedPage,
+    pageCount,
+    numRows,
+    rowsQuery.isPending,
+    rowsQuery.isFetching,
+  ])
 
   if (metaError) {
     return (

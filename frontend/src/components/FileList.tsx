@@ -29,7 +29,12 @@ import {
 
 import { ApiError, getStoredToken, setStoredToken } from '@/api/client'
 import { listFiles, proxyUrl } from '@/api/storage'
-import { useListFiles, useServerInfo, useStorages } from '@/hooks/use-storage'
+import {
+  useListFiles,
+  usePrefetchListFiles,
+  useServerInfo,
+  useStorages,
+} from '@/hooks/use-storage'
 import { useMediaQuery } from '@/hooks/use-media-query'
 import { useResizableWidth } from '@/hooks/use-resizable-width'
 import { useSidebarCollapsed } from '@/hooks/use-sidebar-collapsed'
@@ -168,6 +173,7 @@ export function FileList() {
   // walking and direct fetches share the same cache.
   const currentToken = tokenStack[currentPage - 1]
   const listQuery = useListFiles(prefix, currentToken, storageName || undefined)
+  const prefetchListFiles = usePrefetchListFiles()
   // `walking` is the UI signal (Pager spinner + skeleton). `walkingRef`
   // mirrors it as a ref so the walk effect can guard re-entry without
   // listing `walking` in its dep array.
@@ -219,6 +225,23 @@ export function FileList() {
       return next
     })
   }, [listQuery.data, currentPage, tokenStack.length])
+
+  // Prefetch the next page once the current one resolves so Next-click
+  // navigation lands instantly. Skipped during a walk (the walker drives
+  // its own multi-page fetch) and when the URL points past the known
+  // range (`listQuery.data` is then page 1, not the user's target — the
+  // walk effect below will catch up first). Same staleTime as
+  // `useListFiles` so the prefetched entry survives until the consumer
+  // mounts.
+  const nextToken = listQuery.data?.next_token ?? null
+  const knownPages = tokenStack.length
+  useEffect(() => {
+    if (walkingRef.current) return
+    if (!storageName) return
+    if (!nextToken) return
+    if (currentPage > knownPages) return
+    prefetchListFiles(prefix, nextToken, storageName || undefined)
+  }, [nextToken, currentPage, knownPages, prefix, storageName, prefetchListFiles])
 
   // Walk-on-cold-cache: URL says page N but tokenStack only knows up to
   // page K (< N). One request with `skip_pages = N - K` returns the landed

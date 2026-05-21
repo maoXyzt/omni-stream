@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { keepPreviousData, useQuery } from '@tanstack/react-query'
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertCircle, Check, Loader2, RotateCw, Settings2 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -129,6 +129,31 @@ export function RowsView({ fileKey, source, storage }: RowsViewProps) {
       setKnownTotal((prev) => (prev === v ? prev : v))
     }
   }, [rowsQuery.data])
+
+  // Prefetch the next page once the current one resolves so paging
+  // forward feels instant. `hasMore` from the current page's read
+  // result is the authoritative "next page actually has data" signal —
+  // for streaming sources the static `totalRows` may still be `null`.
+  const queryClient = useQueryClient()
+  useEffect(() => {
+    if (rowsQuery.isPending || rowsQuery.isFetching) return
+    if (!rowsQuery.data?.hasMore) return
+    const next = pageIndex + 1
+    void queryClient.prefetchQuery({
+      queryKey: ['rows-data', storage ?? null, fileKey, next] as const,
+      queryFn: () => source.readRows(next * ROWS_PAGE, (next + 1) * ROWS_PAGE),
+      staleTime: Infinity,
+    })
+  }, [
+    queryClient,
+    source,
+    storage,
+    fileKey,
+    pageIndex,
+    rowsQuery.data?.hasMore,
+    rowsQuery.isPending,
+    rowsQuery.isFetching,
+  ])
 
   const page = rowsQuery.data
   const rows = page?.rows ?? []

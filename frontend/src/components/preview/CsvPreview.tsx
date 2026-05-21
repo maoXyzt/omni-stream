@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { keepPreviousData, useQuery } from '@tanstack/react-query'
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   AlertCircle,
   Check,
@@ -101,6 +101,32 @@ export function CsvPreview({ fileKey, src, storage }: PreviewerProps) {
     placeholderData: keepPreviousData,
     staleTime: Infinity,
   })
+
+  // Prefetch the next page once the current one resolves. The streaming
+  // CSV source surfaces `hasMore` per page, so we only prefetch when the
+  // current page promises that more rows follow — past EOF the prefetch
+  // would just hit the empty tail. Gated on the current fetch being
+  // settled to avoid two concurrent reads against the same stream.
+  const queryClient = useQueryClient()
+  useEffect(() => {
+    if (!source) return
+    if (rowsQuery.isPending || rowsQuery.isFetching) return
+    if (!rowsQuery.data?.hasMore) return
+    const next = pageIndex + 1
+    void queryClient.prefetchQuery({
+      queryKey: ['csv-rows', src, next] as const,
+      queryFn: () => source.readRows(next * PAGE_SIZE, (next + 1) * PAGE_SIZE),
+      staleTime: Infinity,
+    })
+  }, [
+    queryClient,
+    source,
+    src,
+    pageIndex,
+    rowsQuery.data?.hasMore,
+    rowsQuery.isPending,
+    rowsQuery.isFetching,
+  ])
 
   if (metaError) {
     return (
