@@ -41,6 +41,7 @@ import { type ColumnInfo, loadRowsSource } from '@/lib/rows-source'
 import { cn } from '@/lib/utils'
 
 import { PageControls } from './PageControls'
+import { PartialInfoNotice } from './PartialInfoNotice'
 import type { PreviewerProps } from './types'
 
 const PAGE_SIZE = 100
@@ -172,6 +173,7 @@ export function CsvPreview({ fileKey, src, storage }: PreviewerProps) {
 
   return (
     <div className="flex h-full w-full flex-col gap-3 overflow-hidden p-4">
+      <PartialInfoNotice format="csv" />
       <InfoBar
         rows={totalRows}
         cols={columns.length}
@@ -199,10 +201,10 @@ export function CsvPreview({ fileKey, src, storage }: PreviewerProps) {
           />
         </div>
         <Button
-          variant="outline"
           size="sm"
           onClick={openRowsPage}
           disabled={!storage}
+          className="shadow-sm"
         >
           <LayoutList className="size-4" />
           Browse as cards

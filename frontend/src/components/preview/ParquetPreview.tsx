@@ -260,10 +260,10 @@ export function ParquetPreview({ fileKey, src, storage }: PreviewerProps) {
               forwarding any `?rows=` rules already in the URL so the
               transition is seamless. */}
           <Button
-            variant="outline"
             size="sm"
             onClick={openRowsPage}
             disabled={!storage}
+            className="shadow-sm"
           >
             <LayoutList className="size-4" />
             Browse as cards

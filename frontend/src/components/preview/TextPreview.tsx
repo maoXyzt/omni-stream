@@ -342,10 +342,9 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
                 <Button
                   type="button"
                   size="sm"
-                  variant="outline"
                   onClick={openRowsPage}
                   disabled={!storage}
-                  className="h-7"
+                  className="h-7 shadow-sm"
                 >
                   <LayoutList className="size-3.5" />
                   Browse as cards

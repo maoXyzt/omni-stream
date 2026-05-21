@@ -10,6 +10,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { useRowsViewConfig } from '@/hooks/use-rows-view-config'
 import { type RowsSource } from '@/lib/rows-source'
 import { PageControls } from '@/components/preview/PageControls'
+import { PartialInfoNotice } from '@/components/preview/PartialInfoNotice'
 import { RowCard, RowNode } from '@/components/preview/rows-render'
 import { RulesDialog } from '@/components/preview/rows-rules-dialog'
 
@@ -168,6 +169,7 @@ export function RowsView({ fileKey, source, storage }: RowsViewProps) {
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3">
+      {source.kind !== 'parquet' && <PartialInfoNotice format={source.kind} />}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-baseline gap-x-2 text-sm text-muted-foreground">
           <span>
