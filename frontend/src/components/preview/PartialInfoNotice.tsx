@@ -38,6 +38,13 @@ export function PartialInfoNotice({ format }: PartialInfoNoticeProps) {
           the browser's memory, and a runaway scan can freeze or crash
           the tab.
         </p>
+        <p className="text-xs leading-relaxed text-amber-900/80 dark:text-amber-100/80">
+          For frequent or large-scale viewing, consider converting this
+          file to Parquet. The columnar layout and embedded schema let
+          the rows view jump to any page instantly, surface an exact
+          row count up front, and keep memory pressure flat regardless
+          of file size.
+        </p>
       </div>
     </div>
   )
