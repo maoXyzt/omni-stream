@@ -53,6 +53,7 @@ import {
   totalRowCount,
 } from '@/lib/parquet'
 
+import { RowsViewHint } from './RowsViewHint'
 import type { PreviewerProps } from './types'
 
 const PAGE_SIZE = 100
@@ -235,6 +236,7 @@ export function ParquetPreview({ fileKey, src, storage }: PreviewerProps) {
 
   return (
     <div className="flex h-full w-full flex-col gap-3 overflow-hidden p-4">
+      <RowsViewHint onOpen={openRowsPage} disabled={!storage} />
       <InfoBar
         rows={numRows}
         cols={columns.length}

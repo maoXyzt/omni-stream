@@ -41,6 +41,7 @@ import { RowNode } from '@/components/preview/rows-render'
 import { type RenderContext } from '@/components/preview/rows-widgets'
 import { buildAiPrompt } from '@/components/preview/rows-ai-prompt'
 import { type Preset, useRowsPresets } from '@/hooks/use-rows-presets'
+import { type PresetMatch, presetMatch } from '@/lib/rows-applicability'
 import { type Node, parseRules } from '@/lib/rows-schema'
 import { type ColumnInfo } from '@/lib/rows-source'
 import { cn } from '@/lib/utils'
@@ -349,6 +350,7 @@ export function RulesDialog({
             <PresetsSection
               presets={presets}
               currentRules={validation.ok ? validation.rules : null}
+              columns={columns}
               onLoad={handleLoadPreset}
             />
 
@@ -656,15 +658,24 @@ function Section({
 // Presets stored in localStorage. Disabled save when the current draft is
 // invalid or the name is blank; loading a preset replaces the draft so it
 // flows through the same validation + modified-indicator path as typing.
+//
+// Each preset is annotated with its applicability against the current
+// file's columns (rows-applicability.ts). Fully-fitting presets float to
+// the top of the list with a green "fits" badge; partial matches show
+// `matched/total` in amber so the user can decide whether to load and
+// tweak. The applicability signal also drives the per-section summary
+// line right above the list.
 function PresetsSection({
   presets,
   currentRules,
+  columns,
   onLoad,
 }: {
   presets: ReturnType<typeof useRowsPresets>
   /// Canonical rules from the current draft, or null when the draft is
   /// invalid (Save is disabled in that case).
   currentRules: Node[] | null
+  columns: ColumnInfo[]
   onLoad: (preset: Preset) => void
 }) {
   const [name, setName] = useState('')
@@ -676,6 +687,25 @@ function PresetsSection({
     const saved = presets.save(trimmed, currentRules)
     if (saved) setName('')
   }
+
+  // Pair each preset with its match status against the open file. Sort
+  // fitting presets first, then partials (by matched-column count desc),
+  // then unrelated presets — the user's eye lands on what's relevant
+  // without us hiding anything.
+  const annotated = useMemo(() => {
+    const colNames = columns.map((c) => c.name)
+    return presets.presets
+      .map((preset) => ({ preset, match: presetMatch(preset.rules, colNames) }))
+      .sort((a, b) => {
+        if (a.match.fits !== b.match.fits) return a.match.fits ? -1 : 1
+        if (a.match.matched.size !== b.match.matched.size) {
+          return b.match.matched.size - a.match.matched.size
+        }
+        return b.preset.updatedAt - a.preset.updatedAt
+      })
+  }, [presets.presets, columns])
+
+  const fittingCount = annotated.filter((a) => a.match.fits).length
 
   return (
     <Section title={`Presets · ${presets.presets.length}`}>
@@ -714,13 +744,20 @@ function PresetsSection({
       {presets.error && (
         <p className="mt-1 text-[10px] text-destructive">{presets.error}</p>
       )}
+      {fittingCount > 0 && (
+        <p className="mt-1.5 flex items-center gap-1 text-[10px] text-emerald-700 dark:text-emerald-400">
+          <Check className="size-3" />
+          {fittingCount} preset{fittingCount === 1 ? '' : 's'} fit
+          {fittingCount === 1 ? 's' : ''} this file
+        </p>
+      )}
       {presets.presets.length === 0 ? (
         <p className="mt-2 text-[10px] italic text-muted-foreground">
           No saved presets. Save the current rules to reuse them later.
         </p>
       ) : (
         <ul className="mt-1.5 space-y-0.5">
-          {presets.presets.map((p) => (
+          {annotated.map(({ preset: p, match }) => (
             <li
               key={p.id}
               className="group flex items-center gap-1 rounded hover:bg-muted"
@@ -729,9 +766,10 @@ function PresetsSection({
                 type="button"
                 onClick={() => onLoad(p)}
                 title={`Load "${p.name}"`}
-                className="flex-1 truncate px-1.5 py-1 text-left text-xs focus:outline-none"
+                className="flex min-w-0 flex-1 items-center gap-1.5 px-1.5 py-1 text-left text-xs focus:outline-none"
               >
-                {p.name}
+                <span className="truncate">{p.name}</span>
+                <PresetMatchBadge match={match} />
               </button>
               <button
                 type="button"
@@ -747,6 +785,47 @@ function PresetsSection({
         </ul>
       )}
     </Section>
+  )
+}
+
+// Small per-row indicator. Three buckets keep the visual language tight:
+//   * fits     — green check, "fits"            (preset will render cleanly)
+//   * partial  — amber count, "N/M"             (some columns won't resolve)
+//   * none     — nothing (avoid noise on unrelated presets, but the tooltip
+//                still explains *why* it's grey when the user hovers)
+function PresetMatchBadge({ match }: { match: PresetMatch }) {
+  if (match.referenced.size === 0) return null
+  if (match.fits) {
+    return (
+      <span
+        className="inline-flex shrink-0 items-center gap-0.5 rounded-sm bg-emerald-500/15 px-1 py-0.5 text-[9px] font-medium uppercase tracking-wide text-emerald-700 dark:bg-emerald-400/15 dark:text-emerald-300"
+        title={`All ${match.matched.size} referenced columns are in this file`}
+      >
+        <Check className="size-2.5" />
+        fits
+      </span>
+    )
+  }
+  if (match.matched.size > 0) {
+    const missing = [...match.missing].slice(0, 6).join(', ')
+    const more =
+      match.missing.size > 6 ? `, +${match.missing.size - 6} more` : ''
+    return (
+      <span
+        className="inline-flex shrink-0 items-center rounded-sm bg-amber-500/15 px-1 py-0.5 font-mono text-[9px] font-medium text-amber-700 tabular-nums dark:bg-amber-400/15 dark:text-amber-300"
+        title={`Missing columns: ${missing}${more}`}
+      >
+        {match.matched.size}/{match.referenced.size}
+      </span>
+    )
+  }
+  return (
+    <span
+      className="inline-flex shrink-0 items-center rounded-sm bg-muted px-1 py-0.5 text-[9px] font-medium uppercase tracking-wide text-muted-foreground"
+      title={`None of the ${match.referenced.size} referenced column${match.referenced.size === 1 ? '' : 's'} (${[...match.referenced].slice(0, 6).join(', ')}) are in this file`}
+    >
+      other
+    </span>
   )
 }
 
