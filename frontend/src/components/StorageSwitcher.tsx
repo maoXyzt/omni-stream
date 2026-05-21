@@ -96,8 +96,9 @@ export function StorageSwitcher({
           <DialogHeader>
             <DialogTitle>Storage details</DialogTitle>
             <DialogDescription>
-              Click any value to copy it. To change which backend is exposed,
-              edit the server config — only one storage is currently configured.
+              Use the copy icon next to any value to send it to your clipboard.
+              To change which backend is exposed, edit the server config — only
+              one storage is currently configured.
             </DialogDescription>
           </DialogHeader>
           <div className="py-1">
@@ -335,26 +336,32 @@ function Field({ label, value }: { label: string; value: string }) {
   return (
     <>
       <dt className="text-muted-foreground">{label}</dt>
-      <dd className="min-w-0">
-        <button
+      <dd className="flex min-w-0 items-center gap-1.5">
+        {/* Value is plain text — selectable for drag-copy, but clicks fall
+            through to the surrounding StorageCard so the row's primary
+            affordance (switch to this storage) stays the default action.
+            Use the copy button to send the value to the clipboard. */}
+        <span className="min-w-0 flex-1 break-all font-mono">{value}</span>
+        <Button
           type="button"
+          size="icon-xs"
+          variant="ghost"
           onClick={copy}
           onKeyDown={(e) => {
+            // Swallow Enter / Space at the icon so they don't bubble up and
+            // trigger the StorageCard's keyboard activation.
             if (e.key === 'Enter' || e.key === ' ') {
               e.preventDefault()
+              e.stopPropagation()
               void copy(e)
             }
           }}
           title={`Copy ${label}`}
           aria-label={`Copy ${label}: ${value}`}
-          className="group/copy inline-flex w-full min-w-0 items-center gap-1.5 rounded px-1 py-0.5 text-left transition hover:bg-muted focus-visible:bg-muted focus-visible:outline-none"
+          className="shrink-0 text-muted-foreground/60 hover:text-foreground"
         >
-          <span className="min-w-0 flex-1 break-all font-mono">{value}</span>
-          <CopyIcon
-            aria-hidden
-            className="size-3 shrink-0 text-muted-foreground/40 transition group-hover/copy:text-muted-foreground"
-          />
-        </button>
+          <CopyIcon className="size-3" />
+        </Button>
       </dd>
     </>
   )
