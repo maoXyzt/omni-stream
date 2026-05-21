@@ -1,11 +1,11 @@
 import { memo, useState, type ComponentType } from 'react'
-import { Folder, ImageOff } from 'lucide-react'
+import { ImageOff } from 'lucide-react'
 
 import { proxyUrl, thumbUrl } from '@/api/storage'
 import { EntryContextMenu } from '@/components/EntryContextMenu'
 import {
-  FOLDER_COLOR,
   colorForKey,
+  dirVisual,
   iconForKey,
   previewableKind,
 } from '@/components/preview/registry'
@@ -27,6 +27,9 @@ interface FileTileProps {
   entry: FileEntry
   prefix: string
   storageName: string
+  /// True when the current listing is the root of an S3 multi-bucket
+  /// storage. Directory tiles flip to the bucket visual at that depth.
+  inBucketRoot: boolean
   fit: GridFit
   onSelect: (entry: FileEntry) => void
 }
@@ -41,11 +44,13 @@ export const FileTile = memo(function FileTile({
   entry,
   prefix,
   storageName,
+  inBucketRoot,
   fit,
   onSelect,
 }: FileTileProps) {
   const name = displayName(entry.key, prefix)
   const isImage = !entry.is_dir && previewableKind(entry.key) === 'image'
+  const dir = dirVisual(entry.is_dir && inBucketRoot)
 
   return (
     <EntryContextMenu entry={entry} storageName={storageName}>
@@ -70,7 +75,7 @@ export const FileTile = memo(function FileTile({
             through the grid is just as clear. */}
         <div className="relative aspect-square overflow-hidden rounded-md border bg-muted/40 transition duration-200 group-hover:border-primary/40 group-hover:bg-muted group-hover:shadow-md group-focus-visible:border-primary group-focus-visible:ring-2 group-focus-visible:ring-primary/30">
           {entry.is_dir ? (
-            <IconFill icon={Folder} color={FOLDER_COLOR} />
+            <IconFill icon={dir.Icon} color={dir.color} />
           ) : isImage ? (
             <ImageContent
               entry={entry}

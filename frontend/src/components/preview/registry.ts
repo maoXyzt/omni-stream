@@ -1,4 +1,5 @@
 import {
+  Database,
   File as FileIcon,
   FileArchive,
   FileAudio,
@@ -7,6 +8,7 @@ import {
   FileSpreadsheet,
   FileText,
   FileVideo,
+  Folder,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -217,10 +219,39 @@ const DEFAULT_VISUAL: FileVisual = {
   label: 'File',
 }
 
-// Folders use the lucide `Folder` icon directly at call sites; only the color
-// is shared from here so list and grid stay in sync.
+// Folder/bucket palette shared across list + grid + sidebar so the
+// conceptual difference between a regular directory and an S3 top-level
+// bucket reads consistently across views. `BUCKET_*` only applies when
+// the storage is S3 in multi-bucket mode and we're listing its root —
+// see `isBucketEntry` in lib/storage-display.ts.
 export const FOLDER_COLOR = 'text-amber-500'
 export const FOLDER_LABEL = 'Folder'
+export const BUCKET_COLOR = 'text-sky-500'
+export const BUCKET_LABEL = 'Bucket'
+
+export interface DirVisual {
+  Icon: LucideIcon
+  color: string
+  label: string
+}
+
+const FOLDER_VISUAL: DirVisual = {
+  Icon: Folder,
+  color: FOLDER_COLOR,
+  label: FOLDER_LABEL,
+}
+const BUCKET_VISUAL: DirVisual = {
+  Icon: Database,
+  color: BUCKET_COLOR,
+  label: BUCKET_LABEL,
+}
+
+/// Icon + color + label for a directory-like entry. `isBucket` should
+/// reflect whether this entry is a top-level S3 bucket (see
+/// `isBucketEntry`); everywhere else, regular folder visuals apply.
+export function dirVisual(isBucket: boolean): DirVisual {
+  return isBucket ? BUCKET_VISUAL : FOLDER_VISUAL
+}
 
 export function fileVisual(key: string): FileVisual {
   const ext = extensionOf(key)
@@ -241,8 +272,12 @@ export function colorForKey(key: string): string {
 // "Parquet", "CSV", "Code", ...); unknown extensions fall back to the
 // extension itself uppercased so the user still has *something* to go on
 // (e.g. ".dxf" → "DXF"). Empty or extension-less keys yield "File".
-export function typeLabelForEntry(key: string, isDir: boolean): string {
-  if (isDir) return FOLDER_LABEL
+export function typeLabelForEntry(
+  key: string,
+  isDir: boolean,
+  isBucket = false,
+): string {
+  if (isDir) return isBucket ? BUCKET_LABEL : FOLDER_LABEL
   const ext = extensionOf(key)
   if (!ext) return DEFAULT_VISUAL.label
   return EXT_TO_VISUAL.get(ext)?.label ?? ext.toUpperCase()

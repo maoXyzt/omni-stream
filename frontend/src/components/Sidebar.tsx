@@ -5,7 +5,6 @@ import {
   ArrowDownZA,
   ChevronDown,
   ChevronRight,
-  Folder,
   RotateCw,
 } from 'lucide-react'
 
@@ -13,7 +12,7 @@ import { useListFiles } from '@/hooks/use-storage'
 import { SIDEBAR_SORT_KEY, useSortDir, type SortDir } from '@/hooks/use-sort-dir'
 import { useTreeExpanded, type TreeExpandedApi } from '@/hooks/use-tree-expanded'
 import { EntryContextMenu } from '@/components/EntryContextMenu'
-import { FOLDER_COLOR } from '@/components/preview/registry'
+import { dirVisual } from '@/components/preview/registry'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { sortEntries } from '@/lib/sort'
@@ -25,10 +24,19 @@ interface SidebarProps {
   /// this folder and auto-expands its ancestors. Empty string = storage root.
   prefix: string
   storageName: string
+  /// True when the active storage is S3 in multi-bucket mode. Threads
+  /// through to TreeNode so depth-0 entries (which are the buckets
+  /// themselves) get the bucket visual instead of the folder one.
+  multiBucket: boolean
   onNavigate: (prefix: string) => void
 }
 
-export function Sidebar({ prefix, storageName, onNavigate }: SidebarProps) {
+export function Sidebar({
+  prefix,
+  storageName,
+  multiBucket,
+  onNavigate,
+}: SidebarProps) {
   // Sidebar owns its sort axis — independent from the main view so users can
   // browse the tree A→Z while keeping the main panel reverse-sorted.
   const [sortDir, setSortDir] = useSortDir(SIDEBAR_SORT_KEY)
@@ -76,6 +84,7 @@ export function Sidebar({ prefix, storageName, onNavigate }: SidebarProps) {
           depth={0}
           activePrefix={prefix}
           storageName={storageName}
+          multiBucket={multiBucket}
           sortDir={sortDir}
           expand={expand}
           onNavigate={onNavigate}
@@ -91,6 +100,7 @@ interface TreeLevelProps {
   depth: number
   activePrefix: string
   storageName: string
+  multiBucket: boolean
   sortDir: SortDir
   expand: TreeExpandedApi
   onNavigate: (prefix: string) => void
@@ -106,6 +116,7 @@ function TreeLevel({
   depth,
   activePrefix,
   storageName,
+  multiBucket,
   sortDir,
   expand,
   onNavigate,
@@ -155,6 +166,7 @@ function TreeLevel({
           depth={depth}
           activePrefix={activePrefix}
           storageName={storageName}
+          multiBucket={multiBucket}
           sortDir={sortDir}
           expand={expand}
           onNavigate={onNavigate}
@@ -169,6 +181,7 @@ interface TreeNodeProps {
   depth: number
   activePrefix: string
   storageName: string
+  multiBucket: boolean
   sortDir: SortDir
   expand: TreeExpandedApi
   onNavigate: (prefix: string) => void
@@ -179,11 +192,16 @@ function TreeNode({
   depth,
   activePrefix,
   storageName,
+  multiBucket,
   sortDir,
   expand,
   onNavigate,
 }: TreeNodeProps) {
   const name = basenameOf(entry.key)
+  // depth=0 in multi-bucket S3 IS the bucket level — everything deeper is
+  // a regular folder regardless of mode.
+  const isBucket = multiBucket && depth === 0
+  const dir = dirVisual(isBucket)
   const isCurrent = entry.key === activePrefix
   const isExpanded = expand.isExpanded(entry.key)
   const rowRef = useRef<HTMLButtonElement | null>(null)
@@ -257,10 +275,10 @@ function TreeNode({
             className="flex min-w-0 flex-1 items-center gap-2 py-1.5 pr-2 text-left"
             title={name}
           >
-            <Folder
+            <dir.Icon
               className={cn(
                 'size-4 shrink-0',
-                FOLDER_COLOR,
+                dir.color,
                 knownLeaf && 'opacity-60',
               )}
             />
@@ -274,6 +292,7 @@ function TreeNode({
           depth={depth + 1}
           activePrefix={activePrefix}
           storageName={storageName}
+          multiBucket={multiBucket}
           sortDir={sortDir}
           expand={expand}
           onNavigate={onNavigate}
