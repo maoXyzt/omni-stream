@@ -163,7 +163,7 @@ export function WidgetImage({ value, src, ctx }: MediaProps) {
       : r.url
   return (
     <>
-      <MediaFrame fitContent path={resolutionDetail(r)}>
+      <MediaFrame fitContent overlayHeader path={resolutionDetail(r)}>
         {/* Wrapping the image in a real <button> rather than an onClick <div>
             so keyboard focus, Enter/Space activation, and focus-visible rings
             all come for free. The image keeps cursor-zoom-in to signal what
