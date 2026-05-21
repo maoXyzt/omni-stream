@@ -180,7 +180,10 @@ impl fmt::Debug for S3Config {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     f.debug_struct("S3Config")
       .field("endpoint", &self.endpoint)
-      .field("bucket", &self.bucket.as_deref().unwrap_or("<multi-bucket>"))
+      .field(
+        "bucket",
+        &self.bucket.as_deref().unwrap_or("<multi-bucket>"),
+      )
       .field("access_key", &mask_secret(self.access_key.as_deref()))
       .field("secret_key", &mask_secret(self.secret_key.as_deref()))
       .field("region", &self.region)

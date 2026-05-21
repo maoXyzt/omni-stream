@@ -500,7 +500,9 @@ impl StorageBackend for S3Backend {
         .list_v1(&bucket, sub_prefix, marker, bucket_prefix)
         .await;
     }
-    self.list_v2(&bucket, sub_prefix, token, bucket_prefix).await
+    self
+      .list_v2(&bucket, sub_prefix, token, bucket_prefix)
+      .await
   }
 
   async fn stat(&self, path: &str) -> Result<FileMeta, AppError> {
@@ -656,10 +658,7 @@ mod tests {
 
   #[test]
   fn split_path_multi_bucket_splits_on_first_slash() {
-    assert_eq!(
-      split_path(None, "b/x/y").unwrap(),
-      ("b".to_string(), "x/y"),
-    );
+    assert_eq!(split_path(None, "b/x/y").unwrap(), ("b".to_string(), "x/y"),);
     assert_eq!(
       split_path(None, "b/").unwrap(),
       ("b".to_string(), ""),
