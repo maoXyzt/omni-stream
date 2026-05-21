@@ -1,0 +1,26 @@
+/*
+ * Prism token theme used by the rows-view rules editor. Mirrors the
+ * github-dark palette we already load via highlight.js so the editor's
+ * colors match `highlight` widgets elsewhere in the app. Scoped to
+ * `.json5-editor` so prism tokens don't leak into anything else (the
+ * highlight widget keeps using hljs's own classes).
+ */
+.json5-editor .token.comment {
+  color: #8b949e;
+}
+.json5-editor .token.property {
+  color: #79c0ff;
+}
+.json5-editor .token.string {
+  color: #a5d6ff;
+}
+.json5-editor .token.number,
+.json5-editor .token.boolean,
+.json5-editor .token.null {
+  color: #79c0ff;
+}
+/*
+ * Punctuation and operators (`,` `:` `{` `}` `[` `]`) intentionally left at
+ * the inherited text color — matches what github-dark does for hljs (the
+ * theme deliberately skips `.hljs-punctuation`).
+ */

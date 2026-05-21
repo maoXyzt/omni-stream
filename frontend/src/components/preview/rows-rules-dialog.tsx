@@ -16,6 +16,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import JSON5 from 'json5'
+import Editor from 'react-simple-code-editor'
 import {
   AlertCircle,
   Check,
@@ -43,6 +44,7 @@ import { type RenderContext } from '@/components/preview/rows-widgets'
 import { buildAiPrompt } from '@/components/preview/rows-ai-prompt'
 import { type Preset, useRowsPresets } from '@/hooks/use-rows-presets'
 import { type PresetMatch, presetMatch } from '@/lib/rows-applicability'
+import { highlightJson5 } from '@/lib/highlight-json5'
 import { type Node, parseRules } from '@/lib/rows-schema'
 import { type ColumnInfo } from '@/lib/rows-source'
 import { cn } from '@/lib/utils'
@@ -262,11 +264,19 @@ export function RulesDialog({
 
   const modified = draft !== seededDraft
 
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null)
+  // The Editor component renders its own div + pre + textarea; we wrap it in
+  // our own div both to hang the border / focus-within styling on and to
+  // anchor a ref we can use to locate the underlying textarea (the lib
+  // doesn't expose a textarea ref directly).
+  const editorWrapperRef = useRef<HTMLDivElement | null>(null)
+  const getTextarea = useCallback(
+    () => editorWrapperRef.current?.querySelector('textarea') ?? null,
+    [],
+  )
 
   const insertAtCursor = useCallback(
     (snippet: string, selectPlaceholder?: string) => {
-      const ta = textareaRef.current
+      const ta = getTextarea()
       if (!ta) {
         setDraft((prev) => prev + snippet)
         return
@@ -288,7 +298,7 @@ export function RulesDialog({
         ta.setSelectionRange(start + snippet.length, start + snippet.length)
       })
     },
-    [draft],
+    [draft, getTextarea],
   )
 
   const handleSave = useCallback(() => {
@@ -373,17 +383,28 @@ export function RulesDialog({
         <div className="flex min-h-0 flex-1 gap-3">
           {/* Editor pane */}
           <div className="flex min-h-0 flex-1 flex-col gap-2">
-            <textarea
-              ref={textareaRef}
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              spellCheck={false}
+            <div
+              ref={editorWrapperRef}
               className={cn(
-                'min-h-0 flex-1 resize-none rounded-md border border-input bg-transparent p-3 font-mono text-xs leading-relaxed',
-                'transition-colors outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50',
+                // `json5-editor` scopes the prism token CSS to just this
+                // surface (see lib/highlight-json5.css).
+                'json5-editor min-h-0 flex-1 overflow-auto rounded-md border border-input bg-transparent font-mono text-xs leading-relaxed',
+                'transition-colors focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50',
                 'dark:bg-input/30',
               )}
-            />
+            >
+              <Editor
+                value={draft}
+                onValueChange={setDraft}
+                highlight={highlightJson5}
+                padding={12}
+                tabSize={2}
+                insertSpaces
+                textareaClassName="outline-none"
+                className="min-h-full"
+                style={{ fontFamily: 'inherit' }}
+              />
+            </div>
             <StatusLine validation={validation} />
           </div>
 
