@@ -441,6 +441,15 @@ fn split_path<'a>(pinned: Option<&str>, path: &'a str) -> Result<(String, &'a st
 impl StorageBackend for S3Backend {
   async fn get_file(&self, path: &str, opts: GetOptions) -> Result<StorageResponse, AppError> {
     let (bucket, key) = self.split_path(path)?;
+    // An empty key means the path was `"bucket/"` — a directory in the
+    // navigation model, not a file. Forwarding to GetObject with an
+    // empty key surfaces as an opaque AWS InvalidArgument; return a
+    // clear error instead so callers see what actually happened.
+    if key.is_empty() {
+      return Err(AppError::InvalidPath(format!(
+        "S3 path '{path}' refers to a bucket root, not a file"
+      )));
+    }
     let mut req = self.client.get_object().bucket(&bucket).key(key);
     if let Some(range) = opts.range {
       req = req.range(range);
@@ -476,6 +485,21 @@ impl StorageBackend for S3Backend {
       return self.list_buckets().await;
     }
 
+    // Multi-bucket bare-bucket form: a path like `"mybucket"` (no
+    // trailing slash) unambiguously means "list this bucket's root" in
+    // multi-bucket mode — there are no objects sitting alongside the
+    // bucket level. Normalise here so hand-typed URLs and any future
+    // client that forgets the trailing slash still work; `split_path`
+    // itself stays strict because `stat` / `get_file` can't fall back
+    // the same way (an empty key is never a valid object reference).
+    let normalised_owned;
+    let prefix = if self.bucket.is_none() && !prefix.is_empty() && !prefix.contains('/') {
+      normalised_owned = format!("{prefix}/");
+      normalised_owned.as_str()
+    } else {
+      prefix
+    };
+
     // Otherwise we need to know which bucket to list. Split the prefix on
     // its first `/`: in single-bucket mode the configured bucket is used
     // and the prefix passes through verbatim; in multi-bucket mode the
@@ -507,6 +531,14 @@ impl StorageBackend for S3Backend {
 
   async fn stat(&self, path: &str) -> Result<FileMeta, AppError> {
     let (bucket, key) = self.split_path(path)?;
+    // Same rationale as `get_file`: HeadObject with an empty key
+    // returns an opaque AWS error. Stat-ing a bucket directory has no
+    // file metadata to surface, so reject early with a clear message.
+    if key.is_empty() {
+      return Err(AppError::InvalidPath(format!(
+        "S3 path '{path}' refers to a bucket root, not a file"
+      )));
+    }
     let resp = self
       .client
       .head_object()

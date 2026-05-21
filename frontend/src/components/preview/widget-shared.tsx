@@ -79,7 +79,13 @@ export function MediaFrame({
         // which (because the strip is out of flow) is sized purely by
         // the in-flow children — i.e. the image. Long paths can never
         // make the card wider than the image itself.
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex items-center justify-between gap-2 border-t border-border/40 bg-background/80 px-2 py-0.5 text-[11px] text-foreground/80 backdrop-blur-sm">
+        //
+        // The strip stays pointer-interactive so the `title` tooltip
+        // fires on hover and the label text can be drag-selected for
+        // manual copy. The trade-off: clicks on the bottom strip don't
+        // open the image lightbox (the rest of the image surface still
+        // does). The strip is ~24 px tall — acceptable footprint.
+        <div className="absolute inset-x-0 bottom-0 z-10 flex items-center justify-between gap-2 border-t border-border/40 bg-background/80 px-2 py-0.5 text-[11px] text-foreground/80 backdrop-blur-sm">
           {label}
         </div>
       )}
