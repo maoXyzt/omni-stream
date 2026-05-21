@@ -18,9 +18,12 @@ classifiers = [
     "License :: OSI Approved :: Apache Software License",
     "Operating System :: MacOS",
     "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
     "Programming Language :: Rust",
     "Topic :: Internet :: WWW/HTTP :: HTTP Servers",
     "Topic :: System :: Filesystems",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
 ]
 dynamic = ["version"]
 
