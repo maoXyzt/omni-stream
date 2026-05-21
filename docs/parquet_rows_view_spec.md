@@ -137,7 +137,10 @@ images.[abc:5]: slice bounds must be integers (col 8)
 type Node = AtomNode | ContainerNode
 
 interface BaseNode {
-  /// 显示在节点上方的标签
+  /// 显示在节点上方的小标签。**Atom 节点省略时,渲染层自动用 selector 的
+  /// 根列名作为默认 label**——让每个 widget 都能标出"我读的是哪一列",
+  /// 不用手工设。显式 `label` 仍然优先。Container 不绑定单列,省略即不
+  /// 显示。
   label?: string
   /// 作为 row/grid 子节点时的轨道尺寸：'1fr' | '320px' | 'auto'
   width?: string
@@ -299,6 +302,8 @@ input (unknown)
 
 * `from` 字段存的是 selector **源字符串**（不是 AST），URL 短、可读、可粘贴。
 * canonical Node 序列化时**仅写非默认字段**（`show: 'default'` 不写，省字符）。
+* **编辑器输入接受 JSON5**：textarea 里可以写 `// 行注释` / `/* 块注释 */` / 尾逗号 / 不带引号的 key / 单引号字符串。校验、Format、Save 全部走 `JSON5.parse → JSON.stringify` 通道，URL / canonical 输出依然是**严格 JSON**，注释只在编辑时存在,持久化会被剥除。
+* **首次打开规则编辑器**时 (`rules.length === 0` 且 URL `?rows=` 没有 decode 错误),前端会自动弹出对话框并按文件 schema 预填一份「每列一个 widget」的 sugar 草稿;若草稿里出现 image/video/audio/link/text widget,会在顶部加一段 JSON5 注释解释 `src` 字段省略时的默认行为 (`"{value}"`),并示范远程 URL / 同级目录 / 绝对 key 三种覆盖写法。该草稿一旦 Save 就规范化进 URL,后续行为同上。
 
 ---
 

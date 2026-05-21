@@ -129,7 +129,7 @@
 
 ---
 
-## 4. 必备约定（不会变的 6 条）
+## 4. 必备约定（不会变的 7 条）
 
 1. **顶层 JSON 数组就是一个 flow 容器**：所有 widget **横向排**，挤不下自动换行。不用写 `{ "kind": "flow", "children": [...] }`。
 2. **想要"新的一行"就用显式容器**：`{ "row": [...] }` / `{ "column": [...] }` / `{ "grid": [...] }` 三者都自带 `width: 100%`，在父 flow 里**强制占满整行**。`row` 还会强制内部不换行（卡片窄就 overflow）。
@@ -137,6 +137,7 @@
 4. `{ "image": "x" }` ≡ `{ "show": "image", "from": "x" }`。所有 widget 都能这么简写。
 5. `{ "row": [...] }` ≡ `{ "kind": "row", "children": [...] }`。`flow` / `column` / `grid` 同理。
 6. 缺省渲染是 `default`，不用写 `"show": "default"`。
+7. **每个 atom widget 自动标出自己读的列名**：不写 `label` 时，渲染层会把 selector 根列名当默认 label 显示在 widget 上方；想自定义就显式写 `"label": "Generated"`。Container 没有列绑定，省略 label 就不显示。
 
 **直觉记忆**：把每张卡片想成 CSS `flex-wrap: wrap`；想要"分段"就用容器，每个容器自动起新一行。
 
@@ -203,3 +204,11 @@
 ## 附：在哪里粘贴配置
 
 在 Rows View 页面（URL `/r/<storage>/<file>`），右上角点 **Rules** 按钮，把 JSON 粘进对话框 Save 即可。规则会压缩进 URL 的 `?rows=` 参数，链接可以直接分享。
+
+**首次打开就有草稿**：如果这个文件没有保存过规则，对话框会自动弹出并按列名预填一份「每列一个 widget」的草稿（list 列自动 fan-out + grid）。image / video / audio / link / text widget 顶部还有一段注释说明 `src` 字段省略时的默认行为，可以照着改或直接 Save。
+
+**JSON5 友好**：编辑器接受 **JSON5** 输入——可以写 `// 行注释` / `/* 块注释 */`、尾逗号、不带引号的 key、单引号字符串，方便给规则加批注。Save 时会通过 `JSON5.parse → JSON.stringify` 规范化为严格 JSON 再压进 URL，**注释会被剥除**，所以注释只用于编辑时辅助、不要寄希望于长期保留。
+
+**预设（Presets）**：右侧栏可以把当前规则保存成命名预设（存浏览器 localStorage）。打开下一个文件时，对话框会把每条预设跟文件的列名做匹配：完全适用的会排到最前面并打绿色 ✓，缺列的会显示 `N/M`，让你一眼挑出"现成能用"的那一套。
+
+**AI 协作**：底栏的 **AI prompt** 按钮把本文件第 1-6 节 + 当前 schema 拼成一段提示词，复制粘到 ChatGPT/Claude 让它直接产出 JSON 即可。
