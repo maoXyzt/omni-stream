@@ -287,7 +287,10 @@ function ResolutionError({ reason }: { reason: string }) {
 }
 
 function resolutionDetail(r: SrcResolution): string {
-  return r.ok ? r.key ?? r.url : ''
+  // Mirror rows-widgets.tsx: show the user-written `src` template with
+  // `{value}` substituted, not the resolved storage key. The card's caption
+  // should reflect what the rule author typed, not the post-resolve form.
+  return r.ok ? r.rendered : ''
 }
 
 export default WidgetText

@@ -25,6 +25,12 @@ export type SrcResolution =
       /// need additional storage operations (file stat, alt nav, etc.)
       /// recover the key without re-parsing the URL.
       key?: string
+      /// The widget's `src` template with `{value}` substituted but no
+      /// path-relative resolution applied. This is what the user wrote into
+      /// the rules (e.g. `"../edits/{value}"` rendered as `"../edits/42"`)
+      /// — exposed so widgets can surface that human-readable form in their
+      /// caption rather than the post-resolve proxy URL or storage key.
+      rendered: string
     }
   | { ok: false; reason: string }
 
@@ -64,7 +70,7 @@ export function resolveSrc(
   // External http(s) URL → use as-is. Lets the CDN-template case work
   // without dragging the storage proxy in.
   if (/^https?:\/\//i.test(rendered)) {
-    return { ok: true, url: rendered }
+    return { ok: true, url: rendered, rendered }
   }
 
   if (rendered.startsWith('/')) {
@@ -73,7 +79,7 @@ export function resolveSrc(
     if (key.length === 0) {
       return { ok: false, reason: 'path resolves to storage root with no file' }
     }
-    return { ok: true, url: proxyUrl(key, storage), key }
+    return { ok: true, url: proxyUrl(key, storage), key, rendered }
   }
 
   // Relative — anchor at the source file's directory.
@@ -83,6 +89,7 @@ export function resolveSrc(
     ok: true,
     url: proxyUrl(resolved.key, storage),
     key: resolved.key,
+    rendered,
   }
 }
 
