@@ -401,7 +401,7 @@ export function FileList() {
       // page_token cursor returned by S3 is scoped to a specific prefix.
       setTokenStack([undefined])
       const clean = normalizePrefix(nextPrefix)
-      const trail = clean ? clean : ''
+      const trail = clean ? encodePathSegments(clean) : ''
       navigate({
         pathname: `/s/${encodeURIComponent(storageName)}/${trail}`,
         search: '',
@@ -452,7 +452,7 @@ export function FileList() {
       sp.set(PREVIEW_PARAM, base)
       setTokenStack([undefined])
       navigate({
-        pathname: `/s/${encodeURIComponent(storageName)}/${parent}`,
+        pathname: `/s/${encodeURIComponent(storageName)}/${encodePathSegments(parent)}`,
         search: `?${sp.toString()}`,
       })
     },
@@ -1589,6 +1589,16 @@ function normalizePrefix(value: string): string {
   const trimmed = value.replace(/^\/+/, '')
   if (!trimmed) return ''
   return trimmed.endsWith('/') ? trimmed : `${trimmed}/`
+}
+
+/// Percent-encode each path segment for use in a React Router `pathname`,
+/// keeping the `/` separators (and any trailing slash) literal. Without this,
+/// a key containing `#`, `?`, or spaces breaks routing — `#` would start the
+/// URL hash and truncate the path. `params['*']` is decoded by React Router on
+/// read, so this round-trips back to the original value and is a no-op for the
+/// alphanumeric segments that make up most keys.
+function encodePathSegments(path: string): string {
+  return path.split('/').map(encodeURIComponent).join('/')
 }
 
 /// Split a normalized prefix into (parent prefix, current dir name). Returns

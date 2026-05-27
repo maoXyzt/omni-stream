@@ -75,6 +75,12 @@ describe('resolveStorageUri — single-bucket S3', () => {
       { ok: true, path: '' },
     )
   })
+
+  it('matches the bucket case-insensitively', () => {
+    expect(
+      resolveStorageUri('s3://Infographics/vigeneval/x', singleBucket('infographics')),
+    ).toEqual({ ok: true, path: 'vigeneval/x' })
+  })
 })
 
 describe('resolveStorageUri — multi-bucket S3', () => {

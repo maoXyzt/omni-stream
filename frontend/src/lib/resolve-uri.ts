@@ -70,8 +70,10 @@ export function resolveStorageUri(
     return { ok: true, path: key ? `${bucket}/${key}` : `${bucket}/` }
   }
   // Single-bucket storage: the URI's bucket must match the pinned one; the key
-  // is already relative to the storage root.
-  if (bucket !== storage.s3.bucket) {
+  // is already relative to the storage root. Compared case-insensitively (S3
+  // bucket names are lowercase by spec, and we match the scheme that way too),
+  // so a stray uppercase paste still resolves.
+  if (bucket.toLowerCase() !== storage.s3.bucket.toLowerCase()) {
     return {
       ok: false,
       reason: `That path is in bucket "${bucket}", but this storage is bucket "${storage.s3.bucket}".`,
