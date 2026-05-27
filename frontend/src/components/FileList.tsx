@@ -30,6 +30,7 @@ import { ApiError, getStoredToken, setStoredToken } from '@/api/client'
 import { listFiles, proxyUrl, statFile } from '@/api/storage'
 import { isMultiBucketS3 } from '@/lib/storage-display'
 import { resolveStorageUri } from '@/lib/resolve-uri'
+import { encodePathSegments } from '@/lib/route-path'
 import {
   useListFiles,
   usePrefetchListFiles,
@@ -435,9 +436,17 @@ export function FileList() {
       let meta
       try {
         meta = await statFile(trimmed, storageName || undefined)
-      } catch {
-        // Not found / network error: fall back to directory navigation so the
-        // listing surfaces its existing 404/error state, matching prior behavior.
+      } catch (err) {
+        // A 404 (path doesn't exist) or a non-API error (network failure)
+        // falls back to directory navigation, so the listing surfaces its
+        // existing not-found/error state — the behavior before file paths were
+        // supported. Other API errors (401/403/5xx) are reported directly:
+        // falling back would misframe an auth/server problem as "directory not
+        // found".
+        if (err instanceof ApiError && err.status !== 404) {
+          toast.error(`${err.status} — ${err.message}`)
+          return
+        }
         goToPath(trimmed)
         return
       }
@@ -1589,16 +1598,6 @@ function normalizePrefix(value: string): string {
   const trimmed = value.replace(/^\/+/, '')
   if (!trimmed) return ''
   return trimmed.endsWith('/') ? trimmed : `${trimmed}/`
-}
-
-/// Percent-encode each path segment for use in a React Router `pathname`,
-/// keeping the `/` separators (and any trailing slash) literal. Without this,
-/// a key containing `#`, `?`, or spaces breaks routing — `#` would start the
-/// URL hash and truncate the path. `params['*']` is decoded by React Router on
-/// read, so this round-trips back to the original value and is a no-op for the
-/// alphanumeric segments that make up most keys.
-function encodePathSegments(path: string): string {
-  return path.split('/').map(encodeURIComponent).join('/')
 }
 
 /// Split a normalized prefix into (parent prefix, current dir name). Returns

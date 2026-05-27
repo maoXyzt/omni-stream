@@ -9,6 +9,9 @@ export type ResolvedUri =
 const S3_SCHEMES = new Set(['s3', 's3a', 's3n'])
 
 // `scheme://rest` — scheme per RFC 3986 (letter, then letters/digits/+-.).
+// Requires the `//` authority marker, so only the canonical `s3://bucket/key`
+// form is treated as a URI. The non-standard single-colon `s3:bucket/key`
+// shorthand (seen in a few boto contexts) falls through as a relative path.
 const SCHEME_RE = /^([a-zA-Z][a-zA-Z0-9+.-]*):\/\/(.*)$/
 
 /**
