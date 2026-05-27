@@ -27,8 +27,10 @@ import {
 } from 'lucide-react'
 
 import { ApiError, getStoredToken, setStoredToken } from '@/api/client'
-import { listFiles, proxyUrl } from '@/api/storage'
+import { listFiles, proxyUrl, statFile } from '@/api/storage'
 import { isMultiBucketS3 } from '@/lib/storage-display'
+import { resolveStorageUri } from '@/lib/resolve-uri'
+import { encodePathSegments } from '@/lib/route-path'
 import {
   useListFiles,
   usePrefetchListFiles,
@@ -400,13 +402,75 @@ export function FileList() {
       // page_token cursor returned by S3 is scoped to a specific prefix.
       setTokenStack([undefined])
       const clean = normalizePrefix(nextPrefix)
-      const trail = clean ? clean : ''
+      const trail = clean ? encodePathSegments(clean) : ''
       navigate({
         pathname: `/s/${encodeURIComponent(storageName)}/${trail}`,
         search: '',
       })
     },
     [navigate, storageName],
+  )
+
+  // "Go to path" target may be a file rather than a directory. `goToPath`
+  // (used by row clicks / breadcrumb / sidebar) always treats its input as a
+  // directory and stays synchronous; this wrapper is only wired to
+  // `PathNavigator`, where the pasted value is ambiguous. We first resolve a
+  // full `s3://bucket/key` URI down to a path relative to the active storage
+  // (rejected with a toast when it belongs elsewhere). Then an explicit
+  // trailing slash (or empty input) means "directory" and skips the stat
+  // round-trip; otherwise we stat to disambiguate, and for a file we jump to
+  // its parent directory with the file's preview open — same end state as
+  // clicking it.
+  //
+  // Returns `false` when the input couldn't be acted on and the user should
+  // fix it in place (invalid/foreign URI, or a 401/403/5xx from stat), so
+  // `PathNavigator` keeps its dialog open; `true` once we've navigated.
+  const goToPathOrFile = useCallback(
+    async (input: string): Promise<boolean> => {
+      const resolved = resolveStorageUri(input, activeStorage)
+      if (!resolved.ok) {
+        toast.error(resolved.reason)
+        return false
+      }
+      const trimmed = resolved.path.replace(/^\/+/, '')
+      if (!trimmed || trimmed.endsWith('/')) {
+        goToPath(trimmed)
+        return true
+      }
+      let meta
+      try {
+        meta = await statFile(trimmed, storageName || undefined)
+      } catch (err) {
+        // A 404 (path doesn't exist) or a non-API error (network failure)
+        // falls back to directory navigation, so the listing surfaces its
+        // existing not-found/error state — the behavior before file paths were
+        // supported. Other API errors (401/403/5xx) are reported directly:
+        // falling back would misframe an auth/server problem as "directory not
+        // found".
+        if (err instanceof ApiError && err.status !== 404) {
+          toast.error(`${err.status} — ${err.message}`)
+          return false
+        }
+        goToPath(trimmed)
+        return true
+      }
+      if (meta.is_dir) {
+        goToPath(trimmed)
+        return true
+      }
+      const slash = trimmed.lastIndexOf('/')
+      const parent = slash >= 0 ? trimmed.slice(0, slash + 1) : ''
+      const base = slash >= 0 ? trimmed.slice(slash + 1) : trimmed
+      const sp = new URLSearchParams()
+      sp.set(PREVIEW_PARAM, base)
+      setTokenStack([undefined])
+      navigate({
+        pathname: `/s/${encodeURIComponent(storageName)}/${encodePathSegments(parent)}`,
+        search: `?${sp.toString()}`,
+      })
+      return true
+    },
+    [goToPath, navigate, storageName, activeStorage],
   )
 
   const switchStorage = useCallback(
@@ -746,7 +810,7 @@ export function FileList() {
                 </Tooltip>
               )}
               <PathBreadcrumb prefix={prefix} onNavigate={goToPath} />
-              <PathNavigator prefix={prefix} onNavigate={goToPath} />
+              <PathNavigator prefix={prefix} onNavigate={goToPathOrFile} />
             </div>
             <div className="flex shrink-0 items-center gap-2">
               <Tooltip>
