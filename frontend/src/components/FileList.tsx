@@ -27,8 +27,9 @@ import {
 } from 'lucide-react'
 
 import { ApiError, getStoredToken, setStoredToken } from '@/api/client'
-import { listFiles, proxyUrl } from '@/api/storage'
+import { listFiles, proxyUrl, statFile } from '@/api/storage'
 import { isMultiBucketS3 } from '@/lib/storage-display'
+import { resolveStorageUri } from '@/lib/resolve-uri'
 import {
   useListFiles,
   usePrefetchListFiles,
@@ -409,6 +410,55 @@ export function FileList() {
     [navigate, storageName],
   )
 
+  // "Go to path" target may be a file rather than a directory. `goToPath`
+  // (used by row clicks / breadcrumb / sidebar) always treats its input as a
+  // directory and stays synchronous; this wrapper is only wired to
+  // `PathNavigator`, where the pasted value is ambiguous. We first resolve a
+  // full `s3://bucket/key` URI down to a path relative to the active storage
+  // (rejected with a toast when it belongs elsewhere). Then an explicit
+  // trailing slash (or empty input) means "directory" and skips the stat
+  // round-trip; otherwise we stat to disambiguate, and for a file we jump to
+  // its parent directory with the file's preview open — same end state as
+  // clicking it.
+  const goToPathOrFile = useCallback(
+    async (input: string) => {
+      const resolved = resolveStorageUri(input, activeStorage)
+      if (!resolved.ok) {
+        toast.error(resolved.reason)
+        return
+      }
+      const trimmed = resolved.path.replace(/^\/+/, '')
+      if (!trimmed || trimmed.endsWith('/')) {
+        goToPath(trimmed)
+        return
+      }
+      let meta
+      try {
+        meta = await statFile(trimmed, storageName || undefined)
+      } catch {
+        // Not found / network error: fall back to directory navigation so the
+        // listing surfaces its existing 404/error state, matching prior behavior.
+        goToPath(trimmed)
+        return
+      }
+      if (meta.is_dir) {
+        goToPath(trimmed)
+        return
+      }
+      const slash = trimmed.lastIndexOf('/')
+      const parent = slash >= 0 ? trimmed.slice(0, slash + 1) : ''
+      const base = slash >= 0 ? trimmed.slice(slash + 1) : trimmed
+      const sp = new URLSearchParams()
+      sp.set(PREVIEW_PARAM, base)
+      setTokenStack([undefined])
+      navigate({
+        pathname: `/s/${encodeURIComponent(storageName)}/${parent}`,
+        search: `?${sp.toString()}`,
+      })
+    },
+    [goToPath, navigate, storageName, activeStorage],
+  )
+
   const switchStorage = useCallback(
     (name: string) => {
       if (name === storageName) return
@@ -746,7 +796,7 @@ export function FileList() {
                 </Tooltip>
               )}
               <PathBreadcrumb prefix={prefix} onNavigate={goToPath} />
-              <PathNavigator prefix={prefix} onNavigate={goToPath} />
+              <PathNavigator prefix={prefix} onNavigate={goToPathOrFile} />
             </div>
             <div className="flex shrink-0 items-center gap-2">
               <Tooltip>

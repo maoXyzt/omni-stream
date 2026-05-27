@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react'
-import { FolderInput } from 'lucide-react'
+import { FolderInput, Loader2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import {
@@ -19,12 +19,15 @@ import {
 
 interface PathNavigatorProps {
   prefix: string
-  onNavigate: (prefix: string) => void
+  // May be async: a file path is resolved via a stat round-trip in the parent
+  // before navigating, so we await it and show a pending state meanwhile.
+  onNavigate: (prefix: string) => void | Promise<void>
 }
 
 export function PathNavigator({ prefix, onNavigate }: PathNavigatorProps) {
   const [open, setOpen] = useState(false)
   const [value, setValue] = useState(prefix)
+  const [submitting, setSubmitting] = useState(false)
 
   // Reset the input to the live `prefix` whenever the dialog opens, so the
   // user always starts from "current path" rather than whatever they typed
@@ -34,36 +37,49 @@ export function PathNavigator({ prefix, onNavigate }: PathNavigatorProps) {
     setOpen(next)
   }
 
-  function handleSubmit(e: FormEvent) {
+  async function handleSubmit(e: FormEvent) {
     e.preventDefault()
-    // `normalizePrefix` in the parent will strip leading slashes and ensure
-    // trailing-slash convention, so we just trim whitespace here.
-    onNavigate(value.trim())
-    setOpen(false)
+    // The parent normalizes the path (strips leading slashes, applies the
+    // trailing-slash convention, and resolves file vs. directory), so we just
+    // trim whitespace here.
+    setSubmitting(true)
+    try {
+      await onNavigate(value.trim())
+      setOpen(false)
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <Tooltip>
         <TooltipTrigger asChild>
+          {/* Labeled outline button rather than a bare ghost icon — the text
+              + border give it enough weight to read as an action next to the
+              breadcrumb, instead of blending in as decoration. The label
+              collapses to icon-only on very narrow screens; `aria-label`
+              keeps the accessible name in that case. */}
           <Button
-            variant="ghost"
+            variant="outline"
             size="sm"
-            className="size-7 shrink-0 p-0"
+            className="ml-1 shrink-0"
             aria-label="Go to path"
             onClick={() => handleOpenChange(true)}
           >
-            <FolderInput className="size-4" />
+            <FolderInput />
+            <span className="hidden sm:inline">Go to path</span>
           </Button>
         </TooltipTrigger>
-        <TooltipContent>Go to path</TooltipContent>
+        <TooltipContent>Jump to a folder or file path</TooltipContent>
       </Tooltip>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Go to path</DialogTitle>
           <DialogDescription>
-            Relative to the current storage root. Use a trailing slash for
-            directories; leave empty to jump to root.
+            A path relative to the current storage root, or a full s3:// URI
+            for this storage. Paste a folder to browse or a file to open it;
+            leave empty to jump to root.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="flex flex-col gap-3">
@@ -80,10 +96,14 @@ export function PathNavigator({ prefix, onNavigate }: PathNavigatorProps) {
               type="button"
               variant="outline"
               onClick={() => setOpen(false)}
+              disabled={submitting}
             >
               Cancel
             </Button>
-            <Button type="submit">Go</Button>
+            <Button type="submit" disabled={submitting}>
+              {submitting && <Loader2 className="size-4 animate-spin" />}
+              Go
+            </Button>
           </DialogFooter>
         </form>
       </DialogContent>
