@@ -421,17 +421,21 @@ export function FileList() {
   // round-trip; otherwise we stat to disambiguate, and for a file we jump to
   // its parent directory with the file's preview open — same end state as
   // clicking it.
+  //
+  // Returns `false` when the input couldn't be acted on and the user should
+  // fix it in place (invalid/foreign URI, or a 401/403/5xx from stat), so
+  // `PathNavigator` keeps its dialog open; `true` once we've navigated.
   const goToPathOrFile = useCallback(
-    async (input: string) => {
+    async (input: string): Promise<boolean> => {
       const resolved = resolveStorageUri(input, activeStorage)
       if (!resolved.ok) {
         toast.error(resolved.reason)
-        return
+        return false
       }
       const trimmed = resolved.path.replace(/^\/+/, '')
       if (!trimmed || trimmed.endsWith('/')) {
         goToPath(trimmed)
-        return
+        return true
       }
       let meta
       try {
@@ -445,14 +449,14 @@ export function FileList() {
         // found".
         if (err instanceof ApiError && err.status !== 404) {
           toast.error(`${err.status} — ${err.message}`)
-          return
+          return false
         }
         goToPath(trimmed)
-        return
+        return true
       }
       if (meta.is_dir) {
         goToPath(trimmed)
-        return
+        return true
       }
       const slash = trimmed.lastIndexOf('/')
       const parent = slash >= 0 ? trimmed.slice(0, slash + 1) : ''
@@ -464,6 +468,7 @@ export function FileList() {
         pathname: `/s/${encodeURIComponent(storageName)}/${encodePathSegments(parent)}`,
         search: `?${sp.toString()}`,
       })
+      return true
     },
     [goToPath, navigate, storageName, activeStorage],
   )

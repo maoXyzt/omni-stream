@@ -21,7 +21,9 @@ interface PathNavigatorProps {
   prefix: string
   // May be async: a file path is resolved via a stat round-trip in the parent
   // before navigating, so we await it and show a pending state meanwhile.
-  onNavigate: (prefix: string) => void | Promise<void>
+  // Resolving to `false` means navigation didn't happen and the input should
+  // be corrected in place, so we keep the dialog open; anything else closes it.
+  onNavigate: (prefix: string) => void | Promise<boolean | void>
 }
 
 export function PathNavigator({ prefix, onNavigate }: PathNavigatorProps) {
@@ -44,8 +46,10 @@ export function PathNavigator({ prefix, onNavigate }: PathNavigatorProps) {
     // trim whitespace here.
     setSubmitting(true)
     try {
-      await onNavigate(value.trim())
-      setOpen(false)
+      // Keep the dialog open on an explicit `false` (bad/foreign path) so the
+      // user can fix their input; close on success or a void return.
+      const result = await onNavigate(value.trim())
+      if (result !== false) setOpen(false)
     } finally {
       setSubmitting(false)
     }
