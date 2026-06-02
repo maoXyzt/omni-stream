@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 
 import { FileList } from '@/components/FileList'
 import { RowsPage } from '@/components/RowsPage'
@@ -8,6 +8,7 @@ import { StorageRedirect } from '@/components/StorageRedirect'
 import { Toaster } from '@/components/ui/sonner'
 import { useServerInfo, useStorages } from '@/hooks/use-storage'
 import { pruneOrphanTreeExpanded } from '@/hooks/use-tree-expanded'
+import { buildTitle } from '@/lib/document-title'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -21,10 +22,10 @@ const queryClient = new QueryClient({
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <DocumentTitle />
       <TreeExpandedJanitor />
       <Toaster />
       <BrowserRouter>
+        <DocumentTitle />
         <Routes>
           <Route path="/" element={<StorageRedirect />} />
           <Route path="/s/:storage/*" element={<FileList />} />
@@ -36,15 +37,14 @@ function App() {
   )
 }
 
-/// Stamps the server's hostname into the tab title once /api/server resolves.
-/// Lives at the App root so it runs exactly once regardless of routes.
+/// Keeps the tab title in sync with the active route via `buildTitle`.
+/// Sits inside BrowserRouter so it can read the current pathname.
 function DocumentTitle() {
   const { data } = useServerInfo()
+  const { pathname } = useLocation()
   useEffect(() => {
-    if (data?.hostname) {
-      document.title = `${data.hostname} | OmniStream`
-    }
-  }, [data?.hostname])
+    document.title = buildTitle(pathname, data?.hostname)
+  }, [pathname, data?.hostname])
   return null
 }
 
