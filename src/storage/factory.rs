@@ -231,8 +231,10 @@ async fn build_one(entry: &StorageConfig) -> anyhow::Result<Arc<dyn StorageBacke
   Ok(backend)
 }
 
-/// Verify that `root_path` exists, is a directory, and is read+write accessible by
-/// the current process. Required by design §6: "must validate root_path".
+/// Verify that `root_path` exists and is a directory. The backend itself is
+/// read-only (no write paths through `StorageBackend`), so a read-only mount,
+/// snapshot, or directory the process can't write to is a fully supported
+/// configuration — we deliberately do NOT probe for write access here.
 fn validate_local_root(path: &Path) -> anyhow::Result<()> {
   let metadata = std::fs::metadata(path).with_context(|| {
     format!(
@@ -243,14 +245,5 @@ fn validate_local_root(path: &Path) -> anyhow::Result<()> {
   if !metadata.is_dir() {
     bail!("root_path is not a directory: {}", path.display());
   }
-
-  // POSIX permission bits aren't a reliable signal of effective access for the
-  // current user (group/other perms, ACLs, immutable attrs, read-only mounts),
-  // so probe with an actual create+delete in the directory.
-  let probe = path.join(".omni-stream-write-probe");
-  std::fs::write(&probe, b"")
-    .with_context(|| format!("root_path is not writable: {}", path.display()))?;
-  let _ = std::fs::remove_file(&probe);
-
   Ok(())
 }
