@@ -27,9 +27,14 @@ export function buildTitle(pathname: string, hostname: string | undefined): stri
 
 /// Trim FQDNs to the first label so `dev.internal.corp.example.com` doesn't
 /// dominate the tab title. Same-DNS-domain machines are still distinguishable
-/// by the leading label.
+/// by the leading label. IP literals are kept verbatim — splitting `192.168.1.100`
+/// on `.` would otherwise leave just `192`, dropping the only useful context.
+const IPV4_RE = /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/
+
 function shortenHost(hostname: string | undefined): string | null {
   if (!hostname) return null
+  if (IPV4_RE.test(hostname)) return hostname
+  if (hostname.includes(':')) return hostname
   const first = hostname.split('.')[0]
   return first || hostname
 }

@@ -35,6 +35,14 @@ describe('buildTitle', () => {
     expect(buildTitle('/s/bkt', 'dev.internal.corp.example.com')).toBe('bkt@dev · OmniStream')
   })
 
+  it('keeps IPv4 hostnames verbatim instead of dropping octets', () => {
+    expect(buildTitle('/s/bkt', '192.168.1.100')).toBe('bkt@192.168.1.100 · OmniStream')
+  })
+
+  it('keeps IPv6 hostnames verbatim', () => {
+    expect(buildTitle('/s/bkt', 'fe80::1')).toBe('bkt@fe80::1 · OmniStream')
+  })
+
   it('decodes percent-encoded route segments', () => {
     expect(buildTitle('/s/bkt/my%20folder/a%20b.txt', 'h')).toBe('a b.txt · bkt@h · OmniStream')
   })
