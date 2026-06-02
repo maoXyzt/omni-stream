@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 
 import { FileList } from '@/components/FileList'
 import { RowsPage } from '@/components/RowsPage'
@@ -21,10 +21,10 @@ const queryClient = new QueryClient({
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <DocumentTitle />
       <TreeExpandedJanitor />
       <Toaster />
       <BrowserRouter>
+        <DocumentTitle />
         <Routes>
           <Route path="/" element={<StorageRedirect />} />
           <Route path="/s/:storage/*" element={<FileList />} />
@@ -36,16 +36,43 @@ function App() {
   )
 }
 
-/// Stamps the server's hostname into the tab title once /api/server resolves.
-/// Lives at the App root so it runs exactly once regardless of routes.
+/// Keeps the tab title in sync with the active route: `<leaf> · <storage>@<host> · OmniStream`.
+/// Segments are dropped when missing (no storage selected, at the storage root, server info
+/// still loading) so the title never has stranded separators.
 function DocumentTitle() {
   const { data } = useServerInfo()
+  const { pathname } = useLocation()
   useEffect(() => {
-    if (data?.hostname) {
-      document.title = `${data.hostname} | OmniStream`
-    }
-  }, [data?.hostname])
+    document.title = buildTitle(pathname, data?.hostname)
+  }, [pathname, data?.hostname])
   return null
+}
+
+const ROUTE_RE = /^\/[sr]\/([^/]+)(?:\/(.*))?$/
+
+function buildTitle(pathname: string, hostname: string | undefined): string {
+  const m = pathname.match(ROUTE_RE)
+  let storage: string | null = null
+  let leaf: string | null = null
+  if (m) {
+    storage = safeDecode(m[1])
+    const rest = m[2] ? safeDecode(m[2]).replace(/\/+$/, '') : ''
+    if (rest) {
+      const parts = rest.split('/')
+      leaf = parts[parts.length - 1] || null
+    }
+  }
+  const scope = storage && hostname ? `${storage}@${hostname}` : (storage ?? hostname ?? null)
+  const head = [leaf, scope].filter(Boolean).join(' · ')
+  return head ? `${head} · OmniStream` : 'OmniStream'
+}
+
+function safeDecode(s: string): string {
+  try {
+    return decodeURIComponent(s)
+  } catch {
+    return s
+  }
 }
 
 /// Drops tree-expanded localStorage keys for storages no longer in the
