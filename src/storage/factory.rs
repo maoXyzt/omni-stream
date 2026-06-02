@@ -253,3 +253,107 @@ fn validate_local_root(path: &Path) -> anyhow::Result<()> {
     .with_context(|| format!("root_path is not readable: {}", path.display()))?;
   Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use std::time::{SystemTime, UNIX_EPOCH};
+
+  fn tempdir(tag: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!(
+      "omni-factory-test-{}-{}-{}",
+      tag,
+      std::process::id(),
+      SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos(),
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+  }
+
+  #[test]
+  fn accepts_writable_directory() {
+    let dir = tempdir("rw");
+    validate_local_root(&dir).expect("writable dir should validate");
+    let _ = std::fs::remove_dir_all(&dir);
+  }
+
+  #[test]
+  fn accepts_readonly_directory() {
+    // The backend is read-only; a directory we can list but not write to
+    // must still validate. This is the original bug — previous code wrote a
+    // probe file and rejected read-only mounts/snapshots.
+    let dir = tempdir("ro");
+    let mut perms = std::fs::metadata(&dir).unwrap().permissions();
+    perms.set_readonly(true);
+    std::fs::set_permissions(&dir, perms).unwrap();
+
+    let result = validate_local_root(&dir);
+
+    // Restore write perms before any potential panic/cleanup so tempdir teardown works.
+    let mut perms = std::fs::metadata(&dir).unwrap().permissions();
+    #[allow(clippy::permissions_set_readonly_false)]
+    perms.set_readonly(false);
+    let _ = std::fs::set_permissions(&dir, perms);
+    let _ = std::fs::remove_dir_all(&dir);
+
+    result.expect("read-only dir should validate");
+  }
+
+  #[test]
+  fn rejects_missing_path() {
+    let missing = std::env::temp_dir().join("omni-factory-definitely-not-here-zzz");
+    let err = validate_local_root(&missing).expect_err("missing path should fail");
+    let msg = format!("{err:#}");
+    assert!(
+      msg.contains("does not exist") || msg.contains("unreadable"),
+      "unexpected error: {msg}"
+    );
+  }
+
+  #[test]
+  fn rejects_file_path() {
+    let dir = tempdir("file");
+    let file = dir.join("a.txt");
+    std::fs::write(&file, b"x").unwrap();
+
+    let err = validate_local_root(&file).expect_err("file path should fail");
+    let msg = format!("{err:#}");
+    assert!(msg.contains("not a directory"), "unexpected error: {msg}");
+
+    let _ = std::fs::remove_dir_all(&dir);
+  }
+
+  #[cfg(unix)]
+  #[test]
+  fn rejects_unreadable_directory() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempdir("noread");
+    // mode 0o100: search (x) only, no read — `metadata()` on the path itself
+    // still succeeds (uses parent search perm) but `read_dir` returns EACCES
+    // for non-root callers.
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o100)).unwrap();
+
+    // Root bypasses POSIX read perms; if read_dir still works here, this
+    // assertion can never trigger and we'd silently report a passing test.
+    // Detect that case from observed behavior instead of a uid syscall, so
+    // we don't need a libc dep.
+    let root_bypass = std::fs::read_dir(&dir).is_ok();
+    let result = validate_local_root(&dir);
+
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+
+    if root_bypass {
+      eprintln!("skipping rejects_unreadable_directory assertion: read_dir bypassed perms (root?)");
+      return;
+    }
+
+    let err = result.expect_err("unreadable dir should fail");
+    let msg = format!("{err:#}");
+    assert!(msg.contains("not readable"), "unexpected error: {msg}");
+  }
+}

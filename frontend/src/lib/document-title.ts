@@ -1,0 +1,43 @@
+/// Build the tab title from the active route + server hostname:
+/// `<leaf> · <storage>@<host> · OmniStream`. Segments missing for the
+/// current state (no storage selected, at the storage root, /api/server
+/// still loading) are dropped so the title never has stranded separators.
+///
+/// Route prefixes are kept in sync with `<Routes>` in `App.tsx` — extend
+/// the character class in ROUTE_RE when adding new storage-scoped routes.
+const ROUTE_RE = /^\/[sr]\/([^/]+)(?:\/(.*))?$/
+
+export function buildTitle(pathname: string, hostname: string | undefined): string {
+  const m = pathname.match(ROUTE_RE)
+  let storage: string | null = null
+  let leaf: string | null = null
+  if (m) {
+    storage = safeDecode(m[1])
+    const rest = m[2] ? safeDecode(m[2]).replace(/\/+$/, '') : ''
+    if (rest) {
+      const parts = rest.split('/')
+      leaf = parts[parts.length - 1] || null
+    }
+  }
+  const shortHost = shortenHost(hostname)
+  const scope = storage && shortHost ? `${storage}@${shortHost}` : (storage ?? shortHost ?? null)
+  const head = [leaf, scope].filter(Boolean).join(' · ')
+  return head ? `${head} · OmniStream` : 'OmniStream'
+}
+
+/// Trim FQDNs to the first label so `dev.internal.corp.example.com` doesn't
+/// dominate the tab title. Same-DNS-domain machines are still distinguishable
+/// by the leading label.
+function shortenHost(hostname: string | undefined): string | null {
+  if (!hostname) return null
+  const first = hostname.split('.')[0]
+  return first || hostname
+}
+
+function safeDecode(s: string): string {
+  try {
+    return decodeURIComponent(s)
+  } catch {
+    return s
+  }
+}

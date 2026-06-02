@@ -8,6 +8,7 @@ import { StorageRedirect } from '@/components/StorageRedirect'
 import { Toaster } from '@/components/ui/sonner'
 import { useServerInfo, useStorages } from '@/hooks/use-storage'
 import { pruneOrphanTreeExpanded } from '@/hooks/use-tree-expanded'
+import { buildTitle } from '@/lib/document-title'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -36,9 +37,8 @@ function App() {
   )
 }
 
-/// Keeps the tab title in sync with the active route: `<leaf> · <storage>@<host> · OmniStream`.
-/// Segments are dropped when missing (no storage selected, at the storage root, server info
-/// still loading) so the title never has stranded separators.
+/// Keeps the tab title in sync with the active route via `buildTitle`.
+/// Sits inside BrowserRouter so it can read the current pathname.
 function DocumentTitle() {
   const { data } = useServerInfo()
   const { pathname } = useLocation()
@@ -46,33 +46,6 @@ function DocumentTitle() {
     document.title = buildTitle(pathname, data?.hostname)
   }, [pathname, data?.hostname])
   return null
-}
-
-const ROUTE_RE = /^\/[sr]\/([^/]+)(?:\/(.*))?$/
-
-function buildTitle(pathname: string, hostname: string | undefined): string {
-  const m = pathname.match(ROUTE_RE)
-  let storage: string | null = null
-  let leaf: string | null = null
-  if (m) {
-    storage = safeDecode(m[1])
-    const rest = m[2] ? safeDecode(m[2]).replace(/\/+$/, '') : ''
-    if (rest) {
-      const parts = rest.split('/')
-      leaf = parts[parts.length - 1] || null
-    }
-  }
-  const scope = storage && hostname ? `${storage}@${hostname}` : (storage ?? hostname ?? null)
-  const head = [leaf, scope].filter(Boolean).join(' · ')
-  return head ? `${head} · OmniStream` : 'OmniStream'
-}
-
-function safeDecode(s: string): string {
-  try {
-    return decodeURIComponent(s)
-  } catch {
-    return s
-  }
 }
 
 /// Drops tree-expanded localStorage keys for storages no longer in the
