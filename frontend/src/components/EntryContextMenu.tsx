@@ -16,6 +16,7 @@ import {
   ContextMenuTrigger,
 } from '@/components/ui/context-menu'
 import { useStorages } from '@/hooks/use-storage'
+import { basenameOf } from '@/lib/path'
 import type { FileEntry, StorageDescriptor } from '@/types/storage'
 
 interface EntryContextMenuProps {
@@ -114,11 +115,6 @@ export function EntryContextMenu({
   )
 }
 
-function basenameOf(key: string): string {
-  const stripped = key.replace(/\/+$/, '')
-  const slash = stripped.lastIndexOf('/')
-  return slash < 0 ? stripped : stripped.slice(slash + 1)
-}
 
 /// Absolute, human-pasteable location of an entry on its backing storage.
 ///   S3 (single bucket):    `s3://<bucket>/<key>`

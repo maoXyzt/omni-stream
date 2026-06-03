@@ -1,6 +1,7 @@
 import { useState } from 'react'
 
 import { colorForKey, iconForKey } from '@/components/preview/registry'
+import { basenameOf } from '@/lib/path'
 import { cn } from '@/lib/utils'
 
 import { PreviewSpinner } from './PreviewSpinner'
@@ -36,10 +37,7 @@ export function AudioPreview({ src, fileKey }: PreviewerProps) {
           controls
           preload="metadata"
           onLoadedMetadata={() => setLoaded(true)}
-          onError={() => {
-            setLoaded(true)
-            setFailed(true)
-          }}
+          onError={() => setFailed(true)}
           className="w-full max-w-xl"
         />
         {failed && (
@@ -50,8 +48,3 @@ export function AudioPreview({ src, fileKey }: PreviewerProps) {
   )
 }
 
-function basenameOf(key: string): string {
-  const stripped = key.replace(/\/+$/, '')
-  const slash = stripped.lastIndexOf('/')
-  return slash < 0 ? stripped : stripped.slice(slash + 1)
-}

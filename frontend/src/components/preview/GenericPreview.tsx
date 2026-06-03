@@ -6,6 +6,7 @@ import { colorForKey, iconForKey } from '@/components/preview/registry'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { formatBytes, formatTime } from '@/lib/format'
+import { basenameOf } from '@/lib/path'
 import { cn } from '@/lib/utils'
 
 import { TextPreview } from './TextPreview'
@@ -106,8 +107,3 @@ export function GenericPreview({ fileKey, src, storage }: PreviewerProps) {
   )
 }
 
-function basenameOf(key: string): string {
-  const stripped = key.replace(/\/+$/, '')
-  const slash = stripped.lastIndexOf('/')
-  return slash < 0 ? stripped : stripped.slice(slash + 1)
-}
