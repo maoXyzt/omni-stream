@@ -13,6 +13,15 @@ import type { PreviewerProps } from './types'
 
 export function GenericPreview({ fileKey, src, storage }: PreviewerProps) {
   const [asText, setAsText] = useState(false)
+  // PreviewModal reuses one GenericPreview instance across navigations, so
+  // without an explicit reset the `asText` choice from file A would carry
+  // into file B and silently render it as text. Tracking `src` instead of
+  // `fileKey` because `src` already encodes the cache-busting `version`.
+  const [trackedSrc, setTrackedSrc] = useState(src)
+  if (src !== trackedSrc) {
+    setTrackedSrc(src)
+    setAsText(false)
+  }
   const Icon = iconForKey(fileKey)
   const color = colorForKey(fileKey)
   const name = basenameOf(fileKey)
