@@ -12,10 +12,12 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 
+import { AudioPreview } from './AudioPreview'
 import { CsvPreview } from './CsvPreview'
 import { GenericPreview } from './GenericPreview'
 import { ImagePreview } from './ImagePreview'
 import { ParquetPreview } from './ParquetPreview'
+import { PdfPreview } from './PdfPreview'
 import { TextPreview } from './TextPreview'
 import { VideoPreview } from './VideoPreview'
 import type { PreviewKind, PreviewType } from './types'
@@ -23,8 +25,8 @@ import type { PreviewKind, PreviewType } from './types'
 // Adding a new previewable type means appending one entry here — the modal
 // and previewability checks all read from this list. Icons for the file list
 // come from VISUAL_GROUPS below, which is intentionally broader than this set
-// (audio/archives/spreadsheets etc. have distinct icons even though they're
-// not yet previewable).
+// (archives/spreadsheets etc. have distinct icons even though they're not
+// yet previewable).
 export const PREVIEW_TYPES: readonly PreviewType[] = [
   {
     kind: 'image',
@@ -37,6 +39,23 @@ export const PREVIEW_TYPES: readonly PreviewType[] = [
     extensions: ['mp4', 'webm', 'mov', 'mkv', 'm4v', 'ogv'],
     icon: FileVideo,
     Component: VideoPreview,
+  },
+  // Audio extensions match the VISUAL_GROUPS Audio entry exactly so the
+  // file-list icon and the modal preview agree on what counts as audio.
+  {
+    kind: 'audio',
+    extensions: ['mp3', 'wav', 'flac', 'ogg', 'm4a', 'aac', 'opus', 'wma', 'aiff', 'alac'],
+    icon: FileAudio,
+    Component: AudioPreview,
+  },
+  // PDFs render in the browser's built-in viewer via a plain <iframe> — no
+  // pdf.js dependency, page nav / zoom / Range-based progressive load are
+  // all handled natively.
+  {
+    kind: 'pdf',
+    extensions: ['pdf'],
+    icon: FileText,
+    Component: PdfPreview,
   },
   {
     kind: 'text',
@@ -109,8 +128,8 @@ export function getPreviewType(kind: PreviewKind): PreviewType | null {
 
 // File visual = icon + Tailwind text-color class + a short human-readable
 // label. Groups are broader than PREVIEW_TYPES so the file list can show
-// distinct icons for things that aren't (yet) previewable: audio, archives,
-// spreadsheets, PDFs, etc.
+// distinct icons for things that aren't (yet) previewable: archives,
+// spreadsheets, Office docs, etc.
 export interface FileVisual {
   Icon: LucideIcon
   color: string

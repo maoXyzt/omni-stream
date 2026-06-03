@@ -15,6 +15,7 @@ import { EntryContextMenu } from '@/components/EntryContextMenu'
 import { dirVisual } from '@/components/preview/registry'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+import { basenameOf } from '@/lib/path'
 import { sortEntries } from '@/lib/sort'
 import { cn } from '@/lib/utils'
 import type { FileEntry } from '@/types/storage'
@@ -364,8 +365,3 @@ function describeQueryError(error: unknown): string {
   return 'Failed to load folders.'
 }
 
-function basenameOf(key: string): string {
-  const trimmed = key.replace(/\/+$/, '')
-  const idx = trimmed.lastIndexOf('/')
-  return idx === -1 ? trimmed : trimmed.slice(idx + 1)
-}

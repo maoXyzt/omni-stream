@@ -1,16 +1,36 @@
+import { useState } from 'react'
+import { FileText } from 'lucide-react'
+
 import { useFileStat } from '@/hooks/use-storage'
 import { colorForKey, iconForKey } from '@/components/preview/registry'
+import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { formatBytes, formatTime } from '@/lib/format'
+import { basenameOf } from '@/lib/path'
 import { cn } from '@/lib/utils'
 
+import { TextPreview } from './TextPreview'
 import type { PreviewerProps } from './types'
 
-export function GenericPreview({ fileKey, storage }: PreviewerProps) {
+export function GenericPreview({ fileKey, src, storage }: PreviewerProps) {
+  const [asText, setAsText] = useState(false)
+  // PreviewModal reuses one GenericPreview instance across navigations, so
+  // without an explicit reset the `asText` choice from file A would carry
+  // into file B and silently render it as text. Tracking `src` instead of
+  // `fileKey` because `src` already encodes the cache-busting `version`.
+  const [trackedSrc, setTrackedSrc] = useState(src)
+  if (src !== trackedSrc) {
+    setTrackedSrc(src)
+    setAsText(false)
+  }
   const Icon = iconForKey(fileKey)
   const color = colorForKey(fileKey)
   const name = basenameOf(fileKey)
   const { data: meta, isPending } = useFileStat(fileKey, storage)
+
+  if (asText) {
+    return <TextPreview fileKey={fileKey} src={src} storage={storage} />
+  }
 
   return (
     // Inner `my-auto` wrapper does the vertical centering: in a flex-col
@@ -28,8 +48,13 @@ export function GenericPreview({ fileKey, storage }: PreviewerProps) {
           <p className="max-w-xl text-center text-sm text-muted-foreground">
             No inline preview for this file type — use{' '}
             <span className="text-foreground">Open in new tab</span> or{' '}
-            <span className="text-foreground">Download</span> below.
+            <span className="text-foreground">Download</span> below, or
+            view it as text if the bytes are decodable.
           </p>
+          <Button variant="outline" size="sm" onClick={() => setAsText(true)}>
+            <FileText className="size-4" />
+            View as text
+          </Button>
         </div>
 
         <dl className="grid w-full max-w-xl grid-cols-[max-content_1fr] gap-x-6 gap-y-2 text-sm">
@@ -82,8 +107,3 @@ export function GenericPreview({ fileKey, storage }: PreviewerProps) {
   )
 }
 
-function basenameOf(key: string): string {
-  const stripped = key.replace(/\/+$/, '')
-  const slash = stripped.lastIndexOf('/')
-  return slash < 0 ? stripped : stripped.slice(slash + 1)
-}
