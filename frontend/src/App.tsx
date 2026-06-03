@@ -9,6 +9,7 @@ import { Toaster } from '@/components/ui/sonner'
 import { useServerInfo, useStorages } from '@/hooks/use-storage'
 import { pruneOrphanTreeExpanded } from '@/hooks/use-tree-expanded'
 import { buildTitle } from '@/lib/document-title'
+import { buildFaviconHref } from '@/lib/favicon'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -37,14 +38,23 @@ function App() {
   )
 }
 
-/// Keeps the tab title in sync with the active route via `buildTitle`.
-/// Sits inside BrowserRouter so it can read the current pathname.
+/// Keeps the tab title and favicon in sync with the active route via
+/// `buildTitle` / `buildFaviconHref`. Sits inside BrowserRouter so it can
+/// read the current pathname. The favicon swap reuses the existing
+/// `<link rel="icon">` from index.html — replacing the href rather than
+/// adding/removing nodes avoids racing the browser's first-paint icon load.
 function DocumentTitle() {
-  const { data } = useServerInfo()
+  const { data: server } = useServerInfo()
+  const { data: storages } = useStorages()
   const { pathname } = useLocation()
   useEffect(() => {
-    document.title = buildTitle(pathname, data?.hostname)
-  }, [pathname, data?.hostname])
+    document.title = buildTitle(pathname, server?.hostname)
+  }, [pathname, server?.hostname])
+  useEffect(() => {
+    const href = buildFaviconHref(pathname, storages?.storages)
+    const link = document.querySelector<HTMLLinkElement>('link[rel="icon"]')
+    if (link && link.getAttribute('href') !== href) link.setAttribute('href', href)
+  }, [pathname, storages?.storages])
   return null
 }
 
