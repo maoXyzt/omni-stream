@@ -3,8 +3,9 @@ import type {
   FileMetaData,
   SchemaElement,
 } from 'hyparquet'
+import type { AxiosResponse } from 'axios'
 
-import { apiClient } from '@/api/client'
+import { ApiError, apiClient } from '@/api/client'
 
 // hyparquet is a pure-JS parquet reader. Loaded on demand so it only enters
 // the bundle as a lazy chunk when the user opens a `.parquet` file — mirrors
@@ -32,19 +33,34 @@ interface RangeFetchResult {
   totalBytes: number | null
 }
 
+const PARQUET_RANGE_TIMEOUT_MS = 120_000
+
 async function fetchByteRange(
   src: string,
   start: number,
   endInclusive: number,
 ): Promise<RangeFetchResult> {
-  const res = await apiClient.get<ArrayBuffer>(src, {
-    responseType: 'arraybuffer',
-    headers: {
-      Accept: 'application/octet-stream',
-      Range: `bytes=${start}-${endInclusive}`,
-    },
-    transformResponse: [(value) => value],
-  })
+  let res: AxiosResponse<ArrayBuffer>
+  try {
+    res = await apiClient.get<ArrayBuffer>(src, {
+      responseType: 'arraybuffer',
+      timeout: PARQUET_RANGE_TIMEOUT_MS,
+      headers: {
+        Accept: 'application/octet-stream',
+        Range: `bytes=${start}-${endInclusive}`,
+      },
+      transformResponse: [(value) => value],
+    })
+  } catch (err) {
+    if (isTimeoutError(err)) {
+      throw new Error(
+        `parquet: byte-range read timed out after ${PARQUET_RANGE_TIMEOUT_MS / 1000}s. ` +
+          'This can be caused by network latency, server overload, or very large row groups/cells in the file.',
+        { cause: err },
+      )
+    }
+    throw err
+  }
   const cr = res.headers['content-range'] as string | undefined
   let totalBytes: number | null = null
   if (cr) {
@@ -55,6 +71,13 @@ async function fetchByteRange(
     if (len) totalBytes = Number(len)
   }
   return { buffer: res.data, totalBytes }
+}
+
+function isTimeoutError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false
+  if (/timeout|timed out/i.test(err.message)) return true
+  if (err instanceof ApiError && err.status === 504) return true
+  return false
 }
 
 // Probe with a single-byte Range so the server has to return the file size in
