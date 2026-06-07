@@ -5,7 +5,7 @@ import type {
 } from 'hyparquet'
 import type { AxiosResponse } from 'axios'
 
-import { apiClient } from '@/api/client'
+import { ApiError, apiClient } from '@/api/client'
 
 // hyparquet is a pure-JS parquet reader. Loaded on demand so it only enters
 // the bundle as a lazy chunk when the user opens a `.parquet` file — mirrors
@@ -55,7 +55,7 @@ async function fetchByteRange(
     if (isTimeoutError(err)) {
       throw new Error(
         `parquet: byte-range read timed out after ${PARQUET_RANGE_TIMEOUT_MS / 1000}s. ` +
-          'This file may contain very large cells or row groups that are expensive to fetch and decode.',
+          'This can be caused by network latency, server overload, or very large row groups/cells in the file.',
         { cause: err },
       )
     }
@@ -74,7 +74,10 @@ async function fetchByteRange(
 }
 
 function isTimeoutError(err: unknown): boolean {
-  return err instanceof Error && /timeout|timed out/i.test(err.message)
+  if (!(err instanceof Error)) return false
+  if (/timeout|timed out/i.test(err.message)) return true
+  if (err instanceof ApiError && err.status === 504) return true
+  return false
 }
 
 // Probe with a single-byte Range so the server has to return the file size in
