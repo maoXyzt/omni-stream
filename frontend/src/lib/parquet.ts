@@ -3,6 +3,7 @@ import type {
   FileMetaData,
   SchemaElement,
 } from 'hyparquet'
+import type { AxiosResponse } from 'axios'
 
 import { apiClient } from '@/api/client'
 
@@ -32,19 +33,34 @@ interface RangeFetchResult {
   totalBytes: number | null
 }
 
+const PARQUET_RANGE_TIMEOUT_MS = 120_000
+
 async function fetchByteRange(
   src: string,
   start: number,
   endInclusive: number,
 ): Promise<RangeFetchResult> {
-  const res = await apiClient.get<ArrayBuffer>(src, {
-    responseType: 'arraybuffer',
-    headers: {
-      Accept: 'application/octet-stream',
-      Range: `bytes=${start}-${endInclusive}`,
-    },
-    transformResponse: [(value) => value],
-  })
+  let res: AxiosResponse<ArrayBuffer>
+  try {
+    res = await apiClient.get<ArrayBuffer>(src, {
+      responseType: 'arraybuffer',
+      timeout: PARQUET_RANGE_TIMEOUT_MS,
+      headers: {
+        Accept: 'application/octet-stream',
+        Range: `bytes=${start}-${endInclusive}`,
+      },
+      transformResponse: [(value) => value],
+    })
+  } catch (err) {
+    if (isTimeoutError(err)) {
+      throw new Error(
+        `parquet: byte-range read timed out after ${PARQUET_RANGE_TIMEOUT_MS / 1000}s. ` +
+          'This file may contain very large cells or row groups that are expensive to fetch and decode.',
+        { cause: err },
+      )
+    }
+    throw err
+  }
   const cr = res.headers['content-range'] as string | undefined
   let totalBytes: number | null = null
   if (cr) {
@@ -55,6 +71,10 @@ async function fetchByteRange(
     if (len) totalBytes = Number(len)
   }
   return { buffer: res.data, totalBytes }
+}
+
+function isTimeoutError(err: unknown): boolean {
+  return err instanceof Error && /timeout|timed out/i.test(err.message)
 }
 
 // Probe with a single-byte Range so the server has to return the file size in

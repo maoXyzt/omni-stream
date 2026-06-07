@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import {
   AlertCircle,
   Check,
@@ -56,7 +56,7 @@ import {
 import { RowsViewHint } from './RowsViewHint'
 import type { PreviewerProps } from './types'
 
-const PAGE_SIZE = 100
+const PAGE_SIZE = 20
 
 const TAB_PARAM = 'tab'
 const ROWS_PARAM = 'rows'
@@ -166,44 +166,10 @@ export function ParquetPreview({ fileKey, src, storage }: PreviewerProps) {
         rowEnd,
       })
     },
-    enabled: Boolean(source) && numRows > 0,
+    enabled: activeTab === 'data' && Boolean(source) && numRows > 0,
     placeholderData: keepPreviousData,
     staleTime: Infinity,
   })
-
-  // Prefetch the next page so a click on "Next" lands instantly. Triggers
-  // once the current page resolves so we don't compete with the in-flight
-  // fetch for the same AsyncBuffer. prefetchQuery is a no-op when the
-  // target page is already cached, so re-entering this effect is cheap.
-  const queryClient = useQueryClient()
-  useEffect(() => {
-    if (!source || numRows === 0) return
-    if (rowsQuery.isPending || rowsQuery.isFetching) return
-    const next = clampedPage + 1
-    if (next >= pageCount) return
-    const rowStart = next * PAGE_SIZE
-    const rowEnd = Math.min(rowStart + PAGE_SIZE, numRows)
-    void queryClient.prefetchQuery({
-      queryKey: ['parquet-rows', src, next] as const,
-      queryFn: () =>
-        readParquetRows({
-          file: source.file,
-          metadata: source.metadata,
-          rowStart,
-          rowEnd,
-        }),
-      staleTime: Infinity,
-    })
-  }, [
-    queryClient,
-    source,
-    src,
-    clampedPage,
-    pageCount,
-    numRows,
-    rowsQuery.isPending,
-    rowsQuery.isFetching,
-  ])
 
   if (metaError) {
     return (
@@ -327,6 +293,10 @@ export function ParquetPreview({ fileKey, src, storage }: PreviewerProps) {
             onNext={() => setPageIndex((p) => Math.min(pageCount - 1, p + 1))}
             onJump={(p) => setPageIndex(p)}
           />
+          <p className="text-xs text-muted-foreground">
+            Parquet preview limits rows, not bytes. Very large cells or row groups
+            may still take time to fetch and decode.
+          </p>
           {rowsError ? (
             <Alert variant="destructive">
               <AlertCircle className="size-4" />
