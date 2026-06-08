@@ -93,7 +93,7 @@ fn default_host() -> String {
 }
 
 fn default_port() -> u16 {
-  8080
+  28080
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
@@ -538,6 +538,7 @@ mod tests {
   fn parses_example_file() {
     let raw = std::fs::read_to_string("config.example.toml").expect("read example");
     let cfg = parse(&raw);
+    // port is commented out in the template → falls back to the code default
     assert_eq!(cfg.server.port, 28080);
     assert!(!cfg.storages.is_empty());
     let active = cfg.active_storage().expect("active");
@@ -591,7 +592,7 @@ local = { root_path = "/tmp" }
 "#;
     let cfg = parse(raw);
     assert_eq!(cfg.server.host, "127.0.0.1");
-    assert_eq!(cfg.server.port, 8080);
+    assert_eq!(cfg.server.port, 28080);
   }
 
   #[test]
