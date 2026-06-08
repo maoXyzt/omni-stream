@@ -111,7 +111,12 @@ export function ImagePreview({ fileKey, src, storage }: PreviewerProps) {
     canThumbnail(ext) &&
     meta?.size !== undefined &&
     meta.size > PREVIEW_THUMB_MIN_BYTES
-  const showThumb = useThumb && isFit && !thumbErrored
+  // `(!loaded || thumbLoaded)`: if the full image is already ready (e.g. from
+  // browser cache) and the thumbnail hasn't arrived yet, skip mounting it to
+  // avoid a redundant network request underneath an already-visible image.
+  // Once the thumbnail IS showing (`thumbLoaded`), keep it mounted so the
+  // full-image fade-in has something to cover (no blank-background flicker).
+  const showThumb = useThumb && isFit && !thumbErrored && (!loaded || thumbLoaded)
 
   const onLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
     setNatural({
@@ -210,7 +215,10 @@ export function ImagePreview({ fileKey, src, storage }: PreviewerProps) {
             onLoad={onLoad}
             decoding="async"
             className={cn(
-              'h-full w-full min-h-0 min-w-0 rounded-md object-contain transition-opacity duration-200',
+              // `relative` makes this a positioned element so it shares the
+              // same CSS painting step as the absolute thumbnail layer above
+              // and, being later in the DOM, renders on top of it.
+              'relative h-full w-full min-h-0 min-w-0 rounded-md object-contain transition-opacity duration-200',
               loaded ? 'opacity-100' : 'opacity-0',
             )}
             draggable={false}

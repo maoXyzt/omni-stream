@@ -39,10 +39,9 @@ describe('extensionOf', () => {
     expect(extensionOf('archive.tar.')).toBeNull()
   })
 
-  it('strips trailing slashes before extracting the extension', () => {
-    // Directory keys like `foo/bar.d/` should not yield "d"
-    expect(extensionOf('foo/bar.d/')).toBe('d')
-    // A trailing slash after a dot-only segment
+  it('returns null for any key with a trailing slash (directory keys)', () => {
     expect(extensionOf('foo/')).toBeNull()
+    // A dotted directory name must not yield an extension
+    expect(extensionOf('foo/bar.d/')).toBeNull()
   })
 })
