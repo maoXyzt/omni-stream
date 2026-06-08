@@ -1,89 +1,63 @@
 # OmniStream configuration template.
-# Place at $XDG_CONFIG_HOME/omni-stream/config.toml,
-# or set OMNI_CONFIG=/path/to/config.toml.
+# Place at $XDG_CONFIG_HOME/omni-stream/config.toml, or set
+# OMNI_CONFIG=/path/to/config.toml. Regenerate with `omni-stream config init`.
+#
+# Convention:
+#   key = val               you must set this (deployment-specific, no default)
+#   # key = val  # default  code default shown — uncomment to override
+#   # key = val  # optional no default; uncomment only if you need it
+#
+# Env overrides (prefix OMNI_, separator _):
+#   OMNI_SERVER_HOST, OMNI_SERVER_PORT, OMNI_AUTH_TOKEN
 
 [server]
-# Use host = "0.0.0.0" to allow external access. Default is "127.0.0.1", which
-# only allows access from localhost.
-host = "127.0.0.1"
-port = 28080
+# host = "127.0.0.1"  # default; use "0.0.0.0" to allow external access
+# port = 28080        # default
 
-# Optional bearer-token gate on /api/*. When disabled (default), the API is
-# open to anyone who can reach the port. Enable for internal-tool deployment.
-# The token can also be supplied via the OMNI_AUTH_TOKEN environment variable.
 [auth]
-enabled = false
-# token = "replace-with-a-long-random-string"
+# Optional bearer-token gate on /api/*. Disabled = API open to anyone who can
+# reach the port. Enable for internal-tool deployments.
+# enabled = false                               # default
+# token = "replace-with-a-long-random-string"  # required when enabled = true (or OMNI_AUTH_TOKEN)
 
-# Define one or more storage backends. The entry with `active = true` is used;
-# if none is active, the first entry is the default.
-#
-# Common fields:
-#   name      Display name shown in the UI / used in /api?storage=<name>.
-#   type      "s3" or "local".
-#   active    Exactly one entry should be true; that one is served by default.
+# ---- Storage backends -----------------------------------------------------
+# At least one [[storages]] entry is REQUIRED. active = true is served by
+# default; if none is active, the first entry wins.
 
-# ---- S3-compatible backend ----------------------------------------------
-# Talks to AWS S3 or any S3-compatible gateway (MinIO, Ceph, AOSS, OSS, COS).
-#
-# s3 fields:
-#   endpoint          Optional override. Omit for real AWS; set for self-hosted
-#                     gateways. Use the *-internal variant when running inside
-#                     the same VPC to avoid public-endpoint quotas / throttling.
-#   bucket            Optional. When set, the storage pins to that bucket
-#                     (bucket name only — no scheme, no slashes). When omitted
-#                     or set to "*", the storage enters multi-bucket mode: the
-#                     root listing performs ListBuckets and each bucket the
-#                     credentials can see appears as a top-level directory.
-#                     Multi-bucket mode requires the `s3:ListAllMyBuckets`
-#                     IAM permission.
-#   access_key,
-#   secret_key        Static credentials. Prefer env-injected values over
-#                     committing plaintext here.
-#   region            Optional. Defaults to "us-east-1". Set this when:
-#                     (1) the target AWS bucket lives outside us-east-1 —
-#                         SigV4 has to match the bucket's actual region or
-#                         AWS returns AuthorizationHeaderMalformed; or
-#                     (2) an S3-compatible gateway validates the region
-#                         strictly (most don't — MinIO / LocalStack accept
-#                         any value, and the us-east-1 default is enough).
-#   force_path_style  Default true. Path-style URL = `endpoint/bucket/key`,
-#                     used by MinIO / LocalStack / Ceph. Set false to switch to
-#                     virtual-host style (`bucket.endpoint/key`), required by
-#                     some gateways such as AOSS-internal that only resolve
-#                     `*.bucket-host` and reject path-style.
+# S3-compatible (AWS S3 / MinIO / Ceph / AOSS / OSS / COS)
 [[storages]]
-name = "production-s3"
-type = "s3"
-active = true
-s3 = { endpoint = "http://localhost:9000", bucket = "my-bucket", access_key = "minioadmin", secret_key = "minioadmin", force_path_style = true }
+name = "production-s3"  # required; shown in UI, used as ?storage=<name>
+type = "s3"             # required
 
-# Multi-bucket variant: `bucket` is omitted, so the storage root performs
-# ListBuckets and each bucket shows up as a top-level folder in the UI.
-# Useful when the credentials grant access to many buckets and you don't
-# want a separate [[storages]] entry per bucket.
-# [[storages]]
-# name = "all-prod-s3"
-# type = "s3"
-# s3 = { endpoint = "http://localhost:9000", access_key = "minioadmin", secret_key = "minioadmin", force_path_style = true }
+[storages.s3]
+access_key = "minioadmin"              # required for static creds (omit for IAM role / anonymous)
+secret_key = "minioadmin"              # required for static creds
+# endpoint = "http://localhost:9000"   # optional; omit for real AWS, set for self-hosted gateways
+# bucket = "my-bucket"                 # optional; omit or "*" → multi-bucket (needs s3:ListAllMyBuckets)
+# region = "us-east-1"                 # default; set to the bucket's real region for AWS outside us-east-1
+# force_path_style = true              # default; set false for virtual-host gateways (some AOSS/OSS)
 
-# ---- Local filesystem backend -------------------------------------------
-# Serves files under a directory on the host.
-#
-# local fields:
-#   root_path         Required. Absolute path or `~` / `~/sub/dir` — a leading
-#                     tilde is expanded to $HOME at config-load time. Path
-#                     traversal (`..`) outside this root is rejected.
-#   follow_symlinks   Default true. When true, symlinks under root are followed
-#                     transparently (a symlinked directory shows as a directory
-#                     in listings). When false, symlinks are surfaced as their
-#                     own entries and reading them returns Forbidden — useful
-#                     when root contains untrusted user-controlled paths.
+# Local filesystem
 [[storages]]
-name = "local-data"
-type = "local"
-active = false
-local = { root_path = "/var/lib/omni-stream", follow_symlinks = true }
+name = "local-data"  # required
+type = "local"       # required
+# active = false     # default
 
-# Environment overrides (prefix OMNI_, separator _):
-#   OMNI_SERVER_HOST, OMNI_SERVER_PORT
+[storages.local]
+root_path = "/var/lib/omni-stream"  # required; absolute or ~-prefixed, no ".." traversal
+# follow_symlinks = true            # default; false → symlinks surfaced as entries, reads Forbidden
+
+# ---- Thumbnails (on-demand WebP cache; disabled by default) ---------------
+# When off, the grid falls back to /api/proxy originals and /api/thumb returns
+# 404 "thumbnails disabled". Uncomment enabled = true below to opt in.
+
+[thumbnails]
+# enabled = true                              # opt in (default: false)
+# cache_path = "~/.cache/omni-stream/thumbs"  # default; else XDG / ProjectDirs-derived
+# quality = 70                                # default; WebP quality 1-100
+# max_source_bytes = 52428800                 # default 50 MiB; larger sources are rejected
+# sizes = [160, 320, 640]                     # default width ladder (px)
+# default_size = 320                          # default; snapped into `sizes` if not a member
+# max_cache_bytes = 1073741824                # default 1 GiB; LRU sweep trims above this
+# max_age_days = 90                           # default; 0 disables the age cap
+# sweep_interval_secs = 3600                  # default; floored to 60s at runtime
