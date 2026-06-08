@@ -49,9 +49,9 @@ root_path = "/var/lib/omni-stream"  # required; absolute or ~-prefixed, no ".." 
 
 # ---- Thumbnails (on-demand WebP cache; disabled by default) ---------------
 # When off, the grid falls back to /api/proxy originals and /api/thumb returns
-# 404 "thumbnails disabled". Uncomment [thumbnails] (at minimum `enabled`) to opt in.
-#
-# [thumbnails]
+# 404 "thumbnails disabled". Uncomment enabled = true below to opt in.
+
+[thumbnails]
 # enabled = true                              # opt in (default: false)
 # cache_path = "~/.cache/omni-stream/thumbs"  # default; else XDG / ProjectDirs-derived
 # quality = 70                                # default; WebP quality 1-100
