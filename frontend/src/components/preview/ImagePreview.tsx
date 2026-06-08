@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Maximize, ZoomIn, ZoomOut } from 'lucide-react'
 
+import { thumbUrl } from '@/api/storage'
 import { Button } from '@/components/ui/button'
 import {
   Tooltip,
@@ -9,6 +10,9 @@ import {
 } from '@/components/ui/tooltip'
 import { useFileStat } from '@/hooks/use-storage'
 import { formatBytes } from '@/lib/format'
+import { extensionOf } from '@/lib/path'
+import { canThumbnail, PREVIEW_THUMB_MIN_BYTES } from '@/lib/thumbnail'
+import { cn } from '@/lib/utils'
 
 import { PreviewSpinner } from './PreviewSpinner'
 import type { PreviewerProps } from './types'
@@ -30,6 +34,14 @@ export function ImagePreview({ fileKey, src, storage }: PreviewerProps) {
   const [zoom, setZoom] = useState<Zoom>('fit')
   const [natural, setNatural] = useState<{ w: number; h: number } | null>(null)
   const [loaded, setLoaded] = useState(false)
+  // Progressive-loading placeholder state. `thumbLoaded` flips when the
+  // low-res thumbnail is ready (stops the spinner); `thumbErrored` flips on
+  // any thumbnail request failure (404 = thumbnails disabled, 415 = format
+  // not supported, generation error) and causes graceful degradation back to
+  // the current spinner-then-original behaviour.
+  const [thumbLoaded, setThumbLoaded] = useState(false)
+  const [thumbErrored, setThumbErrored] = useState(false)
+
   // src can change in place when the user navigates between images. Reset
   // load/natural state during render (React's "adjusting state on prop change"
   // pattern) so the spinner reappears immediately for the new image.
@@ -38,6 +50,8 @@ export function ImagePreview({ fileKey, src, storage }: PreviewerProps) {
     setTrackedSrc(src)
     setLoaded(false)
     setNatural(null)
+    setThumbLoaded(false)
+    setThumbErrored(false)
   }
 
   function zoomIn() {
@@ -82,6 +96,22 @@ export function ImagePreview({ fileKey, src, storage }: PreviewerProps) {
 
   const isFit = zoom === 'fit'
   const scale = typeof zoom === 'number' ? zoom : null
+
+  // Decide whether to show a thumbnail placeholder while the full image loads.
+  // Only worthwhile when:
+  //   - the backend thumbnail pipeline supports this format (`canThumbnail`)
+  //   - the file is large enough that the browser would visibly stall
+  //   - we're in fit mode (zoom mode uses explicit pixel dimensions that the
+  //     thumbnail can't match, so the placeholder would mis-align on fade-in)
+  //   - the thumbnail didn't already fail (graceful degradation)
+  // `meta` comes from /api/stat via useFileStat; it's often already cached by
+  // the time the modal opens, but we gate on `size !== undefined` to be safe.
+  const ext = extensionOf(fileKey)
+  const useThumb =
+    canThumbnail(ext) &&
+    meta?.size !== undefined &&
+    meta.size > PREVIEW_THUMB_MIN_BYTES
+  const showThumb = useThumb && isFit && !thumbErrored
 
   const onLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
     setNatural({
@@ -140,17 +170,49 @@ export function ImagePreview({ fileKey, src, storage }: PreviewerProps) {
 
   return (
     <div className="relative h-full w-full overflow-hidden rounded-md bg-muted/30">
-      {!loaded && <PreviewSpinner />}
+      {/* Spinner hides as soon as either the thumbnail or the full image is
+          ready. When thumbnails are disabled/unsupported, `thumbLoaded` stays
+          false and the condition degrades to the original `!loaded` behaviour. */}
+      {!loaded && !thumbLoaded && <PreviewSpinner />}
       {isFit ? (
         // Fit mode: no scroll wrapper. The flex container is pinned to the
         // outer box, and the image uses min-h-0/min-w-0 so flex doesn't grant
         // it intrinsic-size overflow that would defeat object-contain.
         <div className="flex h-full w-full items-center justify-center p-2">
+          {/* Thumbnail placeholder — only in fit mode. A mirrored flex
+              container (same padding + alignment as the full-image wrapper)
+              ensures `object-contain` produces the exact same centred rect
+              for both images, so the fade-in has zero position shift.
+              The layer stays mounted after `loaded` flips; the full image
+              fades in on top and covers it, avoiding a same-frame
+              unmount-then-fade flicker against the bare background. */}
+          {showThumb && (
+            <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-2">
+              <img
+                src={thumbUrl(fileKey, {
+                  storage,
+                  width: 640,
+                  version: meta?.last_modified,
+                })}
+                alt=""
+                aria-hidden
+                draggable={false}
+                decoding="async"
+                onLoad={() => setThumbLoaded(true)}
+                onError={() => setThumbErrored(true)}
+                className="h-full w-full min-h-0 min-w-0 rounded-md object-contain"
+              />
+            </div>
+          )}
           <img
             src={src}
             alt={fileKey}
             onLoad={onLoad}
-            className="h-full w-full min-h-0 min-w-0 rounded-md object-contain"
+            decoding="async"
+            className={cn(
+              'h-full w-full min-h-0 min-w-0 rounded-md object-contain transition-opacity duration-200',
+              loaded ? 'opacity-100' : 'opacity-0',
+            )}
             draggable={false}
           />
         </div>
@@ -171,6 +233,7 @@ export function ImagePreview({ fileKey, src, storage }: PreviewerProps) {
               src={src}
               alt={fileKey}
               onLoad={onLoad}
+              decoding="async"
               className="max-w-none rounded-md"
               style={
                 scale !== null && natural
