@@ -96,20 +96,17 @@ jobs:
             exit 1
           fi
 
-  # Decides which targets the backend matrix builds. Full 3-platform fan-out
-  # for the events that either ship artifacts or gate the next thing that
-  # will: push to main, v* tags, manual dispatch, AND pull requests.
+  # Decides which targets the backend matrix builds.
   #
-  # PRs are included on purpose. The team's flow squash-merges dev into main
-  # and then deletes the dev branch — a platform-specific regression caught
-  # only after the post-merge main build would have to be fixed directly on
-  # main (no dev to push to). Validating all three targets at PR time keeps
-  # the gate honest and absorbs the macOS minute cost where it actually
-  # buys safety.
+  # Full 3-platform fan-out only for events that ship artifacts or gate the
+  # next thing that will: push to main, v* tags, manual dispatch.
   #
-  # Plain pushes to dev keep the minimal linux-gnu matrix — every commit on
-  # dev gets cheap validation, and the macOS / musl checks are deferred to
-  # the eventual PR run before the merge.
+  # PRs and plain dev pushes use the minimal linux-gnu-only matrix for fast
+  # feedback. Cross-platform validation (musl + macOS) runs on the post-merge
+  # main push, which is the last gate before a tag / release. A regression
+  # caught there is still caught before it ships, and the fix goes directly
+  # on main (or a follow-up tag) — the same path as today for any main-push
+  # failure.
   matrix-config:
     name: Backend matrix config
     needs: preflight
@@ -127,7 +124,7 @@ jobs:
           set -euo pipefail
           full=false
           case "$EVENT:$REF" in
-            push:refs/heads/main|push:refs/tags/v*|workflow_dispatch:*|pull_request:*)
+            push:refs/heads/main|push:refs/tags/v*|workflow_dispatch:*)
               full=true ;;
           esac
           if $full; then
@@ -253,11 +250,10 @@ jobs:
           CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
         run: cargo build --release --locked --target ${{ matrix.target }} --bin omni-stream
 
-      # PR runs build the binary on all three targets to validate compile +
-      # link (that's the gate value), but no downstream job consumes the
-      # tarball — `release` only fires on tag pushes, never on PRs. Skip
-      # the package + upload pair so PR runs don't spend CI on tarring and
-      # don't churn the repo's artifact storage quota.
+      # PR runs only build linux-gnu (see matrix-config). No downstream job
+      # consumes the tarball on PRs — `release` only fires on tag pushes.
+      # Skip the package + upload pair so PR runs don't spend CI on tarring
+      # and don't churn the repo's artifact storage quota.
       - name: Package archive
         if: github.event_name != 'pull_request'
         id: pkg
