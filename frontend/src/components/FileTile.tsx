@@ -10,18 +10,10 @@ import {
   previewableKind,
 } from '@/components/preview/registry'
 import type { GridFit } from '@/hooks/use-grid-fit'
+import { extensionOf } from '@/lib/path'
+import { canThumbnail, GRID_THUMB_MIN_BYTES } from '@/lib/thumbnail'
 import { cn } from '@/lib/utils'
 import type { FileEntry } from '@/types/storage'
-
-// Formats the backend thumbnail pipeline doesn't decode (or doesn't benefit
-// from resizing). SVG is its own thumbnail; ICO/AVIF would 415 from the
-// server. Skip the round-trip and serve the original directly.
-const THUMB_SKIP_EXTS = new Set(['svg', 'ico', 'avif'])
-
-// Below this size, a 320 px WebP thumbnail (~10–15 KB) wouldn't save bandwidth
-// vs. the original — small images are already well-compressed. Serve the
-// original via proxy instead, avoiding the decode/resize/re-encode cost.
-const THUMB_MIN_BYTES = 64 * 1024
 
 interface FileTileProps {
   entry: FileEntry
@@ -111,8 +103,7 @@ function ImageContent({ entry, storageName, alt, fit }: ImageContentProps) {
   const [usingFallback, setUsingFallback] = useState(false)
 
   const ext = extensionOf(entry.key)
-  const useThumb =
-    (!ext || !THUMB_SKIP_EXTS.has(ext)) && entry.size > THUMB_MIN_BYTES
+  const useThumb = canThumbnail(ext) && entry.size > GRID_THUMB_MIN_BYTES
   const src =
     useThumb && !usingFallback
       ? thumbUrl(entry.key, {
@@ -180,11 +171,4 @@ function IconFill({
 function displayName(key: string, prefix: string): string {
   const rel = key.startsWith(prefix) ? key.slice(prefix.length) : key
   return rel.replace(/\/+$/, '') || key
-}
-
-function extensionOf(key: string): string | null {
-  const stripped = key.replace(/\/+$/, '')
-  const dot = stripped.lastIndexOf('.')
-  if (dot < 0 || dot === stripped.length - 1) return null
-  return stripped.slice(dot + 1).toLowerCase()
 }

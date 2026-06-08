@@ -6,3 +6,13 @@ export function basenameOf(key: string): string {
   const slash = stripped.lastIndexOf('/')
   return slash < 0 ? stripped : stripped.slice(slash + 1)
 }
+
+/// Lowercase file extension of a storage key, without the leading dot.
+/// Returns `null` for directory keys (trailing `/`), extension-less keys,
+/// and keys whose final `.` is the last character (e.g. `Makefile`, `archive.tar.`).
+export function extensionOf(key: string): string | null {
+  if (key.endsWith('/')) return null
+  const dot = key.lastIndexOf('.')
+  if (dot < 0 || dot === key.length - 1) return null
+  return key.slice(dot + 1).toLowerCase()
+}

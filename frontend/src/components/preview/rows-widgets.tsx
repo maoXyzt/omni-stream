@@ -22,8 +22,10 @@ import {
 } from '@/components/ui/dialog'
 import { thumbUrl } from '@/api/storage'
 import { ImagePreview } from '@/components/preview/ImagePreview'
+import { extensionOf } from '@/lib/path'
 import { formatCell, formatCellExpanded } from '@/lib/parquet'
 import { resolveSrc, type SrcResolution } from '@/lib/rows-paths'
+import { canThumbnail } from '@/lib/thumbnail'
 import { cn } from '@/lib/utils'
 
 import { EmptyHint, MediaFrame } from './widget-shared'
@@ -100,15 +102,10 @@ interface MediaProps {
 // typical photos. Same pipeline FileTile uses, just sized for cards
 // rather than 1:1 grid squares.
 const IMAGE_THUMB_WIDTH = 640
-// Formats the backend's thumbnail pipeline either can't decode or
-// wouldn't shrink: SVG is its own thumbnail, ICO/AVIF would 415 from the
-// server. Match FileTile so behaviour stays consistent across the app.
-const IMAGE_THUMB_SKIP_EXTS = new Set(['svg', 'ico', 'avif'])
 
 function shouldThumb(key: string | undefined): boolean {
   if (!key) return false
-  const ext = key.replace(/\/+$/, '').split('.').pop()?.toLowerCase()
-  return !!ext && !IMAGE_THUMB_SKIP_EXTS.has(ext)
+  return canThumbnail(extensionOf(key))
 }
 
 export function WidgetImage({ value, src, ctx }: MediaProps) {

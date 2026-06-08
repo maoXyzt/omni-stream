@@ -12,6 +12,8 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 
+import { extensionOf } from '@/lib/path'
+
 import { AudioPreview } from './AudioPreview'
 import { CsvPreview } from './CsvPreview'
 import { GenericPreview } from './GenericPreview'
@@ -302,9 +304,3 @@ export function typeLabelForEntry(
   return EXT_TO_VISUAL.get(ext)?.label ?? ext.toUpperCase()
 }
 
-function extensionOf(key: string): string | null {
-  const stripped = key.replace(/\/+$/, '')
-  const dot = stripped.lastIndexOf('.')
-  if (dot < 0 || dot === stripped.length - 1) return null
-  return stripped.slice(dot + 1).toLowerCase()
-}
