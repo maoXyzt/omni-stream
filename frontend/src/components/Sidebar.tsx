@@ -12,6 +12,7 @@ import { useListFiles } from '@/hooks/use-storage'
 import { SIDEBAR_SORT_KEY, useSortDir, type SortDir } from '@/hooks/use-sort-dir'
 import { useTreeExpanded, type TreeExpandedApi } from '@/hooks/use-tree-expanded'
 import { EntryContextMenu } from '@/components/EntryContextMenu'
+import { EntryIcon } from '@/components/EntryIcon'
 import { dirVisual } from '@/components/preview/registry'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -276,12 +277,11 @@ function TreeNode({
             className="flex min-w-0 flex-1 items-center gap-2 py-1.5 pr-2 text-left"
             title={name}
           >
-            <dir.Icon
-              className={cn(
-                'size-4 shrink-0',
-                dir.color,
-                knownLeaf && 'opacity-60',
-              )}
+            <EntryIcon
+              Icon={dir.Icon}
+              color={cn(dir.color, knownLeaf && 'opacity-60')}
+              isSymlink={entry.is_symlink}
+              className="size-4 shrink-0"
             />
             <span className="truncate">{name}</span>
           </button>

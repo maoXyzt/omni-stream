@@ -47,6 +47,7 @@ import { cn } from '@/lib/utils'
 import { formatBytes, formatTime } from '@/lib/format'
 import { sortEntries } from '@/lib/sort'
 import { EntryContextMenu } from '@/components/EntryContextMenu'
+import { EntryIcon } from '@/components/EntryIcon'
 import { FileGrid } from '@/components/FileGrid'
 import { PathBreadcrumb } from '@/components/PathBreadcrumb'
 import { PathNavigator } from '@/components/PathNavigator'
@@ -1206,7 +1207,12 @@ function FileRow({
         onClick={() => onSelect(entry)}
       >
         <TableCell className="flex items-center gap-2 truncate">
-          <Icon className={`size-4 shrink-0 ${color}`} />
+          <EntryIcon
+            Icon={Icon}
+            color={color}
+            isSymlink={entry.is_symlink}
+            className="size-4 shrink-0"
+          />
           <span className="truncate" title={name}>
             {name}
           </span>
@@ -1307,7 +1313,12 @@ function GalleryRow({
           selected ? 'bg-accent text-accent-foreground' : 'hover:bg-muted/50',
         )}
       >
-        <Icon className={`size-4 shrink-0 ${color}`} />
+        <EntryIcon
+          Icon={Icon}
+          color={color}
+          isSymlink={entry.is_symlink}
+          className="size-4 shrink-0"
+        />
         <span className="truncate">{name}</span>
       </button>
     </EntryContextMenu>
