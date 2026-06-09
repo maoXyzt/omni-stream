@@ -49,7 +49,7 @@ export function PathNavigator({ prefix, onNavigate, activeStorage }: PathNavigat
   function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
     // e.isComposing guards against IME Enter (e.g. Chinese/Japanese candidate
     // selection) being misinterpreted as a form submission.
-    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault()
       e.currentTarget.form?.requestSubmit()
     }
