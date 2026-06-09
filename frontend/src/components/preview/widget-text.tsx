@@ -58,8 +58,8 @@ export function WidgetText({
   ctx,
 }: TextFileProps) {
   const r = useMemo(
-    () => resolveSrc(src, value, ctx.fileKey, ctx.storage),
-    [src, value, ctx.fileKey, ctx.storage],
+    () => resolveSrc(src, value, ctx.fileKey, ctx.storage, ctx.storageDescriptor),
+    [src, value, ctx.fileKey, ctx.storage, ctx.storageDescriptor],
   )
 
   if (!r.ok) return <ResolutionError reason={r.reason} />

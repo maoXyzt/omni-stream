@@ -243,3 +243,183 @@ describe('resolveSrc — template handling', () => {
     })
   })
 })
+
+// ---------------------------------------------------------------------------
+// StorageDescriptor fixtures for s3:// tests
+// ---------------------------------------------------------------------------
+
+import type { StorageDescriptor } from '@/types/storage'
+
+/** Multi-bucket S3 storage: any bucket in the URI belongs to this storage. */
+const MULTI_BUCKET_S3: StorageDescriptor = {
+  name: 'main',
+  type: 's3',
+  valid: true,
+  s3: { bucket: null },
+}
+
+/** Single-bucket S3 storage: only URIs whose bucket equals 'mybucket' resolve. */
+const SINGLE_BUCKET_S3: StorageDescriptor = {
+  name: 'mybucket-storage',
+  type: 's3',
+  valid: true,
+  s3: { bucket: 'mybucket' },
+}
+
+/** Local FS storage: rejects s3:// URIs with a clear reason. */
+const LOCAL_STORAGE: StorageDescriptor = {
+  name: 'local',
+  type: 'local',
+  valid: true,
+  local: { root_path: '/data' },
+}
+
+describe('resolveSrc — s3:// URI handling', () => {
+  // -- multi-bucket storage ---------------------------------------------------
+
+  it('s3://bucket/key — multi-bucket: maps bucket as first key segment', () => {
+    const r = resolveSrc(
+      's3://infographics/vigeneval/data/img.png',
+      'ignored',
+      FILE,
+      'main',
+      MULTI_BUCKET_S3,
+    )
+    expect(r).toEqual({
+      ok: true,
+      url: '/api/proxy/infographics/vigeneval/data/img.png?storage=main',
+      key: 'infographics/vigeneval/data/img.png',
+      rendered: 's3://infographics/vigeneval/data/img.png',
+    })
+  })
+
+  it('s3a:// variant resolves identically to s3://', () => {
+    const r = resolveSrc(
+      's3a://infographics/data/img.png',
+      'ignored',
+      FILE,
+      'main',
+      MULTI_BUCKET_S3,
+    )
+    expect(r).toMatchObject({ ok: true, key: 'infographics/data/img.png' })
+  })
+
+  it('{value} substitution + s3:// prefix template', () => {
+    const r = resolveSrc(
+      's3://infographics/vigeneval/data/{value}',
+      'x.png',
+      FILE,
+      'main',
+      MULTI_BUCKET_S3,
+    )
+    expect(r).toEqual({
+      ok: true,
+      url: '/api/proxy/infographics/vigeneval/data/x.png?storage=main',
+      key: 'infographics/vigeneval/data/x.png',
+      rendered: 's3://infographics/vigeneval/data/x.png',
+    })
+  })
+
+  it('cell value is itself an s3:// URI (default {value} template)', () => {
+    const r = resolveSrc(
+      '{value}',
+      's3://infographics/data/y.png',
+      FILE,
+      'main',
+      MULTI_BUCKET_S3,
+    )
+    expect(r).toEqual({
+      ok: true,
+      url: '/api/proxy/infographics/data/y.png?storage=main',
+      key: 'infographics/data/y.png',
+      rendered: 's3://infographics/data/y.png',
+    })
+  })
+
+  // -- single-bucket storage --------------------------------------------------
+
+  it('s3://mybucket/key — single-bucket, bucket matches: returns bare key', () => {
+    const r = resolveSrc(
+      's3://mybucket/data/img.png',
+      'ignored',
+      FILE,
+      'mybucket-storage',
+      SINGLE_BUCKET_S3,
+    )
+    expect(r).toEqual({
+      ok: true,
+      url: '/api/proxy/data/img.png?storage=mybucket-storage',
+      key: 'data/img.png',
+      rendered: 's3://mybucket/data/img.png',
+    })
+  })
+
+  it('bucket mismatch on single-bucket storage → ok:false with clear reason', () => {
+    const r = resolveSrc(
+      's3://other-bucket/data/img.png',
+      'ignored',
+      FILE,
+      'mybucket-storage',
+      SINGLE_BUCKET_S3,
+    )
+    expect(r).toMatchObject({ ok: false })
+    expect((r as { ok: false; reason: string }).reason).toMatch(/bucket/)
+  })
+
+  // -- non-S3 storage ---------------------------------------------------------
+
+  it('s3:// on a local storage → ok:false (not S3)', () => {
+    const r = resolveSrc(
+      's3://bucket/img.png',
+      'ignored',
+      FILE,
+      'local',
+      LOCAL_STORAGE,
+    )
+    expect(r).toMatchObject({ ok: false })
+  })
+
+  // -- unsupported scheme -----------------------------------------------------
+
+  it('gs:// scheme → ok:false (unsupported)', () => {
+    const r = resolveSrc(
+      'gs://bucket/img.png',
+      'ignored',
+      FILE,
+      'main',
+      MULTI_BUCKET_S3,
+    )
+    expect(r).toMatchObject({ ok: false })
+    expect((r as { ok: false; reason: string }).reason).toMatch(/scheme/)
+  })
+
+  // -- missing descriptor -----------------------------------------------------
+
+  it('s3:// without storageDescriptor → ok:false (descriptor not loaded)', () => {
+    const r = resolveSrc('s3://bucket/img.png', 'ignored', FILE, 'main')
+    expect(r).toMatchObject({ ok: false })
+    expect((r as { ok: false; reason: string }).reason).toMatch(/storage info/)
+  })
+
+  // -- regression: existing branches unaffected by new s3:// branch ----------
+
+  it('regression: /absolute path still works without descriptor', () => {
+    const r = resolveSrc('/foo/bar.png', 'ignored', FILE, 'mybucket-storage')
+    expect(r).toEqual({
+      ok: true,
+      url: '/api/proxy/foo/bar.png?storage=mybucket-storage',
+      key: 'foo/bar.png',
+      rendered: '/foo/bar.png',
+    })
+  })
+
+  it('regression: relative path still works without descriptor', () => {
+    const r = resolveSrc('{value}', 'a.png', FILE, 'mybucket-storage')
+    expect(r).toEqual({
+      ok: true,
+      url: '/api/proxy/datasets/imagenet/a.png?storage=mybucket-storage',
+      key: 'datasets/imagenet/a.png',
+      rendered: 'a.png',
+    })
+  })
+})

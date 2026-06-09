@@ -6,6 +6,9 @@
 //   2. Classify the rendered string and produce something an `<img>` /
 //      `<video>` / `<a>` can use:
 //        * absolute http(s) URL  → returned as-is (CDN / external case)
+//        * s3:// / s3a:// / s3n:// URI → resolved via resolveStorageUri,
+//          same rules as the "Go to path" navigator (bucket matched against
+//          the active storage descriptor), then proxied
 //        * leading-`/` storage key → proxied via `proxyUrl`
 //        * everything else        → resolved relative to the source data
 //          file's directory (`..` walks up, escape past root rejected),
@@ -14,6 +17,8 @@
 // Pure logic outside of the proxy URL builder; testable without React.
 
 import { proxyUrl } from '@/api/storage'
+import { hasUriScheme, resolveStorageUri } from '@/lib/resolve-uri'
+import type { StorageDescriptor } from '@/types/storage'
 
 export type SrcResolution =
   | {
@@ -40,11 +45,18 @@ export type SrcResolution =
 /// when the user didn't set one). When the template contains the literal
 /// `{value}`, the cell's value is substituted in. Otherwise the template is
 /// taken verbatim — useful for "all rows show this static URL" cases.
+///
+/// `storageDescriptor` is optional but required for `s3://` URI resolution —
+/// it carries the bucket layout needed to map `s3://bucket/key` to the
+/// correct storage-relative path (same logic as the "Go to path" navigator).
+/// When omitted, `s3://` src values are rejected with a clear error rather
+/// than silently producing a broken key.
 export function resolveSrc(
   template: string,
   value: unknown,
   fileKey: string,
   storage: string | undefined,
+  storageDescriptor?: StorageDescriptor,
 ): SrcResolution {
   if (template.length === 0) {
     // Defensive: schema rejects empty src, but keep a clear runtime message.
@@ -71,6 +83,31 @@ export function resolveSrc(
   // without dragging the storage proxy in.
   if (/^https?:\/\//i.test(rendered)) {
     return { ok: true, url: rendered, rendered }
+  }
+
+  // URI with a non-http(s) scheme (s3:// / s3a:// / s3n://) — resolve via
+  // the same logic as the "Go to path" navigator: bucket matched against
+  // the active storage descriptor, then proxied. Requires the descriptor
+  // (carries bucket layout); without it we reject with a clear message
+  // rather than falling through to the relative-path branch and producing
+  // a silently broken key like "s3:/bucket/...".
+  if (hasUriScheme(rendered)) {
+    if (!storageDescriptor) {
+      return {
+        ok: false,
+        reason:
+          's3:// URIs require storage info (not yet loaded). Try again in a moment.',
+      }
+    }
+    const resolved = resolveStorageUri(rendered, storageDescriptor)
+    if (!resolved.ok) return resolved
+    // resolveStorageUri may return a trailing slash for bare-bucket paths;
+    // strip it so the proxy receives a file key, not a directory marker.
+    const key = resolved.path.replace(/\/+$/, '')
+    if (key.length === 0) {
+      return { ok: false, reason: 'path resolves to storage root with no file' }
+    }
+    return { ok: true, url: proxyUrl(key, storage), key, rendered }
   }
 
   if (rendered.startsWith('/')) {
