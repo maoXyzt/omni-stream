@@ -1,0 +1,18 @@
+repos:
+  - repo: local
+    hooks:
+      - id: rustfmt
+        name: rustfmt
+        description: Format Rust code (auto-fix in place)
+        entry: cargo fmt --all
+        language: system
+        types: [rust]
+        pass_filenames: false
+
+      - id: eslint-fix
+        name: ESLint fix (frontend TypeScript)
+        description: Auto-fix TS/TSX lint issues (runs only when frontend/src files change)
+        entry: pnpm -C frontend exec eslint --fix ./src
+        language: system
+        files: ^frontend/src/.*\.(ts|tsx|js|jsx)$
+        pass_filenames: false

@@ -1,6 +1,9 @@
-import { useState, type FormEvent } from 'react'
+import { useState, type FormEvent, type KeyboardEvent } from 'react'
 import { FolderInput, Loader2 } from 'lucide-react'
 
+import { cn } from '@/lib/utils'
+import { resolveStorageUri } from '@/lib/resolve-uri'
+import type { StorageDescriptor } from '@/types/storage'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -10,7 +13,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { Input } from '@/components/ui/input'
 import {
   Tooltip,
   TooltipContent,
@@ -19,6 +21,7 @@ import {
 
 interface PathNavigatorProps {
   prefix: string
+  activeStorage?: StorageDescriptor
   // May be async: a file path is resolved via a stat round-trip in the parent
   // before navigating, so we await it and show a pending state meanwhile.
   // Resolving to `false` means navigation didn't happen and the input should
@@ -26,7 +29,7 @@ interface PathNavigatorProps {
   onNavigate: (prefix: string) => void | Promise<boolean | void>
 }
 
-export function PathNavigator({ prefix, onNavigate }: PathNavigatorProps) {
+export function PathNavigator({ prefix, onNavigate, activeStorage }: PathNavigatorProps) {
   const [open, setOpen] = useState(false)
   const [value, setValue] = useState(prefix)
   const [submitting, setSubmitting] = useState(false)
@@ -39,21 +42,37 @@ export function PathNavigator({ prefix, onNavigate }: PathNavigatorProps) {
     setOpen(next)
   }
 
+  // Strip stray newlines (from paste) and whitespace. Computed once and reused
+  // in both the preview and handleSubmit so the two are always in sync.
+  const cleaned = value.replace(/[\r\n]+/g, '').trim()
+
+  function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
+    // e.isComposing guards against IME Enter (e.g. Chinese/Japanese candidate
+    // selection) being misinterpreted as a form submission.
+    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+      e.preventDefault()
+      e.currentTarget.form?.requestSubmit()
+    }
+  }
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
-    // The parent normalizes the path (strips leading slashes, applies the
-    // trailing-slash convention, and resolves file vs. directory), so we just
-    // trim whitespace here.
     setSubmitting(true)
     try {
       // Keep the dialog open on an explicit `false` (bad/foreign path) so the
       // user can fix their input; close on success or a void return.
-      const result = await onNavigate(value.trim())
+      const result = await onNavigate(cleaned)
       if (result !== false) setOpen(false)
     } finally {
       setSubmitting(false)
     }
   }
+
+  // Resolved path preview — mirrors what goToPathOrFile will derive from the
+  // input. Updated on every keystroke so the user sees the final key before
+  // hitting Go.
+  const resolved = resolveStorageUri(cleaned, activeStorage)
+  const resolvedKey = resolved.ok ? resolved.path.replace(/^\/+/, '') : null
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -77,7 +96,7 @@ export function PathNavigator({ prefix, onNavigate }: PathNavigatorProps) {
         </TooltipTrigger>
         <TooltipContent>Jump to a folder or file path</TooltipContent>
       </Tooltip>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>Go to path</DialogTitle>
           <DialogDescription>
@@ -87,14 +106,41 @@ export function PathNavigator({ prefix, onNavigate }: PathNavigatorProps) {
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="flex flex-col gap-3">
-          <Input
+          <textarea
             value={value}
             onChange={(e) => setValue(e.target.value)}
+            onKeyDown={handleKeyDown}
             placeholder="foo/bar/"
             autoFocus
             spellCheck={false}
             autoComplete="off"
+            rows={3}
+            className={cn(
+              'w-full min-w-0 resize-y rounded-lg border border-input bg-transparent px-2.5 py-1.5',
+              'font-mono text-sm leading-relaxed transition-colors outline-none',
+              'placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50',
+              'dark:bg-input/30',
+            )}
           />
+          {cleaned && (
+            <div
+              className={cn(
+                'flex items-start gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-mono',
+                resolved.ok
+                  ? 'bg-muted text-muted-foreground'
+                  : 'bg-destructive/10 text-destructive dark:bg-destructive/20',
+              )}
+            >
+              <span className="shrink-0 select-none">{resolved.ok ? '→' : '✕'}</span>
+              <span className="break-all">
+                {resolved.ok
+                  ? resolvedKey === ''
+                    ? '(root)'
+                    : resolvedKey
+                  : resolved.reason}
+              </span>
+            </div>
+          )}
           <DialogFooter>
             <Button
               type="button"

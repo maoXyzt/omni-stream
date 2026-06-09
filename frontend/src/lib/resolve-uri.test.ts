@@ -150,3 +150,52 @@ describe('resolveStorageUri — rejections', () => {
     expect(resolveStorageUri(REPORTED, undefined).ok).toBe(false)
   })
 })
+
+describe('resolveStorageUri — local absolute paths', () => {
+  it('strips the root prefix (reported case)', () => {
+    expect(resolveStorageUri('/data/foo/bar/', local)).toEqual({
+      ok: true,
+      path: 'foo/bar/',
+    })
+  })
+
+  it('maps bare root (no trailing slash) to empty key', () => {
+    expect(resolveStorageUri('/data', local)).toEqual({ ok: true, path: '' })
+  })
+
+  it('maps bare root (trailing slash) to empty key', () => {
+    expect(resolveStorageUri('/data/', local)).toEqual({ ok: true, path: '' })
+  })
+
+  it('handles root_path with trailing slash in descriptor', () => {
+    const localTrailing: StorageDescriptor = {
+      name: 'fs',
+      type: 'local',
+      valid: true,
+      local: { root_path: '/data/' },
+    }
+    expect(resolveStorageUri('/data/foo', localTrailing)).toEqual({
+      ok: true,
+      path: 'foo',
+    })
+  })
+
+  it('rejects paths outside root', () => {
+    const r = resolveStorageUri('/etc/passwd', local)
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.reason).toContain('/data')
+  })
+
+  it('does not match a similarly-prefixed sibling directory', () => {
+    // /database/x must not match root /data
+    const r = resolveStorageUri('/database/x', local)
+    expect(r.ok).toBe(false)
+  })
+
+  it('passes relative paths through unchanged', () => {
+    expect(resolveStorageUri('foo/bar/', local)).toEqual({
+      ok: true,
+      path: 'foo/bar/',
+    })
+  })
+})
