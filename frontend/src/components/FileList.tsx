@@ -810,7 +810,7 @@ export function FileList() {
                 </Tooltip>
               )}
               <PathBreadcrumb prefix={prefix} onNavigate={goToPath} />
-              <PathNavigator prefix={prefix} onNavigate={goToPathOrFile} />
+              <PathNavigator prefix={prefix} activeStorage={activeStorage} onNavigate={goToPathOrFile} />
             </div>
             <div className="flex shrink-0 items-center gap-2">
               <Tooltip>

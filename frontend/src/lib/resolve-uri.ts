@@ -31,6 +31,23 @@ const SCHEME_RE = /^([a-zA-Z][a-zA-Z0-9+.-]*):\/\/(.*)$/
  * Resolution is scoped to the current storage only — cross-storage matching
  * is intentionally out of scope.
  */
+// Maps an absolute local path to a key relative to `rootPath`. Mirrors the
+// inverse operation in `absolutePathOf` (EntryContextMenu). Paths outside the
+// root are rejected like a mismatched S3 bucket.
+function resolveLocalAbsolute(input: string, rootPath: string): ResolvedUri {
+  const root = rootPath.replace(/\/+$/, '')
+  if (input === root || input === `${root}/`) {
+    return { ok: true, path: '' }
+  }
+  if (input.startsWith(`${root}/`)) {
+    return { ok: true, path: input.slice(root.length + 1) }
+  }
+  return {
+    ok: false,
+    reason: `That path is outside this storage's root "${rootPath}".`,
+  }
+}
+
 export function resolveStorageUri(
   input: string,
   storage: StorageDescriptor | undefined,
@@ -38,6 +55,15 @@ export function resolveStorageUri(
   const trimmed = input.trim()
   const m = SCHEME_RE.exec(trimmed)
   if (!m) {
+    // Local storage + absolute input: strip the root prefix so the caller
+    // gets a root-relative key (same convention as S3 bucket stripping).
+    if (
+      storage?.type === 'local' &&
+      storage.local?.root_path?.startsWith('/') &&
+      trimmed.startsWith('/')
+    ) {
+      return resolveLocalAbsolute(trimmed, storage.local.root_path)
+    }
     // Not a full URI — treat as already relative to the current storage.
     return { ok: true, path: trimmed }
   }
