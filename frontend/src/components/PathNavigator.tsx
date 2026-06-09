@@ -42,8 +42,14 @@ export function PathNavigator({ prefix, onNavigate, activeStorage }: PathNavigat
     setOpen(next)
   }
 
+  // Strip stray newlines (from paste) and whitespace. Computed once and reused
+  // in both the preview and handleSubmit so the two are always in sync.
+  const cleaned = value.replace(/[\r\n]+/g, '').trim()
+
   function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    // e.isComposing guards against IME Enter (e.g. Chinese/Japanese candidate
+    // selection) being misinterpreted as a form submission.
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
       e.preventDefault()
       e.currentTarget.form?.requestSubmit()
     }
@@ -51,14 +57,11 @@ export function PathNavigator({ prefix, onNavigate, activeStorage }: PathNavigat
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
-    // The parent normalizes the path (strips leading slashes, applies the
-    // trailing-slash convention, and resolves file vs. directory), so we just
-    // strip stray newlines (from paste) and whitespace here.
     setSubmitting(true)
     try {
       // Keep the dialog open on an explicit `false` (bad/foreign path) so the
       // user can fix their input; close on success or a void return.
-      const result = await onNavigate(value.replace(/[\r\n]+/g, '').trim())
+      const result = await onNavigate(cleaned)
       if (result !== false) setOpen(false)
     } finally {
       setSubmitting(false)
@@ -68,7 +71,6 @@ export function PathNavigator({ prefix, onNavigate, activeStorage }: PathNavigat
   // Resolved path preview — mirrors what goToPathOrFile will derive from the
   // input. Updated on every keystroke so the user sees the final key before
   // hitting Go.
-  const cleaned = value.replace(/[\r\n]+/g, '').trim()
   const resolved = resolveStorageUri(cleaned, activeStorage)
   const resolvedKey = resolved.ok ? resolved.path.replace(/^\/+/, '') : null
 
