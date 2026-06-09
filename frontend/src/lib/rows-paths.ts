@@ -100,7 +100,7 @@ export function resolveSrc(
       }
     }
     const resolved = resolveStorageUri(rendered, storageDescriptor)
-    if (!resolved.ok) return { ok: false, reason: resolved.reason }
+    if (!resolved.ok) return resolved
     // resolveStorageUri may return a trailing slash for bare-bucket paths;
     // strip it so the proxy receives a file key, not a directory marker.
     const key = resolved.path.replace(/\/+$/, '')
