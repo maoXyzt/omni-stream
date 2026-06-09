@@ -27,6 +27,7 @@ import { formatCell, formatCellExpanded } from '@/lib/parquet'
 import { resolveSrc, type SrcResolution } from '@/lib/rows-paths'
 import { canThumbnail } from '@/lib/thumbnail'
 import { cn } from '@/lib/utils'
+import type { StorageDescriptor } from '@/types/storage'
 
 import { EmptyHint, MediaFrame } from './widget-shared'
 
@@ -35,6 +36,11 @@ export { EmptyHint } from './widget-shared'
 export interface RenderContext {
   fileKey: string
   storage: string | undefined
+  /// Full storage descriptor, needed to resolve `s3://bucket/key` src values
+  /// using the same bucket-layout rules as the "Go to path" navigator.
+  /// Optional — absent while the storage roster is still loading; s3:// srcs
+  /// will surface a clear error rather than silently producing a broken key.
+  storageDescriptor?: StorageDescriptor
 }
 
 // -----------------------------------------------------------------------
@@ -110,8 +116,8 @@ function shouldThumb(key: string | undefined): boolean {
 
 export function WidgetImage({ value, src, ctx }: MediaProps) {
   const r = useMemo(
-    () => resolveSrc(src, value, ctx.fileKey, ctx.storage),
-    [src, value, ctx.fileKey, ctx.storage],
+    () => resolveSrc(src, value, ctx.fileKey, ctx.storage, ctx.storageDescriptor),
+    [src, value, ctx.fileKey, ctx.storage, ctx.storageDescriptor],
   )
   const url = r.ok ? r.url : ''
   const key = r.ok ? r.key : undefined
@@ -231,8 +237,8 @@ export function WidgetImage({ value, src, ctx }: MediaProps) {
 
 export function WidgetVideo({ value, src, ctx }: MediaProps) {
   const r = useMemo(
-    () => resolveSrc(src, value, ctx.fileKey, ctx.storage),
-    [src, value, ctx.fileKey, ctx.storage],
+    () => resolveSrc(src, value, ctx.fileKey, ctx.storage, ctx.storageDescriptor),
+    [src, value, ctx.fileKey, ctx.storage, ctx.storageDescriptor],
   )
   const url = r.ok ? r.url : ''
   const [failed, setFailed] = useState(false)
@@ -291,8 +297,8 @@ export function WidgetVideo({ value, src, ctx }: MediaProps) {
 
 export function WidgetAudio({ value, src, ctx }: MediaProps) {
   const r = useMemo(
-    () => resolveSrc(src, value, ctx.fileKey, ctx.storage),
-    [src, value, ctx.fileKey, ctx.storage],
+    () => resolveSrc(src, value, ctx.fileKey, ctx.storage, ctx.storageDescriptor),
+    [src, value, ctx.fileKey, ctx.storage, ctx.storageDescriptor],
   )
   const url = r.ok ? r.url : ''
   const [failed, setFailed] = useState(false)
@@ -346,8 +352,8 @@ export function WidgetAudio({ value, src, ctx }: MediaProps) {
 
 export function WidgetLink({ value, src, ctx }: MediaProps) {
   const r = useMemo(
-    () => resolveSrc(src, value, ctx.fileKey, ctx.storage),
-    [src, value, ctx.fileKey, ctx.storage],
+    () => resolveSrc(src, value, ctx.fileKey, ctx.storage, ctx.storageDescriptor),
+    [src, value, ctx.fileKey, ctx.storage, ctx.storageDescriptor],
   )
   if (!r.ok) return <MediaError icon={LinkIcon} reason={r.reason} />
   // Visible label is the rendered `src` template (cell value substituted in,

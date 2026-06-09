@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useRowsPresets } from '@/hooks/use-rows-presets'
 import { useRowsViewConfig } from '@/hooks/use-rows-view-config'
+import { useStorages } from '@/hooks/use-storage'
 import { presetMatch } from '@/lib/rows-applicability'
 import { type Node } from '@/lib/rows-schema'
 import { type ColumnInfo, type RowsSource } from '@/lib/rows-source'
@@ -40,7 +41,21 @@ interface RowsViewProps {
 
 export function RowsView({ fileKey, source, storage }: RowsViewProps) {
   const { rules, decodeError, setRules } = useRowsViewConfig()
-  const renderCtx = useMemo(() => ({ fileKey, storage }), [fileKey, storage])
+
+  // Resolve the full StorageDescriptor for the active storage so that image /
+  // video / audio / link widgets can parse `s3://bucket/key` src values using
+  // the same bucket-layout rules as the "Go to path" navigator. Mirrors the
+  // pattern in FileList (`storages.find(s => s.name === storageName)`).
+  const storagesQuery = useStorages()
+  const storageDescriptor = useMemo(
+    () => storagesQuery.data?.storages.find((s) => s.name === storage),
+    [storagesQuery.data, storage],
+  )
+
+  const renderCtx = useMemo(
+    () => ({ fileKey, storage, storageDescriptor }),
+    [fileKey, storage, storageDescriptor],
+  )
   const columns = source.columns
   const [dialogOpen, setDialogOpen] = useState(false)
 

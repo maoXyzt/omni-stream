@@ -155,6 +155,7 @@ function defaultTemplateFor(columns: ColumnInfo[]): string {
     '//   { "image": "id", "src": "https://cdn/{value}.png" }   ← remote URL',
     '//   { "image": "id", "src": "./images/{value}.jpg" }      ← sibling dir',
     '//   { "image": "id", "src": "/shared/{value}" }           ← absolute key',
+    '//   { "image": "id", "src": "s3://bucket/{value}" }       ← s3:// URI (this storage)',
   ].join('\n')
   return `${banner}\n\n${json}`
 }

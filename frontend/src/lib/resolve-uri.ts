@@ -15,6 +15,17 @@ const S3_SCHEMES = new Set(['s3', 's3a', 's3n'])
 const SCHEME_RE = /^([a-zA-Z][a-zA-Z0-9+.-]*):\/\/(.*)$/
 
 /**
+ * Returns true when `input` begins with a `scheme://` authority prefix.
+ * Used by the RowsView src resolver to decide whether to route a rendered
+ * src template through `resolveStorageUri` rather than the relative-path
+ * or leading-`/` branches. Exported so callers share the same regex
+ * rather than duplicating the pattern.
+ */
+export function hasUriScheme(input: string): boolean {
+  return SCHEME_RE.test(input.trim())
+}
+
+/**
  * Resolves a pasted "Go to path" value into a path relative to the *current*
  * storage root.
  *
