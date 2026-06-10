@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
@@ -146,7 +146,7 @@ export function FileList() {
   // Ref keeps the latest urlViewParam without closing over it in callbacks,
   // so goToPath / goToPathOrFile / switchStorage don't rebuild on view toggle.
   const urlViewParamRef = useRef(urlViewParam)
-  useLayoutEffect(() => {
+  useEffect(() => {
     urlViewParamRef.current = urlViewParam
   }, [urlViewParam])
   const viewMode: ViewMode = isValidViewMode(urlViewParam) ? urlViewParam : storedViewMode
