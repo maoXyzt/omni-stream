@@ -91,6 +91,10 @@ const PAGE_PARAM = 'page'
 const VIEW_PARAM = 'view'
 const REPO_URL = 'https://github.com/maoXyzt/omni-stream'
 
+function isValidViewMode(v: string | null): v is ViewMode {
+  return v === 'list' || v === 'grid'
+}
+
 // Inline GitHub mark. `lucide-react` is brand-neutral so the official octocat
 // isn't shipped there; this is the standard 16x16 path from GitHub's own
 // invertocat asset, recoloured via `currentColor` so it inherits the button's
@@ -145,8 +149,7 @@ export function FileList() {
   useLayoutEffect(() => {
     urlViewParamRef.current = urlViewParam
   }, [urlViewParam])
-  const viewMode: ViewMode =
-    urlViewParam === 'list' || urlViewParam === 'grid' ? urlViewParam : storedViewMode
+  const viewMode: ViewMode = isValidViewMode(urlViewParam) ? urlViewParam : storedViewMode
   const setViewMode = useCallback(
     (next: ViewMode) => {
       setStoredViewMode(next)
@@ -164,7 +167,7 @@ export function FileList() {
   // When a shared URL carries ?view=, sync that preference back to localStorage
   // so subsequent visits without the param remember the user's choice.
   useEffect(() => {
-    if ((urlViewParam === 'list' || urlViewParam === 'grid') && urlViewParam !== storedViewMode) {
+    if (isValidViewMode(urlViewParam) && urlViewParam !== storedViewMode) {
       setStoredViewMode(urlViewParam)
     }
   }, [urlViewParam, storedViewMode, setStoredViewMode])
@@ -534,7 +537,7 @@ export function FileList() {
       const trail = clean ? encodePathSegments(clean) : ''
       navigate({
         pathname: `/s/${encodeURIComponent(storageName)}/${trail}`,
-        search: (urlViewParamRef.current === 'list' || urlViewParamRef.current === 'grid')
+        search: isValidViewMode(urlViewParamRef.current)
           ? `?${VIEW_PARAM}=${urlViewParamRef.current}`
           : '',
       })
@@ -594,7 +597,7 @@ export function FileList() {
       const base = slash >= 0 ? trimmed.slice(slash + 1) : trimmed
       const sp = new URLSearchParams()
       sp.set(PREVIEW_PARAM, base)
-      if (urlViewParamRef.current === 'list' || urlViewParamRef.current === 'grid') {
+      if (isValidViewMode(urlViewParamRef.current)) {
         sp.set(VIEW_PARAM, urlViewParamRef.current)
       }
       setTokenStack([undefined])
@@ -614,7 +617,7 @@ export function FileList() {
       const vp = urlViewParamRef.current
       navigate({
         pathname: `/s/${encodeURIComponent(name)}/`,
-        search: (vp === 'list' || vp === 'grid') ? `?${VIEW_PARAM}=${vp}` : '',
+        search: isValidViewMode(vp) ? `?${VIEW_PARAM}=${vp}` : '',
       })
     },
     [navigate, storageName],
