@@ -114,8 +114,19 @@ pub fn validate_readonly(sql: &str) -> Result<(), AppError> {
 /// land (S3 secret scope / `allowed_directories`).
 fn validate_copy_shape(stripped_stmt: &str) -> Result<(), AppError> {
   let rest = stripped_stmt.trim_start();
-  // Skip the leading COPY keyword (already matched case-insensitively).
-  let rest = rest[4..].trim_start();
+  // The first *word* being COPY doesn't guarantee the statement *starts*
+  // with it — tokenize_words skips punctuation and non-ASCII bytes, so e.g.
+  // `(COPY …)` or `★COPY …` reach here too. `get(..4)` (not `[..4]`) keeps
+  // a non-char-boundary prefix from panicking; any mismatch is rejected.
+  let after_keyword = match rest.get(..4) {
+    Some(kw) if kw.eq_ignore_ascii_case("copy") => &rest[4..],
+    _ => {
+      return Err(AppError::QueryRejected(
+        "COPY must be the first token of the statement".into(),
+      ));
+    }
+  };
+  let rest = after_keyword.trim_start();
   if !rest.starts_with('(') {
     return Err(AppError::QueryRejected(
       "COPY is only allowed in the export form COPY (<query>) TO '<target>'".into(),
@@ -385,6 +396,16 @@ mod tests {
     rejected("COPY (SELECT 1) FROM 'x'");
     rejected("COPY (SELECT 1)");
     rejected("COPY (SELECT 1 TO 'x'"); // unbalanced parens
+  }
+
+  #[test]
+  fn copy_not_at_statement_start_rejected_without_panic() {
+    // tokenize_words skips punctuation / non-ASCII bytes, so the first WORD
+    // can be COPY while the statement doesn't START with it. The multi-byte
+    // prefix used to panic on a non-char-boundary slice (`rest[4..]`).
+    rejected("★★COPY (SELECT 1) TO 'x'");
+    rejected("(COPY (SELECT 1) TO 'x')");
+    rejected("\u{00e9}COPY (SELECT 1) TO 'x'");
   }
 
   #[test]

@@ -120,15 +120,27 @@ pub async fn query_handler(
   // The blocking task sends its interrupt handle back as soon as the
   // connection exists; the watchdog fires it when the wall clock expires,
   // which makes the running query fail fast with an interrupt error.
+  //
+  // Lifetime discipline: the connection is returned alongside the result —
+  // on every path that handed out an interrupt handle — so it outlives the
+  // watchdog. duckdb-rs's InterruptHandle nulls itself when the connection
+  // closes, but disconnect and that clear() aren't atomic; a watchdog that
+  // has already woken could race the drop and interrupt a freed connection.
+  // Holding conn here and awaiting the aborted watchdog closes that window.
   let (tx, rx) = tokio::sync::oneshot::channel();
   let join = tokio::task::spawn_blocking(move || {
-    let conn = duckdb::Connection::open_in_memory()
-      .map_err(|e| AppError::Backend(format!("open duckdb: {e}")))?;
+    let conn = match duckdb::Connection::open_in_memory() {
+      Ok(c) => c,
+      Err(e) => return (Err(AppError::Backend(format!("open duckdb: {e}"))), None),
+    };
     let _ = tx.send(conn.interrupt_handle());
-    conn
-      .execute_batch(&setup)
-      .map_err(|e| AppError::Backend(format!("sql session setup: {e}")))?;
-    exec::run_query(&conn, &user_sql, max_rows)
+    if let Err(e) = conn.execute_batch(&setup) {
+      return (
+        Err(AppError::Backend(format!("sql session setup: {e}"))),
+        Some(conn),
+      );
+    }
+    (exec::run_query(&conn, &user_sql, max_rows), Some(conn))
   });
   let watchdog = tokio::spawn(async move {
     if let Ok(handle) = rx.await {
@@ -136,10 +148,13 @@ pub async fn query_handler(
       handle.interrupt();
     }
   });
-  let result = join
-    .await
-    .map_err(|e| AppError::Backend(format!("query task failed: {e}")))?;
+  let joined = join.await;
   watchdog.abort();
+  // abort() doesn't wait for a task already past its last await point;
+  // join it so a mid-interrupt watchdog finishes before conn drops.
+  let _ = watchdog.await;
+  let (result, conn) = joined.map_err(|e| AppError::Backend(format!("query task failed: {e}")))?;
+  drop(conn);
 
   let elapsed = start.elapsed();
   let (columns, rows, truncated) = match result {

@@ -46,6 +46,12 @@ const Editor =
 
 const DRAFT_KEY_PREFIX = 'omni-stream:sql:'
 
+// DOM render cap, independent of the server's max_rows (default 10k). A
+// 10k×N-column table means hundreds of thousands of DOM nodes — enough to
+// freeze the tab. The full result still lives in memory (mutation.data);
+// only the table is clipped, with a notice in the status bar.
+const RENDER_ROW_CAP = 1000
+
 function loadDraft(storage: string): string {
   try {
     return window.sessionStorage.getItem(DRAFT_KEY_PREFIX + storage) ?? ''
@@ -197,7 +203,10 @@ export function SqlPage() {
               </span>
               {result && (
                 <span className="ml-auto text-xs text-muted-foreground">
-                  {result.row_count} rows · {result.elapsed_ms} ms
+                  {result.row_count > RENDER_ROW_CAP
+                    ? `showing first ${RENDER_ROW_CAP.toLocaleString()} of ${result.row_count.toLocaleString()} rows`
+                    : `${result.row_count} rows`}{' '}
+                  · {result.elapsed_ms} ms
                 </span>
               )}
             </div>
@@ -243,7 +252,7 @@ export function SqlPage() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {result.rows.map((row, ri) => (
+                      {result.rows.slice(0, RENDER_ROW_CAP).map((row, ri) => (
                         <TableRow key={ri}>
                           {row.map((cell, ci) => (
                             <TableCell
