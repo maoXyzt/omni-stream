@@ -43,7 +43,7 @@ import { useResizableWidth } from '@/hooks/use-resizable-width'
 import { useSidebarCollapsed } from '@/hooks/use-sidebar-collapsed'
 import { useSortDir } from '@/hooks/use-sort-dir'
 import { useGridFit } from '@/hooks/use-grid-fit'
-import { useViewMode } from '@/hooks/use-view-mode'
+import { useViewMode, type ViewMode } from '@/hooks/use-view-mode'
 import { cn } from '@/lib/utils'
 import { formatBytes, formatTime } from '@/lib/format'
 import { sortEntries } from '@/lib/sort'
@@ -88,7 +88,12 @@ import type { FileEntry } from '@/types/storage'
 
 const PREVIEW_PARAM = 'preview'
 const PAGE_PARAM = 'page'
+const VIEW_PARAM = 'view'
 const REPO_URL = 'https://github.com/maoXyzt/omni-stream'
+
+function isValidViewMode(v: string | null): v is ViewMode {
+  return v === 'list' || v === 'grid'
+}
 
 // Inline GitHub mark. `lucide-react` is brand-neutral so the official octocat
 // isn't shipped there; this is the standard 16x16 path from GitHub's own
@@ -136,7 +141,36 @@ export function FileList() {
     const first = prefix.split('/')[0]
     return first || null
   }, [multiBucket, prefix])
-  const [viewMode, setViewMode] = useViewMode()
+  const [storedViewMode, setStoredViewMode] = useViewMode()
+  const urlViewParam = searchParams.get(VIEW_PARAM)
+  // Ref keeps the latest urlViewParam without closing over it in callbacks,
+  // so goToPath / goToPathOrFile / switchStorage don't rebuild on view toggle.
+  const urlViewParamRef = useRef(urlViewParam)
+  useEffect(() => {
+    urlViewParamRef.current = urlViewParam
+  }, [urlViewParam])
+  const viewMode: ViewMode = isValidViewMode(urlViewParam) ? urlViewParam : storedViewMode
+  const setViewMode = useCallback(
+    (next: ViewMode) => {
+      setStoredViewMode(next)
+      setSearchParams(
+        (prev) => {
+          const nextParams = new URLSearchParams(prev)
+          nextParams.set(VIEW_PARAM, next)
+          return nextParams
+        },
+        { replace: true },
+      )
+    },
+    [setStoredViewMode, setSearchParams],
+  )
+  // When a shared URL carries ?view=, sync that preference back to localStorage
+  // so subsequent visits without the param remember the user's choice.
+  useEffect(() => {
+    if (isValidViewMode(urlViewParam) && urlViewParam !== storedViewMode) {
+      setStoredViewMode(urlViewParam)
+    }
+  }, [urlViewParam, storedViewMode, setStoredViewMode])
   const [gridFit, setGridFit] = useGridFit()
   // Inline split layout (narrow file list + preview pane) needs horizontal
   // room. Below `md` we keep the full-width list and fall back to the modal.
@@ -503,7 +537,9 @@ export function FileList() {
       const trail = clean ? encodePathSegments(clean) : ''
       navigate({
         pathname: `/s/${encodeURIComponent(storageName)}/${trail}`,
-        search: '',
+        search: isValidViewMode(urlViewParamRef.current)
+          ? `?${VIEW_PARAM}=${urlViewParamRef.current}`
+          : '',
       })
     },
     [navigate, storageName],
@@ -561,6 +597,9 @@ export function FileList() {
       const base = slash >= 0 ? trimmed.slice(slash + 1) : trimmed
       const sp = new URLSearchParams()
       sp.set(PREVIEW_PARAM, base)
+      if (isValidViewMode(urlViewParamRef.current)) {
+        sp.set(VIEW_PARAM, urlViewParamRef.current)
+      }
       setTokenStack([undefined])
       navigate({
         pathname: `/s/${encodeURIComponent(storageName)}/${encodePathSegments(parent)}`,
@@ -575,9 +614,10 @@ export function FileList() {
     (name: string) => {
       if (name === storageName) return
       setTokenStack([undefined])
+      const vp = urlViewParamRef.current
       navigate({
         pathname: `/s/${encodeURIComponent(name)}/`,
-        search: '',
+        search: isValidViewMode(vp) ? `?${VIEW_PARAM}=${vp}` : '',
       })
     },
     [navigate, storageName],
