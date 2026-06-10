@@ -218,8 +218,15 @@ export function FileList() {
       canonical()
       return
     }
+    // An auth failure is not evidence about the path — and probing through
+    // it would permanently occupy probedRef, so the probe would never rerun
+    // after the user supplies a token and the listing settles for real.
+    const isAuthError =
+      listQuery.isError &&
+      listQuery.error instanceof ApiError &&
+      listQuery.error.isUnauthorized
     const settledEmpty =
-      listQuery.isError ||
+      (listQuery.isError && !isAuthError) ||
       (listQuery.data &&
         listQuery.data.entries.length === 0 &&
         !listQuery.data.next_token)
@@ -238,8 +245,11 @@ export function FileList() {
         const slash = candidate.lastIndexOf('/')
         const parent = slash >= 0 ? candidate.slice(0, slash + 1) : ''
         const base = slash >= 0 ? candidate.slice(slash + 1) : candidate
-        const sp = new URLSearchParams()
+        // Carry the visitor's query params along, minus the page cursor —
+        // it indexed the bogus directory interpretation of the file path.
+        const sp = new URLSearchParams(searchParams)
         sp.set(PREVIEW_PARAM, base)
+        sp.delete(PAGE_PARAM)
         navigate(
           {
             pathname: `/s/${encodeURIComponent(storageName)}/${encodePathSegments(parent)}`,
@@ -248,8 +258,13 @@ export function FileList() {
           { replace: true },
         )
       })
-      .catch(() => {
-        // Path doesn't exist (or stat failed): keep the current view.
+      .catch((err: unknown) => {
+        // A 404 settles it — the path doesn't exist, keep the current view
+        // for good. Anything else (network blip, 5xx, auth) is transient:
+        // release the ref so the next listing settle can probe again.
+        if (!(err instanceof ApiError && err.status === 404)) {
+          probedRef.current = null
+        }
       })
     return () => {
       cancelled = true
@@ -260,6 +275,7 @@ export function FileList() {
     storageName,
     listQuery.data,
     listQuery.isError,
+    listQuery.error,
     currentPage,
     searchParams,
     navigate,
