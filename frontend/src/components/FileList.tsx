@@ -144,17 +144,24 @@ export function FileList() {
   const setViewMode = useCallback(
     (next: ViewMode) => {
       setStoredViewMode(next)
-      setSearchParams((prev) => { prev.set(VIEW_PARAM, next); return prev }, { replace: true })
+      setSearchParams(
+        (prev) => {
+          const nextParams = new URLSearchParams(prev)
+          nextParams.set(VIEW_PARAM, next)
+          return nextParams
+        },
+        { replace: true },
+      )
     },
     [setStoredViewMode, setSearchParams],
   )
   // When a shared URL carries ?view=, sync that preference back to localStorage
   // so subsequent visits without the param remember the user's choice.
   useEffect(() => {
-    if (urlViewParam === 'list' || urlViewParam === 'grid') {
+    if ((urlViewParam === 'list' || urlViewParam === 'grid') && urlViewParam !== storedViewMode) {
       setStoredViewMode(urlViewParam)
     }
-  }, [urlViewParam, setStoredViewMode])
+  }, [urlViewParam, storedViewMode, setStoredViewMode])
   const [gridFit, setGridFit] = useGridFit()
   // Inline split layout (narrow file list + preview pane) needs horizontal
   // room. Below `md` we keep the full-width list and fall back to the modal.
@@ -521,7 +528,7 @@ export function FileList() {
       const trail = clean ? encodePathSegments(clean) : ''
       navigate({
         pathname: `/s/${encodeURIComponent(storageName)}/${trail}`,
-        search: urlViewParam ? `?${VIEW_PARAM}=${urlViewParam}` : '',
+        search: (urlViewParam === 'list' || urlViewParam === 'grid') ? `?${VIEW_PARAM}=${urlViewParam}` : '',
       })
     },
     [navigate, storageName, urlViewParam],
@@ -579,7 +586,7 @@ export function FileList() {
       const base = slash >= 0 ? trimmed.slice(slash + 1) : trimmed
       const sp = new URLSearchParams()
       sp.set(PREVIEW_PARAM, base)
-      if (urlViewParam) sp.set(VIEW_PARAM, urlViewParam)
+      if (urlViewParam === 'list' || urlViewParam === 'grid') sp.set(VIEW_PARAM, urlViewParam)
       setTokenStack([undefined])
       navigate({
         pathname: `/s/${encodeURIComponent(storageName)}/${encodePathSegments(parent)}`,
