@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
@@ -139,6 +139,12 @@ export function FileList() {
   }, [multiBucket, prefix])
   const [storedViewMode, setStoredViewMode] = useViewMode()
   const urlViewParam = searchParams.get(VIEW_PARAM)
+  // Ref keeps the latest urlViewParam without closing over it in callbacks,
+  // so goToPath / goToPathOrFile / switchStorage don't rebuild on view toggle.
+  const urlViewParamRef = useRef(urlViewParam)
+  useLayoutEffect(() => {
+    urlViewParamRef.current = urlViewParam
+  }, [urlViewParam])
   const viewMode: ViewMode =
     urlViewParam === 'list' || urlViewParam === 'grid' ? urlViewParam : storedViewMode
   const setViewMode = useCallback(
@@ -528,10 +534,12 @@ export function FileList() {
       const trail = clean ? encodePathSegments(clean) : ''
       navigate({
         pathname: `/s/${encodeURIComponent(storageName)}/${trail}`,
-        search: (urlViewParam === 'list' || urlViewParam === 'grid') ? `?${VIEW_PARAM}=${urlViewParam}` : '',
+        search: (urlViewParamRef.current === 'list' || urlViewParamRef.current === 'grid')
+          ? `?${VIEW_PARAM}=${urlViewParamRef.current}`
+          : '',
       })
     },
-    [navigate, storageName, urlViewParam],
+    [navigate, storageName],
   )
 
   // "Go to path" target may be a file rather than a directory. `goToPath`
@@ -586,7 +594,9 @@ export function FileList() {
       const base = slash >= 0 ? trimmed.slice(slash + 1) : trimmed
       const sp = new URLSearchParams()
       sp.set(PREVIEW_PARAM, base)
-      if (urlViewParam === 'list' || urlViewParam === 'grid') sp.set(VIEW_PARAM, urlViewParam)
+      if (urlViewParamRef.current === 'list' || urlViewParamRef.current === 'grid') {
+        sp.set(VIEW_PARAM, urlViewParamRef.current)
+      }
       setTokenStack([undefined])
       navigate({
         pathname: `/s/${encodeURIComponent(storageName)}/${encodePathSegments(parent)}`,
@@ -594,16 +604,17 @@ export function FileList() {
       })
       return true
     },
-    [goToPath, navigate, storageName, activeStorage, urlViewParam],
+    [goToPath, navigate, storageName, activeStorage],
   )
 
   const switchStorage = useCallback(
     (name: string) => {
       if (name === storageName) return
       setTokenStack([undefined])
+      const vp = urlViewParamRef.current
       navigate({
         pathname: `/s/${encodeURIComponent(name)}/`,
-        search: '',
+        search: (vp === 'list' || vp === 'grid') ? `?${VIEW_PARAM}=${vp}` : '',
       })
     },
     [navigate, storageName],
