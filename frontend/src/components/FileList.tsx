@@ -184,6 +184,86 @@ export function FileList() {
   const currentToken = tokenStack[currentPage - 1]
   const listQuery = useListFiles(prefix, currentToken, storageName || undefined)
   const prefetchListFiles = usePrefetchListFiles()
+
+  // A directly-visited URL without a trailing slash is ambiguous —
+  // `normalizePrefix` has already committed to listing it as a directory.
+  // Let the listing outcome adjudicate:
+  //  - non-empty → it IS a directory → replace-navigate to the canonical
+  //    trailing-slash URL (search params preserved);
+  //  - settled empty (or the backend errored — local fs rejects listing a
+  //    file path, S3 just returns nothing) → stat the path once: a file
+  //    redirects to its parent with the preview open (same end state as
+  //    clicking it, mirroring goToPathOrFile), an empty-but-real directory
+  //    just gets the canonical slash, and a failed stat leaves the page
+  //    alone so the existing empty/error state stays visible.
+  // `replace: true` everywhere keeps Back from bouncing through redirects;
+  // `probedRef` caps the stat probe at one request per ambiguous path.
+  const probedRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!storageName || !rawSplat || rawSplat.endsWith('/')) return
+    const canonical = () => {
+      const qs = searchParams.toString()
+      navigate(
+        {
+          pathname: `/s/${encodeURIComponent(storageName)}/${encodePathSegments(prefix)}`,
+          search: qs ? `?${qs}` : '',
+        },
+        { replace: true },
+      )
+    }
+    if (
+      listQuery.data &&
+      (listQuery.data.entries.length > 0 || listQuery.data.next_token)
+    ) {
+      canonical()
+      return
+    }
+    const settledEmpty =
+      listQuery.isError ||
+      (listQuery.data &&
+        listQuery.data.entries.length === 0 &&
+        !listQuery.data.next_token)
+    if (!settledEmpty || currentPage !== 1) return
+    const candidate = prefix.replace(/\/$/, '')
+    if (!candidate || probedRef.current === candidate) return
+    probedRef.current = candidate
+    let cancelled = false
+    statFile(candidate, storageName || undefined)
+      .then((meta) => {
+        if (cancelled) return
+        if (meta.is_dir) {
+          canonical()
+          return
+        }
+        const slash = candidate.lastIndexOf('/')
+        const parent = slash >= 0 ? candidate.slice(0, slash + 1) : ''
+        const base = slash >= 0 ? candidate.slice(slash + 1) : candidate
+        const sp = new URLSearchParams()
+        sp.set(PREVIEW_PARAM, base)
+        navigate(
+          {
+            pathname: `/s/${encodeURIComponent(storageName)}/${encodePathSegments(parent)}`,
+            search: `?${sp.toString()}`,
+          },
+          { replace: true },
+        )
+      })
+      .catch(() => {
+        // Path doesn't exist (or stat failed): keep the current view.
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [
+    rawSplat,
+    prefix,
+    storageName,
+    listQuery.data,
+    listQuery.isError,
+    currentPage,
+    searchParams,
+    navigate,
+  ])
   // `walking` is the UI signal (Pager spinner + skeleton). `walkingRef`
   // mirrors it as a ref so the walk effect can guard re-entry without
   // listing `walking` in its dep array.
