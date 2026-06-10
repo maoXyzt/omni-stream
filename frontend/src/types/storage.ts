@@ -88,6 +88,14 @@ export interface ServerInfo {
   sql_enabled: boolean
 }
 
+export interface ConvertResult {
+  /// Storage-relative path of the written Parquet file.
+  output_key: string
+  /// Number of rows written as reported by DuckDB.
+  rows_written: number
+  elapsed_ms: number
+}
+
 export interface QueryColumn {
   name: string
   /// DuckDB logical type rendered as a string (e.g. "Int32", "Utf8").

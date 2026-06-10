@@ -146,7 +146,11 @@ async fn main() -> anyhow::Result<()> {
     app
       .route(
         "/api/query",
-        axum::routing::post(sql::query_handler).layer(query_timeout),
+        axum::routing::post(sql::query_handler).layer(query_timeout.clone()),
+      )
+      .route(
+        "/api/convert",
+        axum::routing::post(sql::convert::convert_handler).layer(query_timeout),
       )
       // Router-level so the MethodRouter keeps a single layer (two chained
       // `.layer` calls defeat axum's error-type inference). Other routes

@@ -60,7 +60,7 @@ impl AppState {
     self.sql_enabled
   }
 
-  fn resolve(&self, name: Option<&str>) -> Result<Arc<dyn StorageBackend>, AppError> {
+  pub(crate) fn resolve(&self, name: Option<&str>) -> Result<Arc<dyn StorageBackend>, AppError> {
     let key = name
       .map(str::trim)
       .filter(|s| !s.is_empty())

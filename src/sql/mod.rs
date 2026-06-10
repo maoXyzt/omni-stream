@@ -7,6 +7,7 @@
 //! leaking across storages; setup cost is milliseconds once the httpfs
 //! extension is cached on disk.
 
+pub mod convert;
 pub mod exec;
 pub mod session;
 pub mod validate;

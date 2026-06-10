@@ -14,6 +14,23 @@ use crate::error::AppError;
 
 const LIST_PAGE_SIZE: usize = 1000;
 
+/// Safely join a storage-relative `key` onto `root`, rejecting `..` and other
+/// path components that would escape the root directory. Shared by
+/// `LocalFsBackend` and the SQL convert handler.
+pub(crate) fn safe_join(root: &Path, key: &str) -> Result<PathBuf, AppError> {
+  let trimmed = key.trim_start_matches('/');
+  let mut full = root.to_path_buf();
+  for component in Path::new(trimmed).components() {
+    match component {
+      Component::Normal(c) => full.push(c),
+      Component::CurDir => {}
+      // Reject ParentDir / RootDir / Prefix to prevent escaping the root.
+      _ => return Err(AppError::InvalidPath(key.to_string())),
+    }
+  }
+  Ok(full)
+}
+
 /// How long a sorted listing stays cached. Short enough that external file
 /// changes are visible within seconds; long enough to absorb the typical
 /// "click through pages 1..N" browsing pattern without re-scanning.
@@ -223,17 +240,7 @@ impl LocalFsBackend {
   }
 
   fn resolve(&self, path: &str) -> Result<PathBuf, AppError> {
-    let trimmed = path.trim_start_matches('/');
-    let mut full = self.root.clone();
-    for component in Path::new(trimmed).components() {
-      match component {
-        Component::Normal(c) => full.push(c),
-        Component::CurDir => {}
-        // Reject ParentDir / RootDir / Prefix to prevent escaping the root.
-        _ => return Err(AppError::InvalidPath(path.to_string())),
-      }
-    }
-    Ok(full)
+    safe_join(&self.root, path)
   }
 
   fn relative_key(&self, full: &Path, is_dir: bool) -> String {

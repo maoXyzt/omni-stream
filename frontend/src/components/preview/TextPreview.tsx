@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { useInfiniteQuery } from '@tanstack/react-query'
+import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import {
   AlertCircle,
   Check,
   Copy,
   Download,
+  FileDown,
   LayoutList,
   ListOrdered,
   Loader2,
@@ -29,8 +31,11 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { ApiError } from '@/api/client'
+import { convertToParquet } from '@/api/convert'
 import { useLineNumbers } from '@/hooks/use-line-numbers'
 import { useRowsViewHint } from '@/hooks/use-rows-view-hint'
+import { useServerInfo } from '@/hooks/use-storage'
 import {
   SUPPORTED_LANGUAGES,
   detectLanguage,
@@ -94,6 +99,49 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
     const query = rules ? `?${ROWS_PARAM}=${encodeURIComponent(rules)}` : ''
     navigate(`/r/${encodeURIComponent(storage)}/${trail}${query}`)
   }, [storage, rowsFormat, searchParams, fileKey, navigate])
+  // --- Convert to Parquet ---------------------------------------------------
+
+  const queryClient = useQueryClient()
+  const serverInfo = useServerInfo()
+  // Show the button only for JSONL/NDJSON when the DuckDB-backed convert
+  // endpoint is live (sql_enabled implies auth + [sql] + duckdb build).
+  const canConvert =
+    rowsFormat === 'jsonl' && Boolean(serverInfo.data?.sql_enabled) && Boolean(storage)
+  const [converting, setConverting] = useState(false)
+  const [showOverwriteDialog, setShowOverwriteDialog] = useState(false)
+  // Output filename derived from the input key (shown in the overwrite dialog).
+  const outputKey = useMemo(() => {
+    const dot = fileKey.lastIndexOf('.')
+    return dot >= 0 ? `${fileKey.slice(0, dot)}.parquet` : `${fileKey}.parquet`
+  }, [fileKey])
+
+  const handleConvert = useCallback(
+    async (overwrite = false) => {
+      if (!storage) return
+      setConverting(true)
+      try {
+        const result = await convertToParquet(storage, fileKey, overwrite)
+        toast.success(
+          `Converted to ${result.output_key} (${result.rows_written} rows, ${result.elapsed_ms}ms)`,
+        )
+        // Invalidate the directory listing so the new .parquet file appears.
+        const dirPrefix = fileKey.includes('/')
+          ? fileKey.slice(0, fileKey.lastIndexOf('/') + 1)
+          : ''
+        queryClient.invalidateQueries({ queryKey: ['list', storage, dirPrefix] })
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 409) {
+          setShowOverwriteDialog(true)
+        } else {
+          toast.error(err instanceof ApiError ? err.message : String(err))
+        }
+      } finally {
+        setConverting(false)
+      }
+    },
+    [storage, fileKey, queryClient],
+  )
+
   // Gate the hint banner wrapper so dismissing it doesn't leave a phantom
   // padding strip — RowsViewHint itself returns null when dismissed, but
   // the surrounding spacing div would still take space without this check.
@@ -362,6 +410,27 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
               </TooltipContent>
             </Tooltip>
           )}
+          {canConvert && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => handleConvert(false)}
+                  disabled={converting}
+                  className="h-7 shadow-sm"
+                >
+                  {converting
+                    ? <Loader2 className="size-3.5 animate-spin" />
+                    : <FileDown className="size-3.5" />}
+                  Convert to Parquet
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                Convert this file to Parquet using DuckDB
+              </TooltipContent>
+            </Tooltip>
+          )}
           <select
             value={lang}
             onChange={(e) => setLang(e.target.value)}
@@ -560,6 +629,32 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
             >
               <Download className="size-3.5" />
               {loadAllSeverity === 'heavy' ? 'Load anyway' : 'Load entire file'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={showOverwriteDialog} onOpenChange={setShowOverwriteDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Overwrite existing file?</DialogTitle>
+            <DialogDescription>
+              <code>{outputKey}</code> already exists. Do you want to replace it?
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowOverwriteDialog(false)}>
+              <X className="size-3.5" />
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                setShowOverwriteDialog(false)
+                void handleConvert(true)
+              }}
+            >
+              <FileDown className="size-3.5" />
+              Overwrite
             </Button>
           </DialogFooter>
         </DialogContent>

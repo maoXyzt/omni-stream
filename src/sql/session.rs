@@ -106,7 +106,7 @@ fn secret_sql(s3: &S3Config) -> Result<String, AppError> {
 }
 
 /// Escape a value for inclusion in a single-quoted SQL literal.
-fn sql_escape(s: &str) -> String {
+pub(crate) fn sql_escape(s: &str) -> String {
   s.replace('\'', "''")
 }
 
