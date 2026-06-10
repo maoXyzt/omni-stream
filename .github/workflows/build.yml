@@ -127,10 +127,14 @@ jobs:
             push:refs/heads/main|push:refs/tags/v*|workflow_dispatch:*)
               full=true ;;
           esac
+          # `features` rides along into the backend + wheels jobs. The musl
+          # target builds WITHOUT the duckdb feature: libduckdb is a C++
+          # codebase that the musl-gcc cross setup can't compile, so musl
+          # artifacts simply ship without the SQL endpoint.
           if $full; then
-            matrix='{"include":[{"target":"x86_64-unknown-linux-gnu","runner":"ubuntu-latest"},{"target":"x86_64-unknown-linux-musl","runner":"ubuntu-latest"},{"target":"aarch64-apple-darwin","runner":"macos-latest"}]}'
+            matrix='{"include":[{"target":"x86_64-unknown-linux-gnu","runner":"ubuntu-latest","features":"duckdb"},{"target":"x86_64-unknown-linux-musl","runner":"ubuntu-latest","features":""},{"target":"aarch64-apple-darwin","runner":"macos-latest","features":"duckdb"}]}'
           else
-            matrix='{"include":[{"target":"x86_64-unknown-linux-gnu","runner":"ubuntu-latest"}]}'
+            matrix='{"include":[{"target":"x86_64-unknown-linux-gnu","runner":"ubuntu-latest","features":"duckdb"}]}'
           fi
           echo "matrix=$matrix" >>"$GITHUB_OUTPUT"
 
@@ -209,11 +213,18 @@ jobs:
         with:
           key: lint
 
+      # Lint & test WITH the duckdb feature so the sql module's clippy lints
+      # and its real-engine integration tests gate merges. The extra
+      # no-feature `cargo check` guards the crates.io default build against
+      # a missing #[cfg] — cheap, since it shares the same cache.
       - name: cargo clippy
-        run: cargo clippy --all-targets --locked -- -D warnings
+        run: cargo clippy --all-targets --locked --features duckdb -- -D warnings
 
       - name: cargo test
-        run: cargo test --locked
+        run: cargo test --locked --features duckdb
+
+      - name: cargo check (no default features)
+        run: cargo check --locked
 
   backend:
     name: ${{ matrix.target }}
@@ -248,7 +259,7 @@ jobs:
         env:
           CC_x86_64_unknown_linux_musl: musl-gcc
           CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
-        run: cargo build --release --locked --target ${{ matrix.target }} --bin omni-stream
+        run: cargo build --release --locked --target ${{ matrix.target }} --bin omni-stream ${{ matrix.features && format('--features {0}', matrix.features) || '' }}
 
       # PR runs only build linux-gnu (see matrix-config). No downstream job
       # consumes the tarball on PRs — `release` only fires on tag pushes.
@@ -315,11 +326,15 @@ jobs:
       # toolchain, so we pin to MSRV for parity with the `backend` job.
       # `manylinux: auto` picks manylinux_2_17 for the gnu target; for musl we
       # force musllinux_1_2.
+      # `matrix.features` carries the duckdb feature on supported platforms
+      # (see matrix-config). It cannot live in pyproject's [tool.maturin]
+      # features because that would force it onto every platform, including
+      # musl where libduckdb doesn't cross-compile.
       - name: Build wheel
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.target }}
-          args: --release --locked --strip
+          args: --release --locked --strip ${{ matrix.features && format('--features {0}', matrix.features) || '' }}
           manylinux: ${{ matrix.target == 'x86_64-unknown-linux-musl' && 'musllinux_1_2' || 'auto' }}
           rust-toolchain: '1.91'
           sccache: 'true'

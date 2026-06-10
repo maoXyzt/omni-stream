@@ -26,10 +26,23 @@ pub struct AppState {
   default_name: Arc<String>,
   thumb: Option<Arc<ThumbState>>,
   hostname: Arc<String>,
+  /// Mirrors `auth.enabled` so `/api/server` can tell the SPA whether the
+  /// bearer-token gate is active (reaching this handler at all proves the
+  /// presented token, if any, was accepted).
+  auth_enabled: bool,
+  /// True only when all three hold: built with `--features duckdb`,
+  /// `[sql].enabled`, and `auth.enabled`. Always false in non-duckdb builds.
+  sql_enabled: bool,
 }
 
 impl AppState {
-  pub fn new(reg: BackendRegistry, thumb: Option<Arc<ThumbState>>, hostname: Arc<String>) -> Self {
+  pub fn new(
+    reg: BackendRegistry,
+    thumb: Option<Arc<ThumbState>>,
+    hostname: Arc<String>,
+    auth_enabled: bool,
+    sql_enabled: bool,
+  ) -> Self {
     Self {
       backends: Arc::new(reg.backends),
       invalid: Arc::new(reg.invalid),
@@ -37,7 +50,14 @@ impl AppState {
       default_name: Arc::new(reg.default_name),
       thumb,
       hostname,
+      auth_enabled,
+      sql_enabled,
     }
+  }
+
+  #[cfg(feature = "duckdb")]
+  pub fn sql_enabled(&self) -> bool {
+    self.sql_enabled
   }
 
   fn resolve(&self, name: Option<&str>) -> Result<Arc<dyn StorageBackend>, AppError> {
@@ -140,12 +160,21 @@ pub struct ServerInfo {
   /// it on the same endpoint the frontend already polls keeps this a
   /// zero-extra-request feature; the SPA renders it as a footer chip.
   pub version: &'static str,
+  /// Whether the bearer-token gate is on. This endpoint sits behind the auth
+  /// middleware, so a client that can read this response has already passed
+  /// it — `auth_enabled = true` therefore implies "your token works".
+  pub auth_enabled: bool,
+  /// Whether `POST /api/query` is live (duckdb build + [sql] enabled +
+  /// auth on). The SPA hides the SQL editor entry point when false.
+  pub sql_enabled: bool,
 }
 
 pub async fn server_info_handler(State(state): State<AppState>) -> Json<ServerInfo> {
   Json(ServerInfo {
     hostname: state.hostname.as_str().to_string(),
     version: env!("CARGO_PKG_VERSION"),
+    auth_enabled: state.auth_enabled,
+    sql_enabled: state.sql_enabled,
   })
 }
 

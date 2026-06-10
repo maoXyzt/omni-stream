@@ -27,6 +27,14 @@ include = [
     "/config.example.toml",
 ]
 
+[features]
+default = []
+# Read-only SQL query endpoint backed by an embedded DuckDB engine.
+# Off by default so `cargo install omni-stream` / crates.io builds skip the
+# heavy bundled C++ build; CI enables it per-platform (PyPI wheels and
+# release binaries on supported targets ship with it).
+duckdb = ["dep:duckdb"]
+
 [dependencies]
 tokio = { version = "1", features = ["fs", "io-util", "macros", "rt-multi-thread", "sync", "net", "signal"] }
 async-trait = "0.1"
@@ -49,6 +57,13 @@ rust-embed = { version = "8", features = ["interpolate-folder-path"] }
 
 aws-sdk-s3 = "1"
 aws-config = { version = "1", features = ["behavior-version-latest"] }
+
+# Optional embedded SQL engine for the /api/query endpoint (feature `duckdb`).
+# `bundled` compiles libduckdb from source (C++, slow first build); `parquet` /
+# `json` statically link those extensions so file queries work offline. The
+# httpfs extension (S3 access) is NOT bundled upstream — it is INSTALLed at
+# runtime from the official extension repo and cached under ~/.duckdb.
+duckdb = { version = "1.10503", optional = true, features = ["bundled", "parquet", "json"] }
 
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

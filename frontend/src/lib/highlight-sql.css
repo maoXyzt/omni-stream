@@ -1,0 +1,25 @@
+/*
+ * Prism token theme for the SQL query editor. Mirrors the github-dark
+ * palette already used by highlight.js widgets and the json5 rules editor.
+ * Scoped to `.sql-editor` so prism tokens don't leak elsewhere.
+ */
+.sql-editor .token.comment {
+  color: #8b949e;
+}
+.sql-editor .token.keyword {
+  color: #ff7b72;
+}
+.sql-editor .token.function {
+  color: #d2a8ff;
+}
+.sql-editor .token.string {
+  color: #a5d6ff;
+}
+.sql-editor .token.number,
+.sql-editor .token.boolean {
+  color: #79c0ff;
+}
+.sql-editor .token.operator,
+.sql-editor .token.punctuation {
+  color: inherit;
+}

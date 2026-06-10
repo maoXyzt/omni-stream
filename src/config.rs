@@ -69,6 +69,8 @@ pub struct Config {
   pub auth: AuthConfig,
   #[serde(default)]
   pub thumbnails: ThumbConfig,
+  #[serde(default)]
+  pub sql: SqlConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -276,6 +278,40 @@ impl Default for ThumbConfig {
       max_cache_bytes: 1024 * 1024 * 1024, // 1 GiB
       max_age_days: 90,
       sweep_interval_secs: 3600,
+    }
+  }
+}
+
+/// Settings for the DuckDB-backed `/api/query` endpoint. Only effective when
+/// the binary is built with `--features duckdb` AND `auth.enabled = true` —
+/// the endpoint executes arbitrary (read-mostly) SQL, so it never runs on an
+/// open API. Parsed unconditionally (no cfg gate) so the same config file
+/// loads under both feature variants.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct SqlConfig {
+  /// Kill-switch independent of the compile-time feature. Default true:
+  /// shipping a duckdb-enabled binary means you want the endpoint;
+  /// `auth.enabled` is the real gate.
+  pub enabled: bool,
+  /// DuckDB `memory_limit`, passed verbatim (e.g. "512MB", "2GB").
+  pub memory_limit: String,
+  /// DuckDB `threads` per query connection.
+  pub threads: u16,
+  /// Wall-clock timeout; on expiry the query is interrupted and 408 returned.
+  pub query_timeout_secs: u64,
+  /// Row cap on results; responses set `truncated = true` beyond it.
+  pub max_rows: u32,
+}
+
+impl Default for SqlConfig {
+  fn default() -> Self {
+    Self {
+      enabled: true,
+      memory_limit: "512MB".to_string(),
+      threads: 2,
+      query_timeout_secs: 30,
+      max_rows: 10_000,
     }
   }
 }
@@ -629,6 +665,42 @@ local = { root_path = "/tmp" }
     let cfg = parse(raw);
     assert!(!cfg.auth.enabled);
     assert!(cfg.auth.token.is_none());
+  }
+
+  #[test]
+  fn sql_defaults_when_omitted() {
+    let raw = r#"
+[[storages]]
+name = "x"
+type = "local"
+active = true
+local = { root_path = "/tmp" }
+"#;
+    let cfg = parse(raw);
+    assert!(cfg.sql.enabled);
+    assert_eq!(cfg.sql.memory_limit, "512MB");
+    assert_eq!(cfg.sql.threads, 2);
+    assert_eq!(cfg.sql.query_timeout_secs, 30);
+    assert_eq!(cfg.sql.max_rows, 10_000);
+  }
+
+  #[test]
+  fn sql_partial_override_keeps_other_defaults() {
+    let raw = r#"
+[sql]
+enabled = false
+max_rows = 500
+
+[[storages]]
+name = "x"
+type = "local"
+active = true
+local = { root_path = "/tmp" }
+"#;
+    let cfg = parse(raw);
+    assert!(!cfg.sql.enabled);
+    assert_eq!(cfg.sql.max_rows, 500);
+    assert_eq!(cfg.sql.memory_limit, "512MB");
   }
 
   #[test]

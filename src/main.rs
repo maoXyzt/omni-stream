@@ -3,6 +3,8 @@ mod cli_style;
 mod config;
 mod error;
 mod handlers;
+#[cfg(feature = "duckdb")]
+mod sql;
 mod storage;
 mod thumbs;
 
@@ -86,13 +88,27 @@ async fn main() -> anyhow::Result<()> {
       .and_then(|s| s.into_string().ok())
       .unwrap_or_else(|| "unknown".into()),
   );
-  let state = AppState::new(registry, thumb, hostname);
   let auth_state = AuthState::from_config(&cfg.auth).context("init auth gate")?;
   if auth_state.enabled {
     tracing::info!("auth gate enabled: /api/* requires Bearer token");
   } else {
     tracing::info!("auth gate disabled (open API)");
   }
+  // The SQL endpoint executes user-supplied SQL, so it never runs on an open
+  // API: compile-time feature AND auth AND the [sql] kill-switch must all be
+  // on. The flag also reaches the SPA via /api/server to gate the editor UI.
+  let sql_enabled = cfg!(feature = "duckdb") && auth_state.enabled && cfg.sql.enabled;
+  #[cfg(feature = "duckdb")]
+  if sql_enabled {
+    tracing::info!(
+      timeout_secs = cfg.sql.query_timeout_secs,
+      max_rows = cfg.sql.max_rows,
+      "SQL query endpoint enabled (POST /api/query)",
+    );
+  } else {
+    tracing::warn!("SQL query endpoint disabled: requires auth.enabled = true and [sql] enabled");
+  }
+  let state = AppState::new(registry, thumb, hostname, auth_state.enabled, sql_enabled);
 
   // Bounded per-route timeout for the catalog endpoints. Catalogs touch
   // every entry under a prefix (especially `list` walking many pages), and
@@ -115,7 +131,29 @@ async fn main() -> anyhow::Result<()> {
     .route(
       "/api/thumb/{*key}",
       get(thumb_handler).layer(catalog_timeout),
-    )
+    );
+  // Registered before the auth route_layer below so the query endpoint is
+  // bearer-token protected like every other /api route. The handler holds
+  // its own per-query interrupt timeout; this outer layer is a belt-and-
+  // braces bound in case the blocking task wedges before the watchdog arms.
+  #[cfg(feature = "duckdb")]
+  let app = {
+    let sql_state = std::sync::Arc::new(sql::SqlState::from_config(&cfg));
+    let query_timeout = TimeoutLayer::with_status_code(
+      StatusCode::REQUEST_TIMEOUT,
+      Duration::from_secs(cfg.sql.query_timeout_secs + 5),
+    );
+    app
+      .route(
+        "/api/query",
+        axum::routing::post(sql::query_handler).layer(query_timeout),
+      )
+      // Router-level so the MethodRouter keeps a single layer (two chained
+      // `.layer` calls defeat axum's error-type inference). Other routes
+      // simply ignore the extension.
+      .layer(axum::Extension(sql_state))
+  };
+  let app = app
     // route_layer applies only to routes registered above; fallback (SPA HTML/
     // JS/CSS) stays open so the browser can load the login UI.
     .route_layer(middleware::from_fn_with_state(auth_state, auth_middleware))

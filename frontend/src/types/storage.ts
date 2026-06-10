@@ -79,4 +79,29 @@ export interface ServerInfo {
   /// the SPA so it's visible across pages without polling a separate
   /// endpoint.
   version: string
+  /// Whether the server's bearer-token gate is on. /api/server itself sits
+  /// behind the gate, so being able to read this implies the stored token
+  /// (if any) was accepted.
+  auth_enabled: boolean
+  /// Whether POST /api/query is live (server built with the duckdb feature,
+  /// [sql] enabled, auth on). Gates the SQL editor entry points.
+  sql_enabled: boolean
+}
+
+export interface QueryColumn {
+  name: string
+  /// DuckDB logical type rendered as a string (e.g. "Int32", "Utf8").
+  type: string
+}
+
+export interface QueryResult {
+  columns: QueryColumn[]
+  /// Row-major values. Numbers/booleans/strings come through natively;
+  /// temporal & high-precision types arrive as display strings; SQL NULL is
+  /// JSON null.
+  rows: (string | number | boolean | null)[][]
+  row_count: number
+  /// True when the server dropped rows past its [sql].max_rows cap.
+  truncated: boolean
+  elapsed_ms: number
 }
