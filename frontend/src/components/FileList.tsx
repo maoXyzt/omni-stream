@@ -43,7 +43,7 @@ import { useResizableWidth } from '@/hooks/use-resizable-width'
 import { useSidebarCollapsed } from '@/hooks/use-sidebar-collapsed'
 import { useSortDir } from '@/hooks/use-sort-dir'
 import { useGridFit } from '@/hooks/use-grid-fit'
-import { useViewMode } from '@/hooks/use-view-mode'
+import { useViewMode, type ViewMode } from '@/hooks/use-view-mode'
 import { cn } from '@/lib/utils'
 import { formatBytes, formatTime } from '@/lib/format'
 import { sortEntries } from '@/lib/sort'
@@ -88,6 +88,7 @@ import type { FileEntry } from '@/types/storage'
 
 const PREVIEW_PARAM = 'preview'
 const PAGE_PARAM = 'page'
+const VIEW_PARAM = 'view'
 const REPO_URL = 'https://github.com/maoXyzt/omni-stream'
 
 // Inline GitHub mark. `lucide-react` is brand-neutral so the official octocat
@@ -136,7 +137,24 @@ export function FileList() {
     const first = prefix.split('/')[0]
     return first || null
   }, [multiBucket, prefix])
-  const [viewMode, setViewMode] = useViewMode()
+  const [storedViewMode, setStoredViewMode] = useViewMode()
+  const urlViewParam = searchParams.get(VIEW_PARAM)
+  const viewMode: ViewMode =
+    urlViewParam === 'list' || urlViewParam === 'grid' ? urlViewParam : storedViewMode
+  const setViewMode = useCallback(
+    (next: ViewMode) => {
+      setStoredViewMode(next)
+      setSearchParams((prev) => { prev.set(VIEW_PARAM, next); return prev }, { replace: true })
+    },
+    [setStoredViewMode, setSearchParams],
+  )
+  // When a shared URL carries ?view=, sync that preference back to localStorage
+  // so subsequent visits without the param remember the user's choice.
+  useEffect(() => {
+    if (urlViewParam === 'list' || urlViewParam === 'grid') {
+      setStoredViewMode(urlViewParam)
+    }
+  }, [urlViewParam, setStoredViewMode])
   const [gridFit, setGridFit] = useGridFit()
   // Inline split layout (narrow file list + preview pane) needs horizontal
   // room. Below `md` we keep the full-width list and fall back to the modal.
@@ -503,10 +521,10 @@ export function FileList() {
       const trail = clean ? encodePathSegments(clean) : ''
       navigate({
         pathname: `/s/${encodeURIComponent(storageName)}/${trail}`,
-        search: '',
+        search: urlViewParam ? `?${VIEW_PARAM}=${urlViewParam}` : '',
       })
     },
-    [navigate, storageName],
+    [navigate, storageName, urlViewParam],
   )
 
   // "Go to path" target may be a file rather than a directory. `goToPath`
@@ -561,6 +579,7 @@ export function FileList() {
       const base = slash >= 0 ? trimmed.slice(slash + 1) : trimmed
       const sp = new URLSearchParams()
       sp.set(PREVIEW_PARAM, base)
+      if (urlViewParam) sp.set(VIEW_PARAM, urlViewParam)
       setTokenStack([undefined])
       navigate({
         pathname: `/s/${encodeURIComponent(storageName)}/${encodePathSegments(parent)}`,
@@ -568,7 +587,7 @@ export function FileList() {
       })
       return true
     },
-    [goToPath, navigate, storageName, activeStorage],
+    [goToPath, navigate, storageName, activeStorage, urlViewParam],
   )
 
   const switchStorage = useCallback(
