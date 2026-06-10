@@ -436,6 +436,7 @@ mod tests {
           size: 0,
           last_modified: None,
           is_dir: false,
+          is_symlink: false,
         })
         .collect();
       let next_token = if end < self.keys.len() {

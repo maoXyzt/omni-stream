@@ -44,6 +44,11 @@ pub struct FileEntry {
   pub size: u64,
   pub last_modified: Option<String>,
   pub is_dir: bool,
+  /// True when this entry is a filesystem symbolic link. Always `false` for
+  /// non-local backends (S3, stub) that have no symlink concept. Orthogonal
+  /// to `is_dir`: a symlink pointing at a directory has both set to `true`
+  /// when `follow_symlinks` is enabled.
+  pub is_symlink: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]

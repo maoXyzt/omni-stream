@@ -262,6 +262,7 @@ impl S3Backend {
           size: 0,
           last_modified: None,
           is_dir: true,
+          is_symlink: false,
         });
       }
     }
@@ -273,6 +274,7 @@ impl S3Backend {
         size: obj.size().unwrap_or(0).max(0) as u64,
         last_modified: obj.last_modified().map(|t| t.to_string()),
         is_dir: false,
+        is_symlink: false,
       });
     }
 
@@ -324,6 +326,7 @@ impl S3Backend {
           size: 0,
           last_modified: None,
           is_dir: true,
+          is_symlink: false,
         });
       }
     }
@@ -335,6 +338,7 @@ impl S3Backend {
         size: obj.size().unwrap_or(0).max(0) as u64,
         last_modified: obj.last_modified().map(|t| t.to_string()),
         is_dir: false,
+        is_symlink: false,
       });
     }
 
@@ -371,6 +375,7 @@ impl S3Backend {
           size: 0,
           last_modified: b.creation_date().map(|t| t.to_string()),
           is_dir: true,
+          is_symlink: false,
         })
       })
       .collect();
@@ -569,6 +574,7 @@ mod tests {
       size: 0,
       last_modified: None,
       is_dir: false,
+      is_symlink: false,
     }
   }
 
@@ -578,6 +584,7 @@ mod tests {
       size: 0,
       last_modified: None,
       is_dir: true,
+      is_symlink: false,
     }
   }
 

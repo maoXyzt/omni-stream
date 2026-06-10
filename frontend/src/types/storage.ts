@@ -3,6 +3,10 @@ export interface FileEntry {
   size: number
   last_modified: string | null
   is_dir: boolean
+  /** True when this entry is a filesystem symbolic link. Always false for
+   *  non-local backends (S3). Orthogonal to is_dir: a symlink pointing at a
+   *  directory has both set to true when follow_symlinks is enabled. */
+  is_symlink: boolean
 }
 
 export interface ListResult {

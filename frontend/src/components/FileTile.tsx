@@ -1,5 +1,5 @@
 import { memo, useState, type ComponentType } from 'react'
-import { ImageOff } from 'lucide-react'
+import { ImageOff, Link2 } from 'lucide-react'
 
 import { proxyUrl, thumbUrl } from '@/api/storage'
 import { EntryContextMenu } from '@/components/EntryContextMenu'
@@ -79,6 +79,12 @@ export const FileTile = memo(function FileTile({
             <IconFill
               icon={iconForKey(entry.key)}
               color={colorForKey(entry.key)}
+            />
+          )}
+          {entry.is_symlink && (
+            <Link2
+              aria-label="symlink"
+              className="absolute bottom-1 right-1 size-3.5 rounded-full bg-background stroke-[2.5] text-muted-foreground"
             />
           )}
         </div>

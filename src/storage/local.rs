@@ -28,11 +28,12 @@ const CACHE_MAX_ENTRIES_PER_PREFIX: usize = 50_000;
 /// cap evicts the oldest. Browsing a few directories rarely exceeds this.
 const CACHE_MAX_PREFIXES: usize = 32;
 
-/// Cached sorted view of a directory. We keep only `(key, is_dir)` per
-/// entry — size and mtime are fetched on demand for the page actually
-/// returned, so the cache never holds N stat() results worth of memory.
+/// Cached sorted view of a directory. We keep only `(key, is_dir,
+/// is_symlink)` per entry — size and mtime are fetched on demand for the
+/// page actually returned, so the cache never holds N stat() results worth
+/// of memory.
 struct CachedListing {
-  keys: Arc<Vec<(String, bool)>>,
+  keys: Arc<Vec<(String, bool, bool)>>,
   inserted_at: Instant,
 }
 
@@ -42,7 +43,7 @@ pub struct ListingCache {
 }
 
 impl ListingCache {
-  fn get(&self, prefix: &str) -> Option<Arc<Vec<(String, bool)>>> {
+  fn get(&self, prefix: &str) -> Option<Arc<Vec<(String, bool, bool)>>> {
     let guard = self.inner.lock().unwrap();
     let entry = guard.get(prefix)?;
     if entry.inserted_at.elapsed() >= CACHE_TTL {
@@ -51,7 +52,7 @@ impl ListingCache {
     Some(entry.keys.clone())
   }
 
-  fn put(&self, prefix: &str, keys: Arc<Vec<(String, bool)>>) {
+  fn put(&self, prefix: &str, keys: Arc<Vec<(String, bool, bool)>>) {
     if keys.len() > CACHE_MAX_ENTRIES_PER_PREFIX {
       return;
     }
@@ -112,20 +113,28 @@ impl LocalFsBackend {
   /// `entry.file_type()` won't give us (it reports `Symlink`). Do a single
   /// follow `stat` only in that case. Most entries aren't symlinks so the
   /// extra branch costs nothing per file.
-  async fn quick_is_dir(&self, entry: &fs::DirEntry, entry_path: &Path) -> std::io::Result<bool> {
+  /// Returns `(is_dir, is_symlink)`. `is_symlink` is taken directly from the
+  /// dirent `d_type` — no extra syscall. When `follow_symlinks=true` and the
+  /// entry is a symlink, a single follow `stat` determines the real target
+  /// type (already happening in the original code; no new cost added).
+  async fn quick_is_dir(
+    &self,
+    entry: &fs::DirEntry,
+    entry_path: &Path,
+  ) -> std::io::Result<(bool, bool)> {
     let ft = entry.file_type().await?;
-    if ft.is_symlink() && self.follow_symlinks {
+    let is_symlink = ft.is_symlink();
+    if is_symlink && self.follow_symlinks {
       // Resolve the link to find the real type. Fall back to lstat (i.e.
       // is_dir = false because we already know it's a symlink) if the
       // target's gone, so the entry still appears.
-      return Ok(
-        fs::metadata(entry_path)
-          .await
-          .map(|m| m.is_dir())
-          .unwrap_or(false),
-      );
+      let is_dir = fs::metadata(entry_path)
+        .await
+        .map(|m| m.is_dir())
+        .unwrap_or(false);
+      return Ok((is_dir, true));
     }
-    Ok(ft.is_dir())
+    Ok((ft.is_dir(), is_symlink))
   }
 
   /// Resolve `prefix` to its filesystem path and confirm it's an existing
@@ -146,24 +155,24 @@ impl LocalFsBackend {
     Ok(dir_path)
   }
 
-  /// Return the sorted `(key, is_dir)` listing for `prefix`, hitting the
-  /// shared cache when fresh and falling back to one `read_dir` pass +
-  /// `quick_is_dir` probes (no per-entry stat) when not.
+  /// Return the sorted `(key, is_dir, is_symlink)` listing for `prefix`,
+  /// hitting the shared cache when fresh and falling back to one `read_dir`
+  /// pass + `quick_is_dir` probes (no per-entry stat) when not.
   async fn ensure_keys_cached(
     &self,
     prefix: &str,
     dir_path: &Path,
-  ) -> Result<Arc<Vec<(String, bool)>>, AppError> {
+  ) -> Result<Arc<Vec<(String, bool, bool)>>, AppError> {
     if let Some(hit) = self.cache.get(prefix) {
       return Ok(hit);
     }
-    let mut keys: Vec<(String, bool)> = Vec::new();
+    let mut keys: Vec<(String, bool, bool)> = Vec::new();
     let mut read = fs::read_dir(dir_path).await?;
     while let Some(entry) = read.next_entry().await? {
       let entry_path = entry.path();
-      let is_dir = self.quick_is_dir(&entry, &entry_path).await?;
+      let (is_dir, is_symlink) = self.quick_is_dir(&entry, &entry_path).await?;
       let key = self.relative_key(&entry_path, is_dir);
-      keys.push((key, is_dir));
+      keys.push((key, is_dir, is_symlink));
     }
     keys.sort_by(|a, b| a.0.cmp(&b.0));
     let arc = Arc::new(keys);
@@ -181,10 +190,10 @@ impl LocalFsBackend {
   /// next refresh will drop them.
   async fn materialize_entries(
     &self,
-    slice: &[(String, bool)],
+    slice: &[(String, bool, bool)],
   ) -> Result<Vec<FileEntry>, AppError> {
     let mut out = Vec::with_capacity(slice.len());
-    for (key, is_dir) in slice {
+    for (key, is_dir, is_symlink) in slice {
       let (size, last_modified) = if *is_dir {
         (0u64, None)
       } else {
@@ -207,6 +216,7 @@ impl LocalFsBackend {
         size,
         last_modified,
         is_dir: *is_dir,
+        is_symlink: *is_symlink,
       });
     }
     Ok(out)
@@ -370,7 +380,7 @@ impl StorageBackend for LocalFsBackend {
     let dir_path = self.validate_dir(prefix).await?;
     let keys = self.ensure_keys_cached(prefix, &dir_path).await?;
     let cursor = token.as_deref().unwrap_or("");
-    let start = keys.partition_point(|(k, _)| k.as_str() <= cursor);
+    let start = keys.partition_point(|(k, _, _)| k.as_str() <= cursor);
     let end = (start + LIST_PAGE_SIZE).min(keys.len());
     let entries = self.materialize_entries(&keys[start..end]).await?;
     let next_token = if end < keys.len() {
@@ -399,7 +409,7 @@ impl StorageBackend for LocalFsBackend {
     let dir_path = self.validate_dir(prefix).await?;
     let keys = self.ensure_keys_cached(prefix, &dir_path).await?;
     let cursor = token.as_deref().unwrap_or("");
-    let start = keys.partition_point(|(k, _)| k.as_str() <= cursor);
+    let start = keys.partition_point(|(k, _, _)| k.as_str() <= cursor);
     let total_pages = (keys.len() as u64).div_ceil(LIST_PAGE_SIZE as u64);
     let after_cursor = &keys[start..];
 
