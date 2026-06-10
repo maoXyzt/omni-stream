@@ -4,6 +4,7 @@ import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-route
 
 import { FileList } from '@/components/FileList'
 import { RowsPage } from '@/components/RowsPage'
+import { SqlPage } from '@/components/SqlPage'
 import { StorageRedirect } from '@/components/StorageRedirect'
 import { Toaster } from '@/components/ui/sonner'
 import { useServerInfo, useStorages } from '@/hooks/use-storage'
@@ -31,6 +32,7 @@ function App() {
           <Route path="/" element={<StorageRedirect />} />
           <Route path="/s/:storage/*" element={<FileList />} />
           <Route path="/r/:storage/*" element={<RowsPage />} />
+          <Route path="/q/:storage" element={<SqlPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>

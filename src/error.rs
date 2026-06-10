@@ -36,6 +36,21 @@ pub enum AppError {
 
   #[error("unsupported operation: {0}")]
   Unsupported(String),
+
+  /// DuckDB-side failure (parser / binder / runtime). The engine message is
+  /// passed through verbatim so the SQL editor shows actionable diagnostics.
+  #[cfg(feature = "duckdb")]
+  #[error("query error: {0}")]
+  Query(String),
+
+  /// SQL rejected by the read-only validator before reaching DuckDB.
+  #[cfg(feature = "duckdb")]
+  #[error("query rejected: {0}")]
+  QueryRejected(String),
+
+  #[cfg(feature = "duckdb")]
+  #[error("query timed out after {0}s")]
+  QueryTimeout(u64),
 }
 
 impl AppError {
@@ -48,6 +63,10 @@ impl AppError {
       AppError::Io(e) if e.kind() == io::ErrorKind::NotFound => StatusCode::NOT_FOUND,
       AppError::StorageInvalid(_) => StatusCode::SERVICE_UNAVAILABLE,
       AppError::Io(_) | AppError::Backend(_) => StatusCode::INTERNAL_SERVER_ERROR,
+      #[cfg(feature = "duckdb")]
+      AppError::Query(_) | AppError::QueryRejected(_) => StatusCode::BAD_REQUEST,
+      #[cfg(feature = "duckdb")]
+      AppError::QueryTimeout(_) => StatusCode::REQUEST_TIMEOUT,
     }
   }
 }

@@ -44,6 +44,12 @@ Issues = "https://github.com/maoXyzt/omni-stream/issues"
 # `pnpm build` in `frontend/` must run before `maturin build`. CI handles this
 # by downloading the `frontend-dist` artifact from the upstream `frontend` job;
 # locally, run `cd frontend && pnpm build` first.
+#
+# DuckDB SQL endpoint: published wheels are built with `--features duckdb`
+# where the platform supports it (CI passes the flag per-target; musl can't
+# compile libduckdb and ships without it). The feature is intentionally NOT
+# listed here — [tool.maturin].features would force it onto every platform.
+# Building a wheel locally: `maturin build --release --features duckdb`.
 [tool.maturin]
 bindings = "bin"
 manifest-path = "Cargo.toml"

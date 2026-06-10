@@ -10,3 +10,4 @@ declare module 'prismjs/components/prism-core' {
 }
 declare module 'prismjs/components/prism-json'
 declare module 'prismjs/components/prism-json5'
+declare module 'prismjs/components/prism-sql'
