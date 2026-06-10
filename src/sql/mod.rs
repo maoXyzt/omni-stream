@@ -35,18 +35,35 @@ pub enum SqlTarget {
 pub struct SqlState {
   pub cfg: crate::config::SqlConfig,
   targets: HashMap<String, SqlTarget>,
+  /// Storages that exist but refuse SQL, with the reason (currently: local
+  /// storages with `follow_symlinks = false` — DuckDB's
+  /// `allowed_directories` sandbox follows symlinks, so it cannot honour
+  /// that storage's "don't traverse links" contract).
+  disabled: HashMap<String, String>,
   default_name: String,
 }
 
 impl SqlState {
   pub fn from_config(cfg: &Config) -> Self {
     let mut targets = HashMap::new();
+    let mut disabled = HashMap::new();
     for s in &cfg.storages {
       let target = match (s.r#type, &s.s3, &s.local) {
         (StorageType::S3, Some(s3), _) => SqlTarget::S3(s3.clone()),
-        (StorageType::Local, _, Some(local)) => SqlTarget::Local {
-          root_path: local.root_path.clone(),
-        },
+        (StorageType::Local, _, Some(local)) => {
+          if !local.follow_symlinks {
+            disabled.insert(
+              s.name.clone(),
+              "storage has follow_symlinks = false, which the SQL sandbox \
+               cannot enforce (DuckDB follows symlinks inside the root)"
+                .into(),
+            );
+            continue;
+          }
+          SqlTarget::Local {
+            root_path: local.root_path.clone(),
+          }
+        }
         // Config validation already rejects a missing sub-table; skip
         // defensively rather than panic.
         _ => continue,
@@ -60,16 +77,22 @@ impl SqlState {
     Self {
       cfg: cfg.sql.clone(),
       targets,
+      disabled,
       default_name,
     }
   }
 
   fn resolve(&self, name: Option<&str>) -> Result<&SqlTarget, AppError> {
     let name = name.unwrap_or(&self.default_name);
-    self
-      .targets
-      .get(name)
-      .ok_or_else(|| AppError::NotFound(format!("unknown storage: {name}")))
+    if let Some(t) = self.targets.get(name) {
+      return Ok(t);
+    }
+    if let Some(reason) = self.disabled.get(name) {
+      return Err(AppError::Unsupported(format!(
+        "SQL is not available on storage '{name}': {reason}"
+      )));
+    }
+    Err(AppError::NotFound(format!("unknown storage: {name}")))
   }
 }
 
@@ -174,4 +197,134 @@ pub async fn query_handler(
     truncated,
     elapsed_ms: elapsed.as_millis() as u64,
   }))
+}
+
+#[cfg(test)]
+mod tests {
+  use std::collections::HashMap;
+
+  use super::*;
+  use crate::config::{LocalConfig, SqlConfig, StorageConfig};
+  use crate::storage::factory::BackendRegistry;
+
+  /// AppState with no real backends — query_handler only consults
+  /// `sql_enabled()`, never the registry.
+  fn app_state(sql_enabled: bool) -> AppState {
+    let reg = BackendRegistry {
+      backends: HashMap::new(),
+      invalid: HashMap::new(),
+      order: vec![],
+      default_name: "t".into(),
+    };
+    AppState::new(
+      reg,
+      None,
+      std::sync::Arc::new("test".into()),
+      true,
+      sql_enabled,
+    )
+  }
+
+  fn sql_state(root: &std::path::Path, follow_symlinks: bool) -> Arc<SqlState> {
+    let cfg = Config {
+      server: Default::default(),
+      storages: vec![StorageConfig {
+        name: "t".into(),
+        r#type: StorageType::Local,
+        active: true,
+        s3: None,
+        local: Some(LocalConfig {
+          root_path: root.to_path_buf(),
+          follow_symlinks,
+        }),
+      }],
+      auth: Default::default(),
+      thumbnails: Default::default(),
+      sql: SqlConfig::default(),
+    };
+    Arc::new(SqlState::from_config(&cfg))
+  }
+
+  fn req(sql: &str) -> Json<QueryRequest> {
+    Json(QueryRequest {
+      sql: sql.into(),
+      storage: Some("t".into()),
+    })
+  }
+
+  fn tmp_root() -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join("omni-sql-handler-test");
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+  }
+
+  #[tokio::test]
+  async fn rejects_when_sql_disabled() {
+    let res = query_handler(
+      State(app_state(false)),
+      Extension(sql_state(&tmp_root(), true)),
+      req("SELECT 1"),
+    )
+    .await;
+    assert!(matches!(res, Err(AppError::Forbidden(_))), "{res:?}");
+  }
+
+  #[tokio::test]
+  async fn rejects_invalid_sql_before_execution() {
+    let res = query_handler(
+      State(app_state(true)),
+      Extension(sql_state(&tmp_root(), true)),
+      req("DROP TABLE t"),
+    )
+    .await;
+    assert!(matches!(res, Err(AppError::QueryRejected(_))), "{res:?}");
+  }
+
+  #[tokio::test]
+  async fn rejects_unknown_storage() {
+    let res = query_handler(
+      State(app_state(true)),
+      Extension(sql_state(&tmp_root(), true)),
+      Json(QueryRequest {
+        sql: "SELECT 1".into(),
+        storage: Some("nope".into()),
+      }),
+    )
+    .await;
+    assert!(matches!(res, Err(AppError::NotFound(_))), "{res:?}");
+  }
+
+  #[tokio::test]
+  async fn rejects_no_follow_symlinks_storage_with_reason() {
+    let res = query_handler(
+      State(app_state(true)),
+      Extension(sql_state(&tmp_root(), false)),
+      req("SELECT 1"),
+    )
+    .await;
+    match res {
+      Err(AppError::Unsupported(msg)) => {
+        assert!(msg.contains("follow_symlinks"), "{msg}");
+      }
+      other => panic!("expected Unsupported, got {other:?}"),
+    }
+  }
+
+  #[tokio::test]
+  async fn executes_select_end_to_end() {
+    let res = query_handler(
+      State(app_state(true)),
+      Extension(sql_state(&tmp_root(), true)),
+      req("SELECT 1 AS a, 'x' AS b"),
+    )
+    .await
+    .expect("query should succeed");
+    let body = res.0;
+    assert_eq!(body.row_count, 1);
+    assert_eq!(body.columns.len(), 2);
+    assert_eq!(body.columns[0].name, "a");
+    assert!(!body.truncated);
+    assert_eq!(body.rows[0][0], serde_json::json!(1));
+    assert_eq!(body.rows[0][1], serde_json::json!("x"));
+  }
 }

@@ -155,7 +155,15 @@ export function SqlPage() {
       </header>
 
       <main className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden p-4">
-        {serverQuery.data && !serverQuery.data.sql_enabled ? (
+        {!serverQuery.data ? (
+          // Don't flash the editor before sql_enabled is known — the 403
+          // backstop makes this purely cosmetic, but a brief editor that
+          // morphs into a "disabled" notice reads as a glitch.
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="size-4 animate-spin" />
+            Connecting…
+          </div>
+        ) : !serverQuery.data.sql_enabled ? (
           <Alert variant="destructive" className="max-w-xl">
             <AlertCircle className="size-4" />
             <AlertTitle>SQL is disabled on this server</AlertTitle>

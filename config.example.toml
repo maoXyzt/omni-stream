@@ -68,6 +68,9 @@ root_path = "/var/lib/omni-stream"  # required; absolute or ~-prefixed, no ".." 
 # when the binary was built with the `duckdb` cargo feature AND auth.enabled =
 # true above — it never runs on an open API. PyPI wheels ship with the
 # feature; `cargo install omni-stream` does not.
+#
+# Local storages with follow_symlinks = false refuse SQL entirely: DuckDB's
+# directory sandbox follows symlinks, so it cannot honour that setting.
 
 [sql]
 # enabled = true            # default; kill-switch independent of the build feature
