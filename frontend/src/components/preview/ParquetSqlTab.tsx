@@ -42,21 +42,35 @@ const Editor =
 /// results while the server already caps the row count via [sql].max_rows.
 const RENDER_ROW_CAP = 1000
 
+const DRAFT_KEY_PREFIX = 'omni-stream:sql-draft:'
+
+function loadDraft(key: string): string {
+  try { return window.sessionStorage.getItem(key) ?? '' } catch { return '' }
+}
+function saveDraft(key: string, sql: string): void {
+  try { window.sessionStorage.setItem(key, sql) } catch { /* sandboxed context */ }
+}
+
+/// Escape single quotes for DuckDB string literals (double them: ' → '').
+function sqlEscape(val: string): string {
+  return val.replace(/'/g, "''")
+}
+
 /// Build the DuckDB-visible file path for the query pre-fill.
 /// Mirrors `src/sql/convert.rs::build_uris` logic for the client side.
 function fileSqlPath(descriptor: StorageDescriptor, fileKey: string): string {
-  const key = fileKey.replace(/^\/+/, '') // strip any leading slash
+  const key = sqlEscape(fileKey.replace(/^\/+/, '')) // strip leading slash, escape quotes
   if (descriptor.type === 's3') {
     const bucket = descriptor.s3?.bucket
     if (bucket) {
       // Fixed-bucket storage: prepend the bucket.
-      return `'s3://${bucket}/${key}'`
+      return `'s3://${sqlEscape(bucket)}/${key}'`
     }
     // Multi-bucket storage: key's first path segment IS the bucket name.
     return `'s3://${key}'`
   }
   // Local filesystem storage.
-  const root = (descriptor.local?.root_path ?? '').replace(/\/+$/, '')
+  const root = sqlEscape((descriptor.local?.root_path ?? '').replace(/\/+$/, ''))
   return `'${root}/${key}'`
 }
 
@@ -81,19 +95,25 @@ export function ParquetSqlTab({ fileKey, storage }: Props) {
   /// The storage name to pass to executeQuery.
   const storageName = storage ?? storagesQuery.data?.default ?? ''
 
+  // sessionStorage key scoped to (storage, file) so drafts don't bleed across
+  // files or storages. Uses the `storage` prop directly (always the URL param,
+  // available synchronously) rather than the async-resolved storageName.
+  const draftKey = `${DRAFT_KEY_PREFIX}${storage ?? 'default'}:${fileKey}`
+
   const defaultSql = useMemo(() => {
     if (!descriptor) return `SELECT * FROM '<file>' LIMIT 100`
     return `SELECT * FROM ${fileSqlPath(descriptor, fileKey)} LIMIT 100`
   }, [descriptor, fileKey])
 
-  const [sql, setSql] = useState(defaultSql)
+  // Initialise from the saved draft so tab switches don't discard in-progress SQL.
+  const [sql, setSql] = useState(() => loadDraft(draftKey))
 
-  // When the file or descriptor changes (initial load or navigation to a
-  // different file), reset the editor to the new pre-fill SQL. Preserves
-  // user edits across tab switches within the same file.
+  // Apply the resolved defaultSql whenever the file changes or the storage
+  // descriptor finishes loading — but only when no draft is present, so a
+  // user's edits are never silently overwritten.
   useEffect(() => {
-    setSql(defaultSql)
-  }, [defaultSql])
+    if (!loadDraft(draftKey)) setSql(defaultSql)
+  }, [draftKey, defaultSql])
 
   const mutation = useMutation({
     mutationFn: (statement: string) => executeQuery(statement, storageName),
@@ -138,7 +158,7 @@ export function ParquetSqlTab({ fileKey, storage }: Props) {
       >
         <Editor
           value={sql}
-          onValueChange={setSql}
+          onValueChange={(next) => { setSql(next); saveDraft(draftKey, next) }}
           highlight={highlightSql}
           padding={12}
           placeholder={defaultSql}
