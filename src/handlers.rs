@@ -445,10 +445,21 @@ async fn raw_serve(
   let wants_listing = q.ls.is_some() || path.is_empty() || path.ends_with('/');
 
   if wants_listing {
-    let prefix = path.trim_end_matches('/');
+    // Build the prefix for list_files_walking. On S3, the prefix is a string
+    // filter: "foo" matches "foo.txt" and "foo_bar/" as well as "foo/…", while
+    // "foo/" is scoped to the directory. Always use an empty string for the
+    // root and a trailing-slash form for any non-root directory so S3 listings
+    // return only the intended directory's contents.
+    let prefix = if path.is_empty() {
+      String::new()
+    } else if path.ends_with('/') {
+      path.clone()
+    } else {
+      format!("{path}/")
+    };
     let skip = q.skip_pages.unwrap_or(0).min(MAX_SKIP_PAGES);
     let result = backend
-      .list_files_walking(prefix, q.page_token, skip)
+      .list_files_walking(&prefix, q.page_token, skip)
       .await?;
     let entries = result
       .entries
@@ -461,7 +472,7 @@ async fn raw_serve(
       })
       .collect();
     let listing = RawListing {
-      path: prefix.to_string(),
+      path: prefix.trim_end_matches('/').to_string(),
       entries,
       next_token: result.next_token,
       total_pages: result.total_pages,

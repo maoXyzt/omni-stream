@@ -306,6 +306,7 @@ export function SqlPage() {
             mutation.reset()
             mutation.mutate(sql)
           }}
+          onCancel={() => mutation.reset()}
         />
       )}
     </div>

@@ -677,6 +677,7 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
             setConvertAuthOverwrite(null)
             void handleConvert(overwrite)
           }}
+          onCancel={() => setConvertAuthOverwrite(null)}
         />
       )}
     </div>
