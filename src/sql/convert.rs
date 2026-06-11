@@ -223,15 +223,7 @@ mod tests {
       order: vec![],
       default_name: "t".into(),
     };
-    AppState::new(
-      reg,
-      None,
-      Arc::new("test".into()),
-      true,
-      true,
-      Arc::new("test".into()),
-      sql_enabled,
-    )
+    AppState::new(reg, None, Arc::new("test".into()), true, true, sql_enabled)
   }
 
   fn sql_state_local(root: &std::path::Path, follow_symlinks: bool) -> Arc<SqlState> {
@@ -427,15 +419,7 @@ mod tests {
       sql: SqlConfig::default(),
     };
     let reg = create_registry(&cfg).await.unwrap();
-    let state = AppState::new(
-      reg,
-      None,
-      Arc::new("test".into()),
-      true,
-      true,
-      Arc::new("test".into()),
-      true,
-    );
+    let state = AppState::new(reg, None, Arc::new("test".into()), true, true, true);
 
     let res = convert_handler(
       State(state),
@@ -480,15 +464,7 @@ mod tests {
       sql: SqlConfig::default(),
     };
     let reg = create_registry(&cfg).await.unwrap();
-    let state = AppState::new(
-      reg,
-      None,
-      Arc::new("test".into()),
-      true,
-      true,
-      Arc::new("test".into()),
-      true,
-    );
+    let state = AppState::new(reg, None, Arc::new("test".into()), true, true, true);
 
     let res = convert_handler(
       State(state),

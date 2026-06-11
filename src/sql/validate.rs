@@ -1,26 +1,15 @@
-//! Read-mostly SQL validation for the `/api/query` endpoint.
+//! Read-only SQL validation for the `/api/query` endpoint.
 //!
 //! This is the first, coarse line of defence: a ~100-line lexical pass that
-//! rejects obviously-mutating statements before they reach DuckDB. It is NOT
-//! the security boundary — that is the per-connection DuckDB session setup
-//! (`disabled_filesystems` / `allowed_directories` / `lock_configuration`,
-//! see `session.rs`), which holds even if a statement slips past this filter.
+//! rejects obviously-mutating statements (including `COPY`) before they reach
+//! DuckDB. It is NOT the security boundary — that is the per-connection DuckDB
+//! session setup (`disabled_filesystems` / `allowed_directories` /
+//! `lock_configuration`, see `session.rs`), which holds even if a statement
+//! slips past this filter.
 
 use crate::error::AppError;
 
-/// How a validated statement is classified for authorization. A read-only
-/// statement needs only read permission; a `COPY (...) TO` export writes to
-/// storage and so needs write permission (the bearer token) even when reads
-/// are public.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StatementKind {
-  Read,
-  Export,
-}
-
-/// Statements a query may start with. Everything here is read-only except
-/// COPY, which gets an extra shape check (`COPY (<query>) TO ...` exports
-/// only — never `COPY ... FROM` imports).
+/// Statements a query may start with. All are read-only.
 const ALLOWED_LEADING: &[&str] = &[
   "SELECT",
   "WITH",
@@ -34,14 +23,14 @@ const ALLOWED_LEADING: &[&str] = &[
   "EXPLAIN",
   "PIVOT",
   "UNPIVOT",
-  "COPY",
 ];
 
 /// Keywords rejected anywhere in the statement (whole-word match on the
 /// stripped text, so string literals / quoted identifiers / comments never
-/// trigger them). Mutating DDL/DML plus everything that reconfigures the
-/// session or touches extensions.
+/// trigger them). Mutating DDL/DML, session-reconfiguring commands, and
+/// `COPY` (data export/import — a write operation).
 const FORBIDDEN_ANYWHERE: &[&str] = &[
+  "COPY",
   "INSTALL",
   "LOAD",
   "ATTACH",
@@ -71,10 +60,10 @@ const FORBIDDEN_ANYWHERE: &[&str] = &[
   "REVOKE",
 ];
 
-/// Validate one statement and classify it. The name is historical: a `COPY
-/// (...) TO` export passes validation but is reported as [`StatementKind::Export`]
-/// so the caller can require write permission for it.
-pub fn validate_readonly(sql: &str) -> Result<StatementKind, AppError> {
+/// Validate that `sql` is a single, read-only statement. Returns `Ok(())`
+/// when the statement passes; returns `Err(AppError::QueryRejected)` with a
+/// descriptive message otherwise.
+pub fn validate_readonly(sql: &str) -> Result<(), AppError> {
   let stripped = strip_literals_and_comments(sql);
 
   let mut statements = stripped.split(';').filter(|s| !s.trim().is_empty());
@@ -95,8 +84,7 @@ pub fn validate_readonly(sql: &str) -> Result<StatementKind, AppError> {
   if !ALLOWED_LEADING.contains(&leading.as_str()) {
     return Err(AppError::QueryRejected(format!(
       "statement type '{leading}' is not allowed; only read-only queries \
-       (SELECT / WITH / DESCRIBE / SHOW / SUMMARIZE / EXPLAIN / ...) and \
-       COPY (...) TO exports are permitted"
+       (SELECT / WITH / DESCRIBE / SHOW / SUMMARIZE / EXPLAIN / ...) are permitted"
     )));
   }
 
@@ -110,68 +98,7 @@ pub fn validate_readonly(sql: &str) -> Result<StatementKind, AppError> {
     }
   }
 
-  if leading == "COPY" {
-    validate_copy_shape(stmt)?;
-    return Ok(StatementKind::Export);
-  }
-  Ok(StatementKind::Read)
-}
-
-/// Enforce that a COPY statement has the export shape `COPY ( <query> ) TO …`.
-/// Rejects `COPY tbl FROM 'file'` (data import) and `COPY tbl TO …`
-/// (requiring the parenthesised form keeps the parse trivial and loses no
-/// expressiveness — any table export is `COPY (FROM tbl) TO …`).
-///
-/// Operates on stripped text: literals are already blanked, so parens inside
-/// strings can't confuse the depth counter. The export target path itself is
-/// NOT checked here — the DuckDB session sandbox constrains where writes can
-/// land (S3 secret scope / `allowed_directories`).
-fn validate_copy_shape(stripped_stmt: &str) -> Result<(), AppError> {
-  let rest = stripped_stmt.trim_start();
-  // The first *word* being COPY doesn't guarantee the statement *starts*
-  // with it — tokenize_words skips punctuation and non-ASCII bytes, so e.g.
-  // `(COPY …)` or `★COPY …` reach here too. `get(..4)` (not `[..4]`) keeps
-  // a non-char-boundary prefix from panicking; any mismatch is rejected.
-  let after_keyword = match rest.get(..4) {
-    Some(kw) if kw.eq_ignore_ascii_case("copy") => &rest[4..],
-    _ => {
-      return Err(AppError::QueryRejected(
-        "COPY must be the first token of the statement".into(),
-      ));
-    }
-  };
-  let rest = after_keyword.trim_start();
-  if !rest.starts_with('(') {
-    return Err(AppError::QueryRejected(
-      "COPY is only allowed in the export form COPY (<query>) TO '<target>'".into(),
-    ));
-  }
-  let mut depth = 0usize;
-  let mut after_close = None;
-  for (i, ch) in rest.char_indices() {
-    match ch {
-      '(' => depth += 1,
-      ')' => {
-        depth -= 1;
-        if depth == 0 {
-          after_close = Some(&rest[i + 1..]);
-          break;
-        }
-      }
-      _ => {}
-    }
-  }
-  let Some(tail) = after_close else {
-    return Err(AppError::QueryRejected(
-      "unbalanced parentheses in COPY statement".into(),
-    ));
-  };
-  match tokenize_words(tail).first() {
-    Some(w) if w.eq_ignore_ascii_case("TO") => Ok(()),
-    _ => Err(AppError::QueryRejected(
-      "COPY (<query>) must be followed by TO '<target>'".into(),
-    )),
-  }
+  Ok(())
 }
 
 /// Split into identifier-ish words ([A-Za-z_][A-Za-z0-9_]*). Digits and
@@ -364,6 +291,17 @@ mod tests {
   }
 
   #[test]
+  fn rejects_copy() {
+    // COPY is not in ALLOWED_LEADING, so the leading-keyword check fires.
+    rejected("COPY (SELECT 1) TO 'out.parquet' (FORMAT PARQUET)");
+    rejected("COPY t FROM 'file.csv'");
+    // COPY is also in FORBIDDEN_ANYWHERE, so it's rejected even as a later
+    // keyword (e.g. an unquoted column named `copy`).
+    let msg = rejected("SELECT * FROM t WHERE copy = 1");
+    assert!(msg.contains("double quotes"), "{msg}");
+  }
+
+  #[test]
   fn rejects_forbidden_keywords_embedded() {
     rejected("SELECT 1; SET memory_limit='99GB'");
     rejected("WITH t AS (SELECT 1) INSERT INTO x SELECT * FROM t");
@@ -382,6 +320,10 @@ mod tests {
     ok("SELECT $$ ; PRAGMA $$ AS s");
     ok("SELECT $tag$ ; set x $tag$ AS s");
     ok("SELECT 'it''s; fine'");
+    // COPY in a string literal is not a keyword — it's fine.
+    ok("SELECT 'COPY is just a word here' AS note");
+    // Quoted `copy` identifier is not the keyword.
+    ok(r#"SELECT "copy" FROM t"#);
   }
 
   #[test]
@@ -397,44 +339,6 @@ mod tests {
     rejected("   ");
     rejected("-- just a comment");
     rejected(";");
-  }
-
-  #[test]
-  fn classifies_read_vs_export() {
-    // Read-only statements report Read; valid COPY (...) TO exports report
-    // Export so the handler can require the write token for them.
-    assert_eq!(validate_readonly("SELECT 1").unwrap(), StatementKind::Read);
-    assert_eq!(
-      validate_readonly("WITH t AS (SELECT 1) SELECT * FROM t").unwrap(),
-      StatementKind::Read
-    );
-    assert_eq!(
-      validate_readonly("COPY (SELECT 1) TO 'out.parquet'").unwrap(),
-      StatementKind::Export
-    );
-  }
-
-  #[test]
-  fn copy_export_shape() {
-    ok("COPY (SELECT * FROM 's3://b/in.parquet') TO 's3://b/out.parquet' (FORMAT PARQUET)");
-    ok("copy (from 'a.csv') to 'out.parquet'");
-    ok("COPY ( WITH t AS (SELECT 1) SELECT * FROM t ) TO 'x.csv'");
-    // Imports and table-form exports are rejected.
-    rejected("COPY t FROM 'evil.csv'");
-    rejected("COPY t TO 'out.csv'");
-    rejected("COPY (SELECT 1) FROM 'x'");
-    rejected("COPY (SELECT 1)");
-    rejected("COPY (SELECT 1 TO 'x'"); // unbalanced parens
-  }
-
-  #[test]
-  fn copy_not_at_statement_start_rejected_without_panic() {
-    // tokenize_words skips punctuation / non-ASCII bytes, so the first WORD
-    // can be COPY while the statement doesn't START with it. The multi-byte
-    // prefix used to panic on a non-char-boundary slice (`rest[4..]`).
-    rejected("★★COPY (SELECT 1) TO 'x'");
-    rejected("(COPY (SELECT 1) TO 'x')");
-    rejected("\u{00e9}COPY (SELECT 1) TO 'x'");
   }
 
   #[test]

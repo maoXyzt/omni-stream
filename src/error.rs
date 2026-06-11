@@ -48,13 +48,6 @@ pub enum AppError {
   #[error("query rejected: {0}")]
   QueryRejected(String),
 
-  /// A privileged operation (currently a `COPY (...) TO` export) was attempted
-  /// without a valid bearer token while reads are public but writes are gated.
-  /// 401 so the SPA prompts for the token and retries.
-  #[cfg(feature = "duckdb")]
-  #[error("unauthorized: {0}")]
-  Unauthorized(String),
-
   /// Convert target already exists and overwrite wasn't requested (the
   /// JSONL→Parquet `/api/convert` endpoint). 409 so the SPA can offer to
   /// overwrite. duckdb-gated like the other SQL-path variants.
@@ -79,8 +72,6 @@ impl AppError {
       AppError::Io(_) | AppError::Backend(_) => StatusCode::INTERNAL_SERVER_ERROR,
       #[cfg(feature = "duckdb")]
       AppError::Query(_) | AppError::QueryRejected(_) => StatusCode::BAD_REQUEST,
-      #[cfg(feature = "duckdb")]
-      AppError::Unauthorized(_) => StatusCode::UNAUTHORIZED,
       #[cfg(feature = "duckdb")]
       AppError::Conflict(_) => StatusCode::CONFLICT,
       #[cfg(feature = "duckdb")]
