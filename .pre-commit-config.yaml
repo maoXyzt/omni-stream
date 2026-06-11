@@ -9,6 +9,14 @@ repos:
         types: [rust]
         pass_filenames: false
 
+      - id: clippy
+        name: cargo clippy
+        description: Lint Rust code; fails on warnings (-D warnings)
+        entry: cargo clippy --workspace --all-targets -- -D warnings
+        language: system
+        types: [rust]
+        pass_filenames: false
+
       - id: eslint-fix
         name: ESLint fix (frontend TypeScript)
         description: Auto-fix TS/TSX lint issues (runs only when frontend/src files change)
