@@ -209,7 +209,7 @@ export function ParquetSqlTab({ fileKey, storage }: Props) {
         </Alert>
       )}
 
-      <div className="min-h-0 flex-1 overflow-hidden">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {mutation.isPending ? (
           // Show the table's loading skeleton while a query is running.
           <DataTable
