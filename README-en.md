@@ -95,7 +95,6 @@ name = "production-s3"
 type = "s3"
 active = true
 s3 = { endpoint = "http://minio.local:9000", bucket = "data", access_key = "...", secret_key = "..." }
-# force_path_style = true  # default; set false for virtual-host gateways (some AOSS/OSS)
 ```
 
 The local backend supports `follow_symlinks` (default `true`; when `false`, symlinks appear as entries but reads return Forbidden, and that storage refuses all DuckDB/SQL operations):
@@ -114,6 +113,8 @@ local = { root_path = "/var/lib/omni-stream", follow_symlinks = false }  # defau
 > the bucket's actual region (otherwise AWS returns
 > `AuthorizationHeaderMalformed`); or (2) the S3-compatible gateway
 > validates the region strictly (most don't).
+> `s3.force_path_style` defaults to `true` (required for MinIO and most self-hosted gateways);
+> set it to `false` for virtual-host-style gateways (some AOSS/OSS).
 
 `s3.bucket` is optional. **Omit it (or set it to `"*"`) to enable multi-bucket
 mode**: the storage root performs `ListBuckets`, and every bucket the
