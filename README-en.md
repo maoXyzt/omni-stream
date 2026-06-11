@@ -101,9 +101,11 @@ s3 = { endpoint = "http://minio.local:9000", bucket = "data", access_key = "..."
 The local backend supports `follow_symlinks` (default `true`; when `false`, symlinks appear as entries but reads return Forbidden, and that storage refuses all DuckDB/SQL operations):
 
 ```toml
-[storages.local]
-root_path = "/var/lib/omni-stream"
-# follow_symlinks = true  # default
+[[storages]]
+name = "local-data"
+type = "local"
+active = true
+local = { root_path = "/var/lib/omni-stream", follow_symlinks = false }  # default true
 ```
 
 > `s3.region` defaults to `us-east-1`, which is fine for MinIO / LocalStack

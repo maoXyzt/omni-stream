@@ -116,9 +116,10 @@ SELECT * FROM 's3://my-bucket/data/other.parquet' LIMIT 10
 本地存储若设置了 `follow_symlinks = false`，**不支持**任何 DuckDB 功能（包括 SQL 查询和 Convert to Parquet）。原因是 DuckDB 的目录沙箱内部会跟踪符号链接，无法在这种模式下保证安全隔离。此类存储会在 API 返回 `400 Unsupported` 并附带说明。
 
 ```toml
-[storages.local]
-root_path = "/data"
-follow_symlinks = true   # DuckDB 功能要求此项为 true（默认值）
+[[storages]]
+name = "local-data"
+type = "local"
+local = { root_path = "/data", follow_symlinks = true }  # DuckDB 功能要求此项为 true（默认值）
 ```
 
 ---

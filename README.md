@@ -111,9 +111,11 @@ s3 = { endpoint = "http://minio.local:9000", bucket = "data", access_key = "..."
 local 后端可选 `follow_symlinks`（默认 `true`；`false` 时符号链接作为条目出现但读取返回 Forbidden，且该 storage 完全拒绝 DuckDB/SQL 功能）：
 
 ```toml
-[storages.local]
-root_path = "/var/lib/omni-stream"
-# follow_symlinks = true  # 默认
+[[storages]]
+name = "local-data"
+type = "local"
+active = true
+local = { root_path = "/var/lib/omni-stream", follow_symlinks = false }  # 默认 true
 ```
 
 > `s3.region` 默认 `us-east-1`，对 MinIO / LocalStack / AWS us-east-1 桶都
