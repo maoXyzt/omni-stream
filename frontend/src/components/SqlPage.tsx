@@ -130,6 +130,12 @@ export function SqlPage() {
   }
 
   const result = mutation.data
+  // A write 401 — the SQL endpoint is reachable but running needs a token
+  // (default gated mode: reads public, writes protected). Distinct from the
+  // read 401 above which replaces the whole page; here the editor stays
+  // mounted (typed SQL preserved) and the prompt overlays it.
+  const writeAuthError =
+    mutation.error instanceof ApiError && mutation.error.status === 401
 
   return (
     <div className="flex h-screen w-full flex-col">
@@ -229,7 +235,7 @@ export function SqlPage() {
               </Alert>
             )}
 
-            {mutation.error && (
+            {mutation.error && !writeAuthError && (
               <Alert variant="destructive" className="shrink-0 overflow-auto">
                 <AlertCircle className="size-4" />
                 <AlertTitle>Query failed</AlertTitle>
@@ -293,6 +299,16 @@ export function SqlPage() {
           </>
         )}
       </main>
+      {writeAuthError && (
+        <TokenPrompt
+          onSubmit={() => {
+            // TokenPrompt stored the token; re-run with it attached.
+            mutation.reset()
+            mutation.mutate(sql)
+          }}
+          onCancel={() => mutation.reset()}
+        />
+      )}
     </div>
   )
 }

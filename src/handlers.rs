@@ -27,9 +27,19 @@ pub struct AppState {
   thumb: Option<Arc<ThumbState>>,
   hostname: Arc<String>,
   /// Mirrors `auth.enabled` so `/api/server` can tell the SPA whether the
-  /// bearer-token gate is active (reaching this handler at all proves the
-  /// presented token, if any, was accepted).
+  /// bearer-token gate is active at all.
   auth_enabled: bool,
+  /// Mirrors `auth.public_read`. With the gate on, `true` means reads are
+  /// public and only writes need the token; `false` means everything does.
+  /// The SPA uses (auth_enabled, public_read) to decide when to prompt for a
+  /// token: never under `public_read` for browsing, only when a write 401s.
+  public_read: bool,
+  /// The shared bearer token (empty when the gate is off). Read routes are
+  /// gated by middleware; this lets the SQL handler additionally gate a
+  /// `COPY (...) TO` export (a write) when reads are public. Unused outside
+  /// the duckdb build, where there are no write-classified handlers yet.
+  #[cfg_attr(not(feature = "duckdb"), allow(dead_code))]
+  auth_token: Arc<String>,
   /// True only when all three hold: built with `--features duckdb`,
   /// `[sql].enabled`, and `auth.enabled`. Always false in non-duckdb builds.
   sql_enabled: bool,
@@ -41,6 +51,8 @@ impl AppState {
     thumb: Option<Arc<ThumbState>>,
     hostname: Arc<String>,
     auth_enabled: bool,
+    public_read: bool,
+    auth_token: Arc<String>,
     sql_enabled: bool,
   ) -> Self {
     Self {
@@ -51,6 +63,8 @@ impl AppState {
       thumb,
       hostname,
       auth_enabled,
+      public_read,
+      auth_token,
       sql_enabled,
     }
   }
@@ -58,6 +72,15 @@ impl AppState {
   #[cfg(feature = "duckdb")]
   pub fn sql_enabled(&self) -> bool {
     self.sql_enabled
+  }
+
+  /// Whether the request carries the configured bearer token. Used by the SQL
+  /// handler to gate `COPY (...) TO` exports (a write) even when reads are
+  /// public — reaching that handler at all implies `auth.enabled`, so a
+  /// mismatch here means "write token required".
+  #[cfg(feature = "duckdb")]
+  pub fn bearer_ok(&self, headers: &HeaderMap) -> bool {
+    crate::auth::bearer_matches(headers, &self.auth_token)
   }
 
   pub(crate) fn resolve(&self, name: Option<&str>) -> Result<Arc<dyn StorageBackend>, AppError> {
@@ -160,10 +183,15 @@ pub struct ServerInfo {
   /// it on the same endpoint the frontend already polls keeps this a
   /// zero-extra-request feature; the SPA renders it as a footer chip.
   pub version: &'static str,
-  /// Whether the bearer-token gate is on. This endpoint sits behind the auth
-  /// middleware, so a client that can read this response has already passed
-  /// it — `auth_enabled = true` therefore implies "your token works".
+  /// Whether the bearer-token gate is on at all. Under a full lockdown this
+  /// endpoint sits behind the gate, so reading it implies the token works;
+  /// when `public_read` is on, it's readable without a token and reports the
+  /// gate state so the SPA knows writes need one.
   pub auth_enabled: bool,
+  /// Whether reads are public while only writes require the token. Only
+  /// meaningful when `auth_enabled`. The SPA prompts for a token lazily (on a
+  /// write 401) when this is true, and up-front when it's false.
+  pub public_read: bool,
   /// Whether `POST /api/query` is live (duckdb build + [sql] enabled +
   /// auth on). The SPA hides the SQL editor entry point when false.
   pub sql_enabled: bool,
@@ -174,6 +202,7 @@ pub async fn server_info_handler(State(state): State<AppState>) -> Json<ServerIn
     hostname: state.hostname.as_str().to_string(),
     version: env!("CARGO_PKG_VERSION"),
     auth_enabled: state.auth_enabled,
+    public_read: state.public_read,
     sql_enabled: state.sql_enabled,
   })
 }
@@ -306,6 +335,172 @@ pub async fn proxy_handler(
     .status(status)
     .header(header::ACCEPT_RANGES, "bytes")
     .header(header::CACHE_CONTROL, "public, max-age=3600");
+
+  if let Some(ct) = resp.content_type.as_deref() {
+    builder = builder.header(header::CONTENT_TYPE, ct);
+  }
+  if let Some(cl) = resp.content_length {
+    builder = builder.header(header::CONTENT_LENGTH, cl);
+  }
+  if let Some(etag) = resp.etag.as_deref() {
+    builder = builder.header(header::ETAG, etag);
+  }
+  if let Some(lm) = resp.last_modified.as_deref() {
+    builder = builder.header(header::LAST_MODIFIED, lm);
+  }
+  if let Some(cr) = resp.content_range.as_deref() {
+    builder = builder.header(header::CONTENT_RANGE, cr);
+  }
+
+  let body = Body::from_stream(resp.body);
+  builder
+    .body(body)
+    .map_err(|e| AppError::Backend(format!("response build: {e}")))
+}
+
+/// Query params for the `/raw` mount. `ls` (presence, any value) flips a
+/// request into directory-listing mode; `page_token` / `skip_pages` mirror
+/// `/api/list` so a served page can paginate a large directory.
+#[derive(Debug, Deserialize)]
+pub struct RawQuery {
+  pub ls: Option<String>,
+  pub page_token: Option<String>,
+  pub skip_pages: Option<u32>,
+}
+
+/// One entry in a `/raw …?ls` directory listing. `name` is the basename (not
+/// the full storage key) so a served HTML page can fetch it with a plain
+/// relative URL.
+#[derive(Debug, Serialize)]
+pub struct RawDirEntry {
+  pub name: String,
+  pub is_dir: bool,
+  pub size: u64,
+  pub last_modified: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RawListing {
+  pub path: String,
+  pub entries: Vec<RawDirEntry>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub next_token: Option<String>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub total_pages: Option<u64>,
+}
+
+/// Last path segment of a (possibly trailing-slashed) storage key.
+/// `"a/b/c.txt"` → `"c.txt"`, `"a/b/"` → `"b"`, `""` → `""`.
+fn basename_of(key: &str) -> String {
+  key
+    .trim_end_matches('/')
+    .rsplit('/')
+    .next()
+    .unwrap_or("")
+    .to_string()
+}
+
+/// Root of the `/raw` mount (`/raw/{storage}`) — lists the storage root.
+pub async fn raw_root_handler(
+  State(state): State<AppState>,
+  Path(storage): Path<String>,
+  Query(q): Query<RawQuery>,
+  headers: HeaderMap,
+) -> Result<Response, AppError> {
+  raw_serve(state, storage, String::new(), q, headers).await
+}
+
+/// `/raw/{storage}/{*path}` — a copyparty-style navigable file mount.
+///
+/// Storage lives in the PATH (not a query param) so that relative
+/// sub-resource fetches from a served HTML page keep the storage context.
+/// A request whose path resolves to a file streams raw bytes (same
+/// Content-Type / Range behavior as `proxy_handler`, no `Content-Disposition`
+/// so HTML renders inline); a request carrying `?ls`, a trailing slash, or an
+/// empty path returns a JSON directory listing. Self-contained dashboards can
+/// thus both load their data files relatively and discover directories via
+/// `fetch("subdir/?ls")` without hard-coding paths or the storage name.
+pub async fn raw_handler(
+  State(state): State<AppState>,
+  Path((storage, path)): Path<(String, String)>,
+  Query(q): Query<RawQuery>,
+  headers: HeaderMap,
+) -> Result<Response, AppError> {
+  raw_serve(state, storage, path, q, headers).await
+}
+
+async fn raw_serve(
+  state: AppState,
+  storage: String,
+  path: String,
+  q: RawQuery,
+  headers: HeaderMap,
+) -> Result<Response, AppError> {
+  let backend = state.resolve(Some(&storage))?;
+
+  // Directory intent: explicit `?ls`, a trailing slash, or the storage root.
+  // We deliberately do NOT stat to detect directories — S3 has no real dir
+  // objects, so the convention has to be request-shape driven to work on both
+  // backends.
+  let wants_listing = q.ls.is_some() || path.is_empty() || path.ends_with('/');
+
+  if wants_listing {
+    // Build the prefix for list_files_walking. On S3, the prefix is a string
+    // filter: "foo" matches "foo.txt" and "foo_bar/" as well as "foo/…", while
+    // "foo/" is scoped to the directory. Always use an empty string for the
+    // root and a trailing-slash form for any non-root directory so S3 listings
+    // return only the intended directory's contents.
+    let prefix = if path.is_empty() {
+      String::new()
+    } else if path.ends_with('/') {
+      path.clone()
+    } else {
+      format!("{path}/")
+    };
+    let skip = q.skip_pages.unwrap_or(0).min(MAX_SKIP_PAGES);
+    let result = backend
+      .list_files_walking(&prefix, q.page_token, skip)
+      .await?;
+    let entries = result
+      .entries
+      .into_iter()
+      .map(|e| RawDirEntry {
+        name: basename_of(&e.key),
+        is_dir: e.is_dir,
+        size: e.size,
+        last_modified: e.last_modified,
+      })
+      .collect();
+    let listing = RawListing {
+      path: prefix.trim_end_matches('/').to_string(),
+      entries,
+      next_token: result.next_token,
+      total_pages: result.total_pages,
+    };
+    return Ok(Json(listing).into_response());
+  }
+
+  // File branch — mirrors proxy_handler's streaming/Range/header logic, with
+  // two deliberate differences: no Content-Disposition (so .html renders
+  // inline instead of downloading) and `no-cache` instead of a 1h max-age,
+  // since these mounts back live dashboards that re-poll their data files.
+  let range = headers
+    .get(header::RANGE)
+    .and_then(|v| v.to_str().ok())
+    .map(str::to_string);
+
+  let resp = backend.get_file(&path, GetOptions { range }).await?;
+
+  let status = if resp.is_partial {
+    StatusCode::PARTIAL_CONTENT
+  } else {
+    StatusCode::OK
+  };
+
+  let mut builder = Response::builder()
+    .status(status)
+    .header(header::ACCEPT_RANGES, "bytes")
+    .header(header::CACHE_CONTROL, "no-cache");
 
   if let Some(ct) = resp.content_type.as_deref() {
     builder = builder.header(header::CONTENT_TYPE, ct);
@@ -601,5 +796,20 @@ mod tests {
     // Pin the constant so an accidental bump (e.g. 100 → 100_000) shows up
     // in review. The handler clamps `skip_pages` to this value.
     assert_eq!(MAX_SKIP_PAGES, 100);
+  }
+
+  #[test]
+  fn basename_of_common_cases() {
+    assert_eq!(basename_of("a/b/c.txt"), "c.txt");
+    assert_eq!(basename_of("data.json"), "data.json");
+    // Directory key from list_files: trailing slash stripped, last segment returned.
+    assert_eq!(basename_of("a/subdir/"), "subdir");
+    assert_eq!(basename_of("subdir/"), "subdir");
+    // Storage root / empty prefix — listing the root itself.
+    assert_eq!(basename_of(""), "");
+    // Single-segment file (no directory component).
+    assert_eq!(basename_of("file.txt"), "file.txt");
+    // Nested path, no trailing slash (file deep in the tree).
+    assert_eq!(basename_of("a/b/c/d.parquet"), "d.parquet");
   }
 }

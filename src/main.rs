@@ -25,11 +25,11 @@ use tracing_subscriber::EnvFilter;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
-use crate::auth::{AuthState, auth_middleware};
+use crate::auth::{AuthLayer, auth_middleware};
 use crate::config::Config;
 use crate::handlers::{
-  AppState, list_handler, list_storages_handler, proxy_handler, server_info_handler, stat_handler,
-  static_handler, thumb_handler,
+  AppState, list_handler, list_storages_handler, proxy_handler, raw_handler, raw_root_handler,
+  server_info_handler, stat_handler, static_handler, thumb_handler,
 };
 use crate::storage::factory::create_registry;
 use crate::thumbs::ThumbState;
@@ -88,16 +88,26 @@ async fn main() -> anyhow::Result<()> {
       .and_then(|s| s.into_string().ok())
       .unwrap_or_else(|| "unknown".into()),
   );
-  let auth_state = AuthState::from_config(&cfg.auth).context("init auth gate")?;
-  if auth_state.enabled {
-    tracing::info!("auth gate enabled: /api/* requires Bearer token");
-  } else {
+  // One shared token, applied to two route groups with different strictness:
+  // the read group enforces it only on a full lockdown (`!public_read`), the
+  // write group enforces it whenever the gate is on.
+  let auth_token = AuthLayer::token_from_config(&cfg.auth).context("init auth gate")?;
+  let read_auth = AuthLayer::read(&cfg.auth, auth_token.clone());
+  // `write_auth` is consumed only inside the `duckdb` cfg block below; binding
+  // it here (vs at the use site) would warn as unused in non-duckdb builds.
+  if !cfg.auth.enabled {
     tracing::info!("auth gate disabled (open API)");
+  } else if cfg.auth.public_read {
+    tracing::info!("auth gate enabled: reads public, writes require a Bearer token");
+  } else {
+    tracing::info!("auth gate enabled: every request requires a Bearer token");
   }
   // The SQL endpoint executes user-supplied SQL, so it never runs on an open
   // API: compile-time feature AND auth AND the [sql] kill-switch must all be
-  // on. The flag also reaches the SPA via /api/server to gate the editor UI.
-  let sql_enabled = cfg!(feature = "duckdb") && auth_state.enabled && cfg.sql.enabled;
+  // on. With the gate on it lives in the write group, so it always requires
+  // the token regardless of `public_read`. The flag also reaches the SPA via
+  // /api/server to gate the editor UI.
+  let sql_enabled = cfg!(feature = "duckdb") && cfg.auth.enabled && cfg.sql.enabled;
   #[cfg(feature = "duckdb")]
   if sql_enabled {
     tracing::info!(
@@ -108,7 +118,15 @@ async fn main() -> anyhow::Result<()> {
   } else {
     tracing::warn!("SQL query endpoint disabled: requires auth.enabled = true and [sql] enabled");
   }
-  let state = AppState::new(registry, thumb, hostname, auth_state.enabled, sql_enabled);
+  let state = AppState::new(
+    registry,
+    thumb,
+    hostname,
+    cfg.auth.enabled,
+    cfg.auth.public_read,
+    auth_token.clone(),
+    sql_enabled,
+  );
 
   // Bounded per-route timeout for the catalog endpoints. Catalogs touch
   // every entry under a prefix (especially `list` walking many pages), and
@@ -122,6 +140,10 @@ async fn main() -> anyhow::Result<()> {
   let catalog_timeout =
     TimeoutLayer::with_status_code(StatusCode::REQUEST_TIMEOUT, Duration::from_secs(25));
 
+  // Read / browse group. `read_auth` only enforces the token on a full
+  // lockdown (auth on + `public_read = false`); in the default gated mode
+  // these stay public. The SPA fallback is added last, outside any
+  // route_layer, so the login UI loads even when reads are locked.
   let app = Router::new()
     .route("/api/server", get(server_info_handler))
     .route("/api/storages", get(list_storages_handler))
@@ -131,36 +153,67 @@ async fn main() -> anyhow::Result<()> {
     .route(
       "/api/thumb/{*key}",
       get(thumb_handler).layer(catalog_timeout),
-    );
-  // Registered before the auth route_layer below so the query endpoint is
-  // bearer-token protected like every other /api route. The handler holds
-  // its own per-query interrupt timeout; this outer layer is a belt-and-
-  // braces bound in case the blocking task wedges before the watchdog arms.
+    )
+    // copyparty-style navigable file mount: serves a stored .html as a live
+    // page and lets its relative fetches reach sibling files / `?ls`
+    // directory listings, with storage encoded in the path so relative
+    // resolution preserves it. A *read* surface — gated only on a full
+    // lockdown; no per-route timeout (it streams arbitrarily large files,
+    // same rationale as proxy). NOTE: top-level browser navigation can't send
+    // a Bearer header, so under a full lockdown a standalone page can't auth
+    // its sub-resource fetches — that needs a `/raw`-scoped session cookie
+    // (not implemented yet). Three shapes: `/raw/t` and `/raw/t/` both list
+    // the storage root (the `{*path}` wildcard does NOT match an empty
+    // segment, so the trailing-slash form needs its own route or it falls
+    // through to the SPA), `/raw/t/...` serves a file or, with `?ls` / a
+    // trailing slash, a sub-directory.
+    .route("/raw/{storage}", get(raw_root_handler))
+    .route("/raw/{storage}/", get(raw_root_handler))
+    .route("/raw/{storage}/{*path}", get(raw_handler));
+
+  // `/api/query` is a *read* surface: a read-only DuckDB query needs only read
+  // permission, and `query_handler` upgrades a `COPY (...) TO` export to a
+  // write-token check itself. So it joins the read group BEFORE the read_auth
+  // route_layer below (routes added after a route_layer aren't covered by it).
   #[cfg(feature = "duckdb")]
-  let app = {
-    let sql_state = std::sync::Arc::new(sql::SqlState::from_config(&cfg));
-    let query_timeout = TimeoutLayer::with_status_code(
+  let app = app.route(
+    "/api/query",
+    axum::routing::post(sql::query_handler).layer(TimeoutLayer::with_status_code(
       StatusCode::REQUEST_TIMEOUT,
       Duration::from_secs(cfg.sql.query_timeout_secs + 5),
-    );
-    app
-      .route(
-        "/api/query",
-        axum::routing::post(sql::query_handler).layer(query_timeout),
-      )
+    )),
+  );
+
+  let app = app.route_layer(middleware::from_fn_with_state(read_auth, auth_middleware));
+
+  // Write / privileged group. `/api/convert` writes a Parquet file, so it
+  // always requires the token when the gate is on (`write_auth`), independent
+  // of `public_read`. Future mutating endpoints (upload / delete) belong here
+  // too. Merged in so it keeps its own auth layer.
+  #[cfg(feature = "duckdb")]
+  let app = {
+    let write_auth = AuthLayer::write(&cfg.auth, auth_token.clone());
+    let write_router = Router::new()
       .route(
         "/api/convert",
-        axum::routing::post(sql::convert::convert_handler).layer(query_timeout),
+        axum::routing::post(sql::convert::convert_handler).layer(TimeoutLayer::with_status_code(
+          StatusCode::REQUEST_TIMEOUT,
+          Duration::from_secs(cfg.sql.query_timeout_secs + 5),
+        )),
       )
-      // Router-level so the MethodRouter keeps a single layer (two chained
-      // `.layer` calls defeat axum's error-type inference). Other routes
-      // simply ignore the extension.
-      .layer(axum::Extension(sql_state))
+      .route_layer(middleware::from_fn_with_state(write_auth, auth_middleware));
+    app.merge(write_router)
   };
+
+  // The DuckDB `SqlState` extension must reach both `/api/query` (read group)
+  // and `/api/convert` (write group), so apply it once to the merged router;
+  // non-SQL handlers ignore it.
+  #[cfg(feature = "duckdb")]
+  let app = app.layer(axum::Extension(std::sync::Arc::new(
+    sql::SqlState::from_config(&cfg),
+  )));
+
   let app = app
-    // route_layer applies only to routes registered above; fallback (SPA HTML/
-    // JS/CSS) stays open so the browser can load the login UI.
-    .route_layer(middleware::from_fn_with_state(auth_state, auth_middleware))
     .fallback(static_handler)
     .with_state(state)
     .layer(TraceLayer::new_for_http());

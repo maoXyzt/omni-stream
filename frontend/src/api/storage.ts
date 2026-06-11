@@ -66,6 +66,17 @@ export function proxyUrl(
   return qs ? `${base}?${qs}` : base
 }
 
+/// Navigable URL for a stored file (or directory) under the backend `/raw`
+/// mount. Unlike `proxyUrl`, the storage name lives in the PATH, not a query
+/// param — so when a served HTML page does a relative `fetch("sub/data.json")`
+/// the browser keeps the `/raw/<storage>/<dir>/` base (a `?storage=` query
+/// would be silently dropped during relative resolution). Open the returned
+/// URL in a new tab to render an `.html` as a live page; append `?ls` to a
+/// directory URL to get a JSON listing.
+export function rawUrl(key: string, storage: string): string {
+  return `/raw/${encodeURIComponent(storage)}/${encodeKey(key)}`
+}
+
 export interface ThumbOptions {
   storage?: string
   width?: number

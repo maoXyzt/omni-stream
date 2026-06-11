@@ -15,9 +15,14 @@ import { Input } from '@/components/ui/input'
 
 interface Props {
   onSubmit: () => void
+  /// When provided, the dialog is dismissable: a Cancel button, Escape, and
+  /// click-outside all close it via this callback. Used for the proactive
+  /// "Auth Token" entry point. Omitted for the mandatory 401-triggered prompt,
+  /// which stays locked until a token is supplied.
+  onCancel?: () => void
 }
 
-export function TokenPrompt({ onSubmit }: Props) {
+export function TokenPrompt({ onSubmit, onCancel }: Props) {
   const [token, setToken] = useState('')
 
   function handleSubmit(e: FormEvent) {
@@ -29,11 +34,20 @@ export function TokenPrompt({ onSubmit }: Props) {
   }
 
   return (
-    <Dialog open onOpenChange={() => {}}>
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open) onCancel?.()
+      }}
+    >
       <DialogContent
         className="max-w-md"
-        onInteractOutside={(e) => e.preventDefault()}
-        onEscapeKeyDown={(e) => e.preventDefault()}
+        onInteractOutside={(e) => {
+          if (!onCancel) e.preventDefault()
+        }}
+        onEscapeKeyDown={(e) => {
+          if (!onCancel) e.preventDefault()
+        }}
       >
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
@@ -57,8 +71,13 @@ export function TokenPrompt({ onSubmit }: Props) {
             onChange={(e) => setToken(e.target.value)}
           />
           <DialogFooter>
+            {onCancel && (
+              <Button type="button" variant="outline" onClick={onCancel}>
+                Cancel
+              </Button>
+            )}
             <Button type="submit" disabled={!token.trim()}>
-              Save & retry
+              {onCancel ? 'Save' : 'Save & retry'}
             </Button>
           </DialogFooter>
         </form>
