@@ -1,9 +1,9 @@
 import { apiClient } from '@/api/client'
 import type { ConvertResult } from '@/types/storage'
 
-/// Convert a JSONL/NDJSON file to Parquet in-place via the server's embedded
-/// DuckDB. The server enforces its own wall-clock timeout; the generous client
-/// timeout just needs to outlast that.
+/// Convert a JSONL/NDJSON/TSV/CSV file to Parquet in-place via the server's
+/// embedded DuckDB. The server enforces its own wall-clock timeout; the
+/// generous client timeout just needs to outlast that.
 export async function convertToParquet(
   storage: string,
   key: string,

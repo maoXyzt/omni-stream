@@ -41,7 +41,7 @@ export function TokenPrompt({ onSubmit, onCancel }: Props) {
       }}
     >
       <DialogContent
-        className="max-w-md"
+        className="sm:max-w-md"
         onInteractOutside={(e) => {
           if (!onCancel) e.preventDefault()
         }}

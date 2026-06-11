@@ -1,5 +1,5 @@
-//! `POST /api/convert` — convert a JSONL/NDJSON file to Parquet in-place via
-//! DuckDB.
+//! `POST /api/convert` — convert a JSONL/NDJSON/TSV/CSV file to Parquet
+//! in-place via DuckDB.
 //!
 //! The endpoint is gated behind the same triple condition as `/api/query`
 //! (`duckdb` feature + `auth.enabled` + `[sql].enabled`). It reuses the same
@@ -24,8 +24,10 @@ use super::{SqlState, SqlTarget};
 
 #[derive(Debug, Deserialize)]
 pub struct ConvertRequest {
-  /// Storage-relative path of the JSONL/NDJSON source file (e.g.
-  /// `"logs/2024/events.jsonl"`). Leading slashes are stripped.
+  /// Storage-relative path of the source file (e.g.
+  /// `"logs/2024/events.jsonl"` or `"data/records.tsv"`).
+  /// Supported formats: `.jsonl`, `.ndjson`, `.tsv`, `.csv`.
+  /// Leading slashes are stripped.
   pub key: String,
   /// Storage name; defaults to the server's active storage when absent.
   pub storage: Option<String>,
@@ -58,11 +60,12 @@ pub async fn convert_handler(
 
   let key = req.key.trim_start_matches('/');
 
-  // Only accept .jsonl / .ndjson inputs.
   let lower = key.to_lowercase();
-  if !lower.ends_with(".jsonl") && !lower.ends_with(".ndjson") {
+  let is_json_lines = lower.ends_with(".jsonl") || lower.ends_with(".ndjson");
+  let is_csv_like = lower.ends_with(".tsv") || lower.ends_with(".csv");
+  if !is_json_lines && !is_csv_like {
     return Err(AppError::Unsupported(format!(
-      "convert: expected a .jsonl or .ndjson source file, got '{key}'"
+      "convert: expected a .jsonl, .ndjson, .tsv, or .csv source file, got '{key}'"
     )));
   }
 
@@ -97,8 +100,15 @@ pub async fn convert_handler(
   let (in_uri, out_uri) = build_uris(target, key, &output_key)?;
 
   let setup = session::setup_statements(&sql_state.cfg, target)?;
+  // TSV/CSV: read_csv_auto auto-detects comma vs tab (and other delimiters).
+  // JSONL/NDJSON: read_json_auto handles newline-delimited JSON.
+  let read_fn = if is_json_lines {
+    "read_json_auto"
+  } else {
+    "read_csv_auto"
+  };
   let copy_sql = format!(
-    "COPY (SELECT * FROM read_json_auto('{}')) TO '{}' (FORMAT PARQUET)",
+    "COPY (SELECT * FROM {read_fn}('{}')) TO '{}' (FORMAT PARQUET)",
     session::sql_escape(&in_uri),
     session::sql_escape(&out_uri),
   );
@@ -163,7 +173,7 @@ pub async fn convert_handler(
   }))
 }
 
-/// Build the DuckDB-visible URIs for the source JSONL and destination Parquet.
+/// Build the DuckDB-visible URIs for the source file and destination Parquet.
 fn build_uris(
   target: &SqlTarget,
   key: &str,
@@ -338,14 +348,19 @@ mod tests {
   }
 
   #[tokio::test]
-  async fn rejects_non_jsonl_suffix() {
-    let res = convert_handler(
-      State(app_state(true)),
-      Extension(sql_state_local(&tmp_root(), true)),
-      req("data.csv", false),
-    )
-    .await;
-    assert!(matches!(res, Err(AppError::Unsupported(_))), "{res:?}");
+  async fn rejects_unsupported_suffix() {
+    for bad in ["data.xml", "archive.tar.gz", "image.png"] {
+      let res = convert_handler(
+        State(app_state(true)),
+        Extension(sql_state_local(&tmp_root(), true)),
+        req(bad, false),
+      )
+      .await;
+      assert!(
+        matches!(res, Err(AppError::Unsupported(_))),
+        "expected Unsupported for {bad}: {res:?}"
+      );
+    }
   }
 
   #[tokio::test]
@@ -429,6 +444,59 @@ mod tests {
     )
     .await
     .expect("convert should succeed");
+    assert_eq!(res.0.output_key, "test_e2e.parquet");
+    assert_eq!(res.0.rows_written, 2);
+    assert!(
+      parquet_path.exists(),
+      "parquet file should have been written"
+    );
+  }
+
+  #[tokio::test]
+  async fn end_to_end_local_convert_tsv() {
+    let root = tmp_root();
+    let tsv_path = root.join("test_e2e.tsv");
+    let parquet_path = root.join("test_e2e.parquet");
+    // Write a small TSV file.
+    std::fs::write(&tsv_path, b"id\tname\n1\talice\n2\tbob\n").unwrap();
+    let _ = std::fs::remove_file(&parquet_path);
+
+    use crate::config::{Config, LocalConfig, SqlConfig, StorageConfig, StorageType};
+    use crate::storage::factory::create_registry;
+    let cfg = Config {
+      server: Default::default(),
+      storages: vec![StorageConfig {
+        name: "t".into(),
+        r#type: StorageType::Local,
+        active: true,
+        s3: None,
+        local: Some(LocalConfig {
+          root_path: root.clone(),
+          follow_symlinks: true,
+        }),
+      }],
+      auth: Default::default(),
+      thumbnails: Default::default(),
+      sql: SqlConfig::default(),
+    };
+    let reg = create_registry(&cfg).await.unwrap();
+    let state = AppState::new(
+      reg,
+      None,
+      Arc::new("test".into()),
+      true,
+      true,
+      Arc::new("test".into()),
+      true,
+    );
+
+    let res = convert_handler(
+      State(state),
+      Extension(sql_state_local(&root, true)),
+      req("test_e2e.tsv", false),
+    )
+    .await
+    .expect("TSV convert should succeed");
     assert_eq!(res.0.output_key, "test_e2e.parquet");
     assert_eq!(res.0.rows_written, 2);
     assert!(
