@@ -643,11 +643,12 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
         </DialogContent>
       </Dialog>
       <Dialog open={showOverwriteDialog} onOpenChange={setShowOverwriteDialog}>
-        <DialogContent>
+        <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>Overwrite existing file?</DialogTitle>
             <DialogDescription>
-              <code>{outputKey}</code> already exists. Do you want to replace it?
+              <code className="break-all">{outputKey}</code> already exists. Do
+              you want to replace it?
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
