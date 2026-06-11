@@ -786,4 +786,19 @@ mod tests {
     // in review. The handler clamps `skip_pages` to this value.
     assert_eq!(MAX_SKIP_PAGES, 100);
   }
+
+  #[test]
+  fn basename_of_common_cases() {
+    assert_eq!(basename_of("a/b/c.txt"), "c.txt");
+    assert_eq!(basename_of("data.json"), "data.json");
+    // Directory key from list_files: trailing slash stripped, last segment returned.
+    assert_eq!(basename_of("a/subdir/"), "subdir");
+    assert_eq!(basename_of("subdir/"), "subdir");
+    // Storage root / empty prefix — listing the root itself.
+    assert_eq!(basename_of(""), "");
+    // Single-segment file (no directory component).
+    assert_eq!(basename_of("file.txt"), "file.txt");
+    // Nested path, no trailing slash (file deep in the tree).
+    assert_eq!(basename_of("a/b/c/d.parquet"), "d.parquet");
+  }
 }
