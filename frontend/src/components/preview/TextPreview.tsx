@@ -652,7 +652,7 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
         </DialogContent>
       </Dialog>
       <Dialog open={showOverwriteDialog} onOpenChange={setShowOverwriteDialog}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Overwrite existing file?</DialogTitle>
             <DialogDescription>
