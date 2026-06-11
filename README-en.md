@@ -23,7 +23,7 @@ HTTP API (the bundled SPA is built on top of these — `curl` or your own client
 - `GET /api/thumb/{*key}` — on-demand WebP thumbnail (requires `[thumbnails] enabled = true`)
 - `POST /api/query` — DuckDB **read-only** SQL (SELECT / DESCRIBE / EXPLAIN etc.; COPY and mutating statements are rejected; requires `--features duckdb` build + `auth.enabled = true`)
 - `POST /api/convert` — JSONL / NDJSON / TSV / CSV → Parquet conversion (write operation — always requires a token when auth is on)
-- `GET /raw/{storage}/{*path}` — navigable file mount: serves files inline (HTML renders live in the browser); append `?ls` or use a trailing slash for a JSON directory listing; supports copyparty-style self-contained dashboards
+- `GET /raw/{storage}` / `GET /raw/{storage}/` / `GET /raw/{storage}/{*path}` — navigable file mount: serves files inline (HTML renders live in the browser); the root and trailing-slash forms list the storage root as JSON; append `?ls` to any path for a directory listing; supports copyparty-style self-contained dashboards
 - Embedded SPA fallback — anything not under `/api/*` or `/raw/*` falls back to `index.html`, so client-side routing just works
 
 > For prerequisites and full usage of SQL queries and file conversion, see [docs/edit_features_guide.md](docs/edit_features_guide.md).

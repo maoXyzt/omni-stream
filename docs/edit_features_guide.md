@@ -32,7 +32,7 @@ token = "your-long-random-token"   # 也可用环境变量 OMNI_AUTH_TOKEN
 启动时的日志会确认激活状态：
 
 ```
-INFO omni_stream: SQL/convert endpoint active (DuckDB)
+INFO omni_stream: SQL query endpoint enabled (POST /api/query) timeout_secs=300 max_rows=10000
 ```
 
 若三项未全部满足，则打印：
