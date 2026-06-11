@@ -3,29 +3,32 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use axum::Json;
 use axum::extract::{Request, State};
-use axum::http::{StatusCode, header};
+use axum::http::{HeaderMap, StatusCode, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use serde_json::json;
 
 use crate::config::AuthConfig;
 
-/// Resolved auth gate. `enabled = false` means the middleware is a no-op;
-/// when enabled, `token` is the only accepted Bearer credential.
-/// Wrapped in Arc so cloning the layer state is cheap.
+/// Per-route-group bearer-token gate. The same shared `token` is applied with
+/// a different `required` flag to each group: the read group requires it only
+/// when `auth.public_read = false`, the write group requires it whenever the
+/// gate is on. `required = false` makes the middleware a pure pass-through.
+/// Cloned once per request by axum, so the `Arc` keeps that cheap.
 #[derive(Clone)]
-pub struct AuthState {
-  pub enabled: bool,
+pub struct AuthLayer {
+  required: bool,
   token: Arc<String>,
 }
 
-impl AuthState {
-  pub fn from_config(cfg: &AuthConfig) -> anyhow::Result<Self> {
+impl AuthLayer {
+  /// Build the shared token once, then derive the read/write layers from it
+  /// with [`AuthLayer::read`] / [`AuthLayer::write`]. Errors when the gate is
+  /// on but no usable token is configured — `config.validate()` already
+  /// guards this, so reaching the error here means a programming mistake.
+  pub fn token_from_config(cfg: &AuthConfig) -> anyhow::Result<Arc<String>> {
     if !cfg.enabled {
-      return Ok(Self {
-        enabled: false,
-        token: Arc::new(String::new()),
-      });
+      return Ok(Arc::new(String::new()));
     }
     let token = cfg
       .token
@@ -34,27 +37,50 @@ impl AuthState {
       .filter(|s| !s.is_empty())
       .ok_or_else(|| anyhow!("auth.enabled=true but auth.token is missing or empty"))?
       .to_string();
-    Ok(Self {
-      enabled: true,
-      token: Arc::new(token),
-    })
+    Ok(Arc::new(token))
+  }
+
+  /// Gate for read/browse routes: enforced only on a full lockdown
+  /// (`enabled && !public_read`).
+  pub fn read(cfg: &AuthConfig, token: Arc<String>) -> Self {
+    Self {
+      required: cfg.enabled && !cfg.public_read,
+      token,
+    }
+  }
+
+  /// Gate for write/privileged routes: enforced whenever the gate is on.
+  /// Only the `duckdb` build wires up write routes today; without it this is
+  /// dead code rather than a real omission.
+  #[cfg_attr(not(feature = "duckdb"), allow(dead_code))]
+  pub fn write(cfg: &AuthConfig, token: Arc<String>) -> Self {
+    Self {
+      required: cfg.enabled,
+      token,
+    }
   }
 }
 
-pub async fn auth_middleware(State(auth): State<AuthState>, req: Request, next: Next) -> Response {
-  if !auth.enabled {
-    return next.run(req).await;
-  }
-
-  let presented = req
-    .headers()
+/// Whether `headers` carry an `Authorization: Bearer <token>` matching
+/// `token` in constant time. Shared by the route middleware and the
+/// in-handler write check on `/api/query` (a `COPY (...) TO` export needs the
+/// write token even when reads are public).
+pub fn bearer_matches(headers: &HeaderMap, token: &str) -> bool {
+  let presented = headers
     .get(header::AUTHORIZATION)
     .and_then(|v| v.to_str().ok())
     .and_then(|v| v.strip_prefix("Bearer "))
     .map(str::trim)
     .unwrap_or("");
+  !presented.is_empty() && constant_time_eq(presented.as_bytes(), token.as_bytes())
+}
 
-  if !presented.is_empty() && constant_time_eq(presented.as_bytes(), auth.token.as_bytes()) {
+pub async fn auth_middleware(State(auth): State<AuthLayer>, req: Request, next: Next) -> Response {
+  if !auth.required {
+    return next.run(req).await;
+  }
+
+  if bearer_matches(req.headers(), &auth.token) {
     return next.run(req).await;
   }
 
@@ -93,39 +119,63 @@ mod tests {
   use super::*;
 
   #[test]
-  fn from_config_disabled_ignores_token() {
+  fn disabled_makes_both_layers_pass_through() {
     let cfg = AuthConfig {
       enabled: false,
       token: None,
+      public_read: true,
     };
-    let s = AuthState::from_config(&cfg).unwrap();
-    assert!(!s.enabled);
+    let token = AuthLayer::token_from_config(&cfg).unwrap();
+    assert!(!AuthLayer::read(&cfg, token.clone()).required);
+    assert!(!AuthLayer::write(&cfg, token).required);
   }
 
   #[test]
-  fn from_config_enabled_requires_token() {
+  fn enabled_public_read_gates_writes_only() {
     let cfg = AuthConfig {
       enabled: true,
-      token: None,
+      token: Some("secret".into()),
+      public_read: true,
     };
-    assert!(AuthState::from_config(&cfg).is_err());
-
-    let cfg = AuthConfig {
-      enabled: true,
-      token: Some("   ".into()),
-    };
-    assert!(AuthState::from_config(&cfg).is_err());
+    let token = AuthLayer::token_from_config(&cfg).unwrap();
+    // Reads stay open, writes are gated.
+    assert!(!AuthLayer::read(&cfg, token.clone()).required);
+    assert!(AuthLayer::write(&cfg, token).required);
   }
 
   #[test]
-  fn from_config_enabled_trims_token() {
+  fn enabled_private_gates_reads_and_writes() {
+    let cfg = AuthConfig {
+      enabled: true,
+      token: Some("secret".into()),
+      public_read: false,
+    };
+    let token = AuthLayer::token_from_config(&cfg).unwrap();
+    assert!(AuthLayer::read(&cfg, token.clone()).required);
+    assert!(AuthLayer::write(&cfg, token).required);
+  }
+
+  #[test]
+  fn token_from_config_requires_non_empty_when_enabled() {
+    for bad in [None, Some("   ".to_string())] {
+      let cfg = AuthConfig {
+        enabled: true,
+        token: bad,
+        public_read: true,
+      };
+      assert!(AuthLayer::token_from_config(&cfg).is_err());
+    }
+  }
+
+  #[test]
+  fn token_from_config_trims() {
     let cfg = AuthConfig {
       enabled: true,
       token: Some("  secret  ".into()),
+      public_read: true,
     };
-    let s = AuthState::from_config(&cfg).unwrap();
-    assert!(s.enabled);
-    assert_eq!(s.token.as_str(), "secret");
+    let token = AuthLayer::token_from_config(&cfg).unwrap();
+    assert_eq!(token.as_str(), "secret");
   }
 
   #[test]

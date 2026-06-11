@@ -17,6 +17,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Database,
+  KeyRound,
   Loader2,
   LogOut,
   PanelLeft,
@@ -123,6 +124,10 @@ export function FileList() {
 
   const storagesQuery = useStorages()
   const serverInfo = useServerInfo()
+  // Proactive token entry. Reads stay public in the default gated mode, so a
+  // user with no token never hits a read 401 — this lets them enter the token
+  // up front (e.g. before running a write) instead of waiting to be prompted.
+  const [showTokenPrompt, setShowTokenPrompt] = useState(false)
   const activeStorage = useMemo(
     () => storagesQuery.data?.storages.find((s) => s.name === storageName),
     [storagesQuery.data, storageName],
@@ -1030,6 +1035,24 @@ export function FileList() {
                 </Tooltip>
               )}
               <ShareLinkButton />
+              {serverInfo.data?.auth_enabled && !hasToken && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      aria-label="Auth Token"
+                      onClick={() => setShowTokenPrompt(true)}
+                    >
+                      <KeyRound className="size-4" />
+                      Auth Token
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    Enter the bearer token (needed for SQL exports / convert)
+                  </TooltipContent>
+                </Tooltip>
+              )}
               {hasToken && (
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -1051,6 +1074,16 @@ export function FileList() {
               )}
             </div>
           </div>
+
+          {showTokenPrompt && (
+            <TokenPrompt
+              onSubmit={() => {
+                setShowTokenPrompt(false)
+                queryClient.invalidateQueries()
+              }}
+              onCancel={() => setShowTokenPrompt(false)}
+            />
+          )}
 
           {listQuery.isError && (
             <ErrorState

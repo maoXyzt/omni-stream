@@ -8,6 +8,16 @@
 
 use crate::error::AppError;
 
+/// How a validated statement is classified for authorization. A read-only
+/// statement needs only read permission; a `COPY (...) TO` export writes to
+/// storage and so needs write permission (the bearer token) even when reads
+/// are public.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StatementKind {
+  Read,
+  Export,
+}
+
 /// Statements a query may start with. Everything here is read-only except
 /// COPY, which gets an extra shape check (`COPY (<query>) TO ...` exports
 /// only — never `COPY ... FROM` imports).
@@ -61,7 +71,10 @@ const FORBIDDEN_ANYWHERE: &[&str] = &[
   "REVOKE",
 ];
 
-pub fn validate_readonly(sql: &str) -> Result<(), AppError> {
+/// Validate one statement and classify it. The name is historical: a `COPY
+/// (...) TO` export passes validation but is reported as [`StatementKind::Export`]
+/// so the caller can require write permission for it.
+pub fn validate_readonly(sql: &str) -> Result<StatementKind, AppError> {
   let stripped = strip_literals_and_comments(sql);
 
   let mut statements = stripped.split(';').filter(|s| !s.trim().is_empty());
@@ -99,8 +112,9 @@ pub fn validate_readonly(sql: &str) -> Result<(), AppError> {
 
   if leading == "COPY" {
     validate_copy_shape(stmt)?;
+    return Ok(StatementKind::Export);
   }
-  Ok(())
+  Ok(StatementKind::Read)
 }
 
 /// Enforce that a COPY statement has the export shape `COPY ( <query> ) TO …`.
@@ -383,6 +397,21 @@ mod tests {
     rejected("   ");
     rejected("-- just a comment");
     rejected(";");
+  }
+
+  #[test]
+  fn classifies_read_vs_export() {
+    // Read-only statements report Read; valid COPY (...) TO exports report
+    // Export so the handler can require the write token for them.
+    assert_eq!(validate_readonly("SELECT 1").unwrap(), StatementKind::Read);
+    assert_eq!(
+      validate_readonly("WITH t AS (SELECT 1) SELECT * FROM t").unwrap(),
+      StatementKind::Read
+    );
+    assert_eq!(
+      validate_readonly("COPY (SELECT 1) TO 'out.parquet'").unwrap(),
+      StatementKind::Export
+    );
   }
 
   #[test]

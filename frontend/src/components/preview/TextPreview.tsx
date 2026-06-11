@@ -33,6 +33,7 @@ import {
 } from '@/components/ui/tooltip'
 import { ApiError } from '@/api/client'
 import { convertToParquet } from '@/api/convert'
+import { TokenPrompt } from '@/components/TokenPrompt'
 import { useLineNumbers } from '@/hooks/use-line-numbers'
 import { useRowsViewHint } from '@/hooks/use-rows-view-hint'
 import { useServerInfo } from '@/hooks/use-storage'
@@ -109,6 +110,12 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
     rowsFormat === 'jsonl' && Boolean(serverInfo.data?.sql_enabled) && Boolean(storage)
   const [converting, setConverting] = useState(false)
   const [showOverwriteDialog, setShowOverwriteDialog] = useState(false)
+  // Non-null while a convert was rejected with 401 (write needs a token in the
+  // default gated mode). Holds the `overwrite` flag so the retry after the
+  // token is entered preserves the user's intent.
+  const [convertAuthOverwrite, setConvertAuthOverwrite] = useState<
+    boolean | null
+  >(null)
   // Output filename derived from the input key (shown in the overwrite dialog).
   const outputKey = useMemo(() => {
     const dot = fileKey.lastIndexOf('.')
@@ -130,7 +137,9 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
           : ''
         queryClient.invalidateQueries({ queryKey: ['list', storage, dirPrefix] })
       } catch (err) {
-        if (err instanceof ApiError && err.status === 409) {
+        if (err instanceof ApiError && err.status === 401) {
+          setConvertAuthOverwrite(overwrite)
+        } else if (err instanceof ApiError && err.status === 409) {
           setShowOverwriteDialog(true)
         } else {
           toast.error(err instanceof ApiError ? err.message : String(err))
@@ -659,6 +668,17 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {convertAuthOverwrite !== null && (
+        <TokenPrompt
+          onSubmit={() => {
+            // TokenPrompt stored the token; retry the convert with the same
+            // overwrite intent now that the request can authenticate.
+            const overwrite = convertAuthOverwrite
+            setConvertAuthOverwrite(null)
+            void handleConvert(overwrite)
+          }}
+        />
+      )}
     </div>
   )
 }

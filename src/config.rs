@@ -316,14 +316,38 @@ impl Default for SqlConfig {
   }
 }
 
-/// Optional bearer-token gate on `/api/*`. When `enabled = false` (default),
-/// the API is open to anyone who can reach the listening port.
-#[derive(Clone, Default, Deserialize)]
+/// Optional bearer-token gate. When `enabled = false` (default), the API is
+/// open to anyone who can reach the listening port. When `enabled = true`,
+/// `public_read` decides the granularity: by default reads stay public and
+/// only write/privileged endpoints (SQL queries, conversions) require the
+/// token; set `public_read = false` to lock down reads too.
+#[derive(Clone, Deserialize)]
 pub struct AuthConfig {
   #[serde(default)]
   pub enabled: bool,
   #[serde(default)]
   pub token: Option<String>,
+  /// With the gate on, keep read/browse endpoints (list / stat / proxy /
+  /// thumb / raw) public and require the token only for writes. Default
+  /// `true`: enabling auth protects writes without locking down browsing.
+  /// `false` requires the token for every request. No effect when
+  /// `enabled = false`.
+  #[serde(default = "default_public_read")]
+  pub public_read: bool,
+}
+
+fn default_public_read() -> bool {
+  true
+}
+
+impl Default for AuthConfig {
+  fn default() -> Self {
+    Self {
+      enabled: false,
+      token: None,
+      public_read: default_public_read(),
+    }
+  }
 }
 
 // Manual Debug: token is a secret; never let it surface via tracing or panic dumps.
@@ -331,6 +355,7 @@ impl fmt::Debug for AuthConfig {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     f.debug_struct("AuthConfig")
       .field("enabled", &self.enabled)
+      .field("public_read", &self.public_read)
       .field("token", &mask_secret(self.token.as_deref()))
       .finish()
   }
@@ -750,6 +775,41 @@ local = { root_path = "/tmp" }
     let cfg = parse(raw);
     assert!(cfg.auth.enabled);
     assert_eq!(cfg.auth.token.as_deref(), Some("secret-token"));
+    // public_read defaults to true: enabling auth protects writes but leaves
+    // reads public unless the operator opts into a full lockdown.
+    assert!(cfg.auth.public_read);
+  }
+
+  #[test]
+  fn auth_public_read_defaults_true_even_when_disabled() {
+    let raw = r#"
+[[storages]]
+name = "x"
+type = "local"
+active = true
+local = { root_path = "/tmp" }
+"#;
+    let cfg = parse(raw);
+    assert!(cfg.auth.public_read);
+  }
+
+  #[test]
+  fn auth_public_read_false_locks_reads() {
+    let raw = r#"
+[auth]
+enabled = true
+token = "secret-token"
+public_read = false
+
+[[storages]]
+name = "x"
+type = "local"
+active = true
+local = { root_path = "/tmp" }
+"#;
+    let cfg = parse(raw);
+    assert!(cfg.auth.enabled);
+    assert!(!cfg.auth.public_read);
   }
 
   #[test]
@@ -757,6 +817,7 @@ local = { root_path = "/tmp" }
     let auth = AuthConfig {
       enabled: true,
       token: Some("very-secret-bearer-value".into()),
+      public_read: true,
     };
     let dbg = format!("{auth:?}");
     assert!(!dbg.contains("very-secret-bearer-value"), "leaked: {dbg}");

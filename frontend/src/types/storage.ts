@@ -79,10 +79,16 @@ export interface ServerInfo {
   /// the SPA so it's visible across pages without polling a separate
   /// endpoint.
   version: string
-  /// Whether the server's bearer-token gate is on. /api/server itself sits
-  /// behind the gate, so being able to read this implies the stored token
-  /// (if any) was accepted.
+  /// Whether the server's bearer-token gate is on at all. Under a full
+  /// lockdown /api/server sits behind the gate, so reading it implies the
+  /// stored token was accepted; with public_read on it's readable without a
+  /// token and just reports that writes need one.
   auth_enabled: boolean
+  /// When the gate is on, whether reads are public and only writes need the
+  /// token (true) or every request needs it (false). Drives whether the SPA
+  /// prompts for a token lazily (on a write 401) or up front. Always true when
+  /// auth_enabled is false.
+  public_read: boolean
   /// Whether POST /api/query is live (server built with the duckdb feature,
   /// [sql] enabled, auth on). Gates the SQL editor entry points.
   sql_enabled: boolean

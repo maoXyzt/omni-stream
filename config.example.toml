@@ -15,10 +15,19 @@
 # port = 28080        # default
 
 [auth]
-# Optional bearer-token gate on /api/*. Disabled = API open to anyone who can
-# reach the port. Enable for internal-tool deployments.
+# Optional bearer-token gate. Disabled = API open to anyone who can reach the
+# port. Enable for internal-tool deployments.
 # enabled = false                               # default
 # token = "replace-with-a-long-random-string"  # required when enabled = true (or OMNI_AUTH_TOKEN)
+#
+# Read/write granularity (only applies when enabled = true):
+#   public_read = true   # DEFAULT — browsing / preview / download stay open;
+#                        # only writes (SQL queries, JSONL->Parquet convert,
+#                        # plus any future upload / delete) require the token.
+#   public_read = false  # full lockdown — every request requires the token.
+# NOTE: enabling auth no longer locks down reads by default. For the old
+# "everything needs the token" behavior, set public_read = false.
+# public_read = true                            # default
 
 # ---- Storage backends -----------------------------------------------------
 # At least one [[storages]] entry is REQUIRED. active = true is served by

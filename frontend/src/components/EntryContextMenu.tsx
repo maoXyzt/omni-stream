@@ -4,10 +4,11 @@ import {
   Download,
   ExternalLink,
   FolderTree,
+  Globe,
   Link as LinkIcon,
 } from 'lucide-react'
 
-import { proxyUrl } from '@/api/storage'
+import { proxyUrl, rawUrl } from '@/api/storage'
 import {
   ContextMenu,
   ContextMenuContent,
@@ -35,6 +36,12 @@ export function EntryContextMenu({
   children,
 }: EntryContextMenuProps) {
   const name = basenameOf(entry.key)
+  // HTML files can be opened as a *live* page via the /raw mount (storage in
+  // the path) so their relative fetches / `?ls` listings reach sibling files —
+  // distinct from "Open in new tab", which streams raw bytes via /api/proxy.
+  // Guard on storageName: rawUrl puts the storage in the path, so an empty
+  // name would yield a broken `/raw//…` URL.
+  const isHtml = !entry.is_dir && !!storageName && /\.x?html?$/i.test(name)
   // Cached forever (see useStorages) — cheap to read from any tile / row.
   const { data: storagesData } = useStorages()
   const storage = storagesData?.storages.find((s) => s.name === storageName)
@@ -64,6 +71,12 @@ export function EntryContextMenu({
       '_blank',
       'noreferrer',
     )
+  }
+
+  function openRendered() {
+    // /raw keeps storage in the path so the page's relative data fetches and
+    // `?ls` directory listings resolve to the right backend keys.
+    window.open(rawUrl(entry.key, storageName), '_blank', 'noopener')
   }
 
   function downloadFile() {
@@ -100,6 +113,12 @@ export function EntryContextMenu({
         </ContextMenuItem>
         {!entry.is_dir && (
           <>
+            {isHtml && (
+              <ContextMenuItem onClick={openRendered}>
+                <Globe />
+                Render in new tab
+              </ContextMenuItem>
+            )}
             <ContextMenuItem onClick={openInNewTab}>
               <ExternalLink />
               Open in new tab
