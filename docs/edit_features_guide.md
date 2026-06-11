@@ -16,6 +16,8 @@ OmniStream 在 0.8.0 之后陆续引入了对存储数据的**写入/转换**能
 
 只要三项同时成立，前端就会自动显示写入相关的 UI 控件；否则控件不可见，API 也会拒绝调用（403）。
 
+**关于鉴权粒度**：开启 `auth.enabled = true` 后，**默认行为是读写分离**（`public_read = true`）——浏览/预览保持开放，**`/api/convert` 写操作始终需要 token**。`/api/query` SQL 查询同属读组（`public_read = true` 时默认无需 token），但端点本身需要 `auth.enabled = true` 才激活。如果工具栏的 **Auth Token** 按钮变为可用（有鉴权但尚未输入 token），可点击提前输入 token，便于后续写操作。
+
 ### 最简配置示例
 
 ```toml
@@ -43,41 +45,69 @@ WARN omni_stream: SQL query endpoint disabled: requires auth.enabled = true and 
 
 ## 2. 当前可用的写入功能
 
-### 2.1 JSONL / NDJSON → Parquet 一键转换
+### 2.1 JSONL / NDJSON / TSV / CSV → Parquet 一键转换
 
-在文件预览页浏览 `.jsonl` 或 `.ndjson` 文件时，工具栏会出现 **"Convert to Parquet"** 按钮。点击后，服务端通过内嵌的 DuckDB 将该文件就地转换为 Parquet，写入**同一目录、同一文件名（后缀改为 `.parquet`）**。
+在文件预览页浏览 `.jsonl`、`.ndjson`、`.tsv` 或 `.csv` 文件时，工具栏会出现对应的转换按钮。点击后，服务端通过内嵌的 DuckDB 将该文件就地转换为 Parquet，写入**同一目录、同一文件名（后缀改为 `.parquet`）**。
+
+**支持的格式：**
+
+- `.jsonl` / `.ndjson`：DuckDB `read_json_auto`（按行读 JSON）
+- `.tsv` / `.csv`：DuckDB `read_csv_auto`（自动识别 tab / 逗号分隔符及列类型）
+
+**按钮文案**随文件格式变化：**"JSONL → Parquet"** / **"TSV → Parquet"** / **"CSV → Parquet"**，转换进行中显示 "Converting…"。
 
 **示例：**
 
 ```
-logs/2024/events.jsonl  →  logs/2024/events.parquet
-data/stream.ndjson      →  data/stream.parquet
+logs/2024/events.jsonl     →  logs/2024/events.parquet
+data/stream.ndjson         →  data/stream.parquet
+export/report.tsv          →  export/report.parquet
+data/users.csv             →  data/users.parquet
 ```
 
 **操作流程：**
 
-1. 在文件浏览器中打开一个 `.jsonl` / `.ndjson` 文件进入预览。
-2. 工具栏右侧出现 Convert to Parquet 按钮（仅当 `sql_enabled` 条件满足时可见）。
+1. 在文件浏览器中打开一个 `.jsonl` / `.ndjson` / `.tsv` / `.csv` 文件进入预览。
+2. 工具栏右侧出现对应格式的转换按钮（仅当 `sql_enabled` 条件满足时可见）。
 3. 点击按钮：
    - 按钮变为转圈 Spinner，期间禁止重复点击。
    - 转换成功后，页面右下角弹出成功提示，包含输出路径、写入行数和耗时，同时文件列表自动刷新，`.parquet` 文件立即出现。
-   - 若目标 `.parquet` **已存在**，弹出覆盖确认框；确认后以 `overwrite=true` 重试。
+   - 若目标 `.parquet` **已存在**，弹出覆盖确认框（显示源路径 → 输出路径的箭头预览）；确认后以 `overwrite=true` 重试。
    - 若存储只读或 S3 凭据无写权限，弹出可读的错误提示（如 "The storage may be read-only or your credentials lack write access"）。
 
 **支持的存储类型：** 本地文件系统（Local）和 S3 兼容存储（含 MinIO / Ceph 等）均支持。
 
-**超时设置：** 转换共享 `[sql].query_timeout_secs`（默认 60 秒）。超大文件可能超时，届时可在配置中适当调大：
+**超时设置：** 转换共享 `[sql].query_timeout_secs`（默认 **300 秒 / 5 分钟**）。超大文件可能超时，届时可在配置中适当调大：
 
 ```toml
 [sql]
-query_timeout_secs = 120   # 按需调整
+query_timeout_secs = 600   # 按需调整（单位：秒）
 ```
 
 ---
 
-## 3. SQL 查询编辑器（附）
+## 3. SQL 查询（内嵌在 Parquet 预览，只读）
 
-写入功能依赖的 `sql_enabled` 三重门同样激活 **SQL 查询编辑器**（`POST /api/query`）。导航栏出现 "SQL" 入口后，可对任意存储执行 DuckDB SQL，包括 `SELECT`、`COPY (...) TO '...' (FORMAT PARQUET)` 等操作。SQL 编辑器的详细用法不在本文范围内，但配置上无需额外设置——开启写入功能即同时开启了 SQL 编辑器。
+三重门满足后，打开任意 **Parquet 文件**，预览界面会出现 **SQL** 标签页（`?tab=sql`）。这是由 `POST /api/query` 驱动的内嵌 DuckDB SQL 编辑器。
+
+**用法：**
+
+1. 在文件浏览器中打开一个 `.parquet` 文件。
+2. 点击预览顶部的 **SQL** tab（仅当 `sql_enabled` 满足时可见）。
+3. 编辑器自动预填 `SELECT * FROM '<当前文件>' LIMIT 100`（路径按 storage 类型构造为 DuckDB URI）。
+4. 修改 SQL 后按 **Cmd/Ctrl+Enter**（或点击 Run 按钮）执行。
+5. 草稿按 `storage:fileKey` 存入 sessionStorage，切 tab 不会丢失。
+
+**可查询当前 storage 内的任意文件**（不限于当前打开的文件），例如：
+
+```sql
+SELECT * FROM 's3://my-bucket/data/other.parquet' LIMIT 10
+```
+
+**严格只读**：`/api/query` 仅接受 SELECT / WITH / DESCRIBE / SHOW / SUMMARIZE / EXPLAIN / PIVOT
+等只读语句。`COPY` 及所有写语句均被拒绝（返回 400）。**如需写入 Parquet，请使用 §2.1 的转换按钮**（`/api/convert`），而非 SQL 编辑器。
+
+配置上无需额外设置——开启三重门即同时激活 SQL 查询与格式转换两项功能。
 
 ---
 

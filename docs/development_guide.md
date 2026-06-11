@@ -53,13 +53,13 @@ cargo build --release --bin omni-stream
 cargo test --bin omni-stream
 ```
 
-## 4. 可选 Feature：DuckDB（SQL 编辑器 & JSONL 转换）
+## 4. 可选 Feature：DuckDB（SQL 查询 & JSONL/TSV/CSV 转换）
 
 `duckdb` feature 默认**关闭**（`Cargo.toml` 中 `default = []`），原因是 bundled DuckDB 需要编译 C++ 代码，`cargo install omni-stream` 和本地 `start.sh` 均不启用。
 
 **启用后新增的能力：**
-- `POST /api/query` — SQL 编辑器后端（DuckDB 执行任意读查询）
-- `POST /api/convert` — JSONL/NDJSON → Parquet 一键转换
+- `POST /api/query` — Parquet 预览内嵌 SQL tab 的后端（DuckDB 执行只读查询；COPY 及写语句被拒）
+- `POST /api/convert` — JSONL / NDJSON / TSV / CSV → Parquet 一键转换
 
 这两个端点还需满足**三重门**才会激活：`duckdb feature 编入` + `auth.enabled = true` + `[sql] enabled = true`（详见 [edit_features_guide.md](edit_features_guide.md)）。
 
@@ -131,21 +131,26 @@ pnpm build          # tsc -b（类型检查）+ vite build
 
 ## 7. HTTP API 速览
 
-| 方法 | 路径 | 说明 | 需鉴权 |
+| 方法 | 路径 | 说明 | 鉴权组 |
 |------|------|------|--------|
-| GET | `/api/server` | 服务器信息（版本、auth_enabled、sql_enabled） | ✅ |
-| GET | `/api/storages` | 存储列表及描述符 | ✅ |
-| GET | `/api/list` | 文件目录列表（分页）| ✅ |
-| GET | `/api/stat/{*key}` | 文件元信息 | ✅ |
-| GET | `/api/proxy/{*key}` | 文件内容代理（支持 Range）| ✅ |
-| GET | `/api/thumb/{*key}` | 缩略图（WebP，需 thumbnails.enabled）| ✅ |
-| POST | `/api/query` | DuckDB SQL 查询 ⚠️ | ✅ |
-| POST | `/api/convert` | JSONL → Parquet 转换 ⚠️ | ✅ |
-| GET | `/*` | SPA fallback（返回嵌入的前端）| ❌ |
+| GET | `/api/server` | 服务器信息（版本、auth_enabled、sql_enabled、public_read） | 读组 |
+| GET | `/api/storages` | 存储列表及描述符 | 读组 |
+| GET | `/api/list` | 文件目录列表（分页）| 读组 |
+| GET | `/api/stat/{*key}` | 文件元信息 | 读组 |
+| GET | `/api/proxy/{*key}` | 文件内容代理（支持 Range）| 读组 |
+| GET | `/api/thumb/{*key}` | 缩略图（WebP，需 `thumbnails.enabled`）| 读组 |
+| GET | `/raw/{storage}` / `/raw/{storage}/{*path}` | 可导航文件挂载（inline 服务；`?ls` 列目录）| 读组 |
+| POST | `/api/query` | DuckDB 只读 SQL ⚠️（COPY/写语句被拒）| 读组 |
+| POST | `/api/convert` | JSONL/NDJSON/TSV/CSV → Parquet 转换 ⚠️ | 写组 |
+| GET | `/*` | SPA fallback（返回嵌入的前端）| 始终开放 |
 
 ⚠️ 仅在 `duckdb` feature 编入且满足三重门时注册。
 
-**鉴权**：`/api/*` 路由受 Bearer token `route_layer` 保护；SPA fallback 始终开放（无 token 时前端会引导输入）。
+**鉴权分组**：
+- **读组**：默认 `public_read = true` 时无需 token；`public_read = false`（全锁定）时每个请求都要 token。
+- **写组**：`auth.enabled = true` 时始终要 token，不受 `public_read` 影响。
+- `/api/query` 虽是只读端点，但需要 `auth.enabled = true` 才会激活，激活后归入读组（默认模式下无需 token）。
+- SPA fallback（`/`、`/assets/*`）始终开放，无 token 时前端会引导输入。
 
 ## 8. 项目结构
 
@@ -163,8 +168,8 @@ omni-stream/
 │   ├── config.rs             # Config / StorageConfig / S3Config / LocalConfig
 │   │                         #   ThumbConfig / SqlConfig / AuthConfig
 │   ├── error.rs              # AppError + IntoResponse；duckdb 下额外变体
-│   ├── handlers.rs           # HTTP 处理器（list/stat/proxy/thumb/server/storages）
-│   │                         #   + AppState（持有 registry、thumb_state、sql_enabled）
+│   ├── handlers.rs           # HTTP 处理器（list/stat/proxy/thumb/server/storages/raw）
+│   │                         #   + AppState（持有 registry、thumb_state、sql_enabled、public_read）
 │   ├── auth.rs               # Bearer-token 鉴权中间件
 │   ├── thumbs.rs             # 缩略图生成与 LRU 缓存（含 cache CLI 子命令底层逻辑）
 │   ├── cli_style.rs          # CLI 输出着色封装（nu_ansi_term）
@@ -175,7 +180,7 @@ omni-stream/
 │   │   └── local.rs          # LocalFsBackend（safe_join 路径越权防护、Range 解析）
 │   └── sql/                  # ← 整块受 #[cfg(feature = "duckdb")] 门控
 │       ├── mod.rs            # SqlState / SqlTarget / query_handler（POST /api/query）
-│       ├── convert.rs        # convert_handler（POST /api/convert）JSONL → Parquet
+│       ├── convert.rs        # convert_handler（POST /api/convert）JSONL/NDJSON/TSV/CSV → Parquet
 │       ├── exec.rs           # 查询执行与结果序列化（run_query）
 │       ├── session.rs        # DuckDB 会话沙箱（allowed_directories / S3 凭证注入）
 │       └── validate.rs       # SQL 词法白名单校验（粗筛，非安全边界）
@@ -188,11 +193,11 @@ omni-stream/
 │       │                     # 路由：/ → StorageRedirect
 │       │                     #       /s/:storage/* → FileList（主文件浏览）
 │       │                     #       /r/:storage/* → RowsPage（卡片视图）
-│       │                     #       /q/:storage   → SqlPage（SQL 编辑器，sql_enabled）
+│       │                     # （SQL 已内嵌在 Parquet 预览的 SQL tab，无独立路由）
 │       ├── api/
 │       │   ├── client.ts     # axios 实例、Bearer token 注入、ApiError 封装
 │       │   ├── storage.ts    # listStorages / getServerInfo / listFiles / statFile
-│       │   │                 #   proxyUrl / thumbUrl
+│       │   │                 #   proxyUrl / thumbUrl / rawUrl
 │       │   ├── query.ts      # executeQuery → POST /api/query（DuckDB SQL）
 │       │   └── convert.ts    # convertToParquet → POST /api/convert
 │       ├── hooks/            # 自定义 hooks（useStorages / useServerInfo / useListFiles
@@ -200,8 +205,8 @@ omni-stream/
 │       │                     #   useRowsViewConfig 等，多数持久化到 localStorage）
 │       ├── components/
 │       │   ├── FileList.tsx  # 主文件浏览页（列表/网格视图，URL ?view= 同步）
+│       │   │                 #   含 Auth Token 按钮（auth 开启但尚无 token 时显示）
 │       │   ├── RowsPage.tsx  # Rows view 卡片页
-│       │   ├── SqlPage.tsx   # DuckDB SQL 编辑器页
 │       │   ├── PreviewModal.tsx  # 全屏预览弹窗，按类型分发预览器
 │       │   ├── PathBreadcrumb.tsx
 │       │   ├── PathNavigator.tsx # Go-to-path 跳转（含 s3:// URI 解析）
@@ -209,10 +214,13 @@ omni-stream/
 │       │   ├── FileGrid.tsx / FileTile.tsx
 │       │   ├── StorageSwitcher.tsx / TokenPrompt.tsx
 │       │   ├── EntryContextMenu.tsx / ViewToggle.tsx 等
+│       │   │                 #   EntryContextMenu 含 "Render in new tab"（.html 用 /raw 打开）
 │       │   ├── preview/      # 各类文件预览器
 │       │   │   ├── registry.ts   # 预览类型注册表（扩展名 → 预览器）
-│       │   │   ├── TextPreview.tsx    # 文本（Range 分块加载，语法高亮）
-│       │   │   ├── ParquetPreview.tsx # Parquet（hyparquet 纯 JS）
+│       │   │   ├── TextPreview.tsx    # 文本（Range 分块加载，语法高亮）；CSV/TSV 转换按钮
+│       │   │   ├── ParquetPreview.tsx # Parquet（hyparquet 纯 JS）；含 SQL tab 切换
+│       │   │   ├── ParquetSqlTab.tsx  # 内嵌 DuckDB SQL 编辑器 tab（sql_enabled 时出现）
+│       │   │   ├── DataTable.tsx      # 查询/预览共享结果表格
 │       │   │   ├── CsvPreview.tsx
 │       │   │   ├── ImagePreview.tsx / VideoPreview.tsx / AudioPreview.tsx / PdfPreview.tsx
 │       │   │   ├── GenericPreview.tsx # 兜底（下载 + 元信息）
