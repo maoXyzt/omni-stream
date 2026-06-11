@@ -37,6 +37,9 @@ pub enum AppError {
   #[error("unsupported operation: {0}")]
   Unsupported(String),
 
+  #[error("conflict: {0}")]
+  Conflict(String),
+
   /// DuckDB-side failure (parser / binder / runtime). The engine message is
   /// passed through verbatim so the SQL editor shows actionable diagnostics.
   #[cfg(feature = "duckdb")]
@@ -60,6 +63,7 @@ impl AppError {
       AppError::Forbidden(_) => StatusCode::FORBIDDEN,
       AppError::InvalidRange(_) => StatusCode::RANGE_NOT_SATISFIABLE,
       AppError::InvalidPath(_) | AppError::Unsupported(_) => StatusCode::BAD_REQUEST,
+      AppError::Conflict(_) => StatusCode::CONFLICT,
       AppError::Io(e) if e.kind() == io::ErrorKind::NotFound => StatusCode::NOT_FOUND,
       AppError::StorageInvalid(_) => StatusCode::SERVICE_UNAVAILABLE,
       AppError::Io(_) | AppError::Backend(_) => StatusCode::INTERNAL_SERVER_ERROR,

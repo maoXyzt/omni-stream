@@ -148,6 +148,10 @@ async fn main() -> anyhow::Result<()> {
         "/api/query",
         axum::routing::post(sql::query_handler).layer(query_timeout),
       )
+      .route(
+        "/api/convert",
+        axum::routing::post(sql::convert::convert_handler).layer(query_timeout),
+      )
       // Router-level so the MethodRouter keeps a single layer (two chained
       // `.layer` calls defeat axum's error-type inference). Other routes
       // simply ignore the extension.
