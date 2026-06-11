@@ -146,7 +146,7 @@ async fn main() -> anyhow::Result<()> {
     app
       .route(
         "/api/query",
-        axum::routing::post(sql::query_handler).layer(query_timeout.clone()),
+        axum::routing::post(sql::query_handler).layer(query_timeout),
       )
       .route(
         "/api/convert",
