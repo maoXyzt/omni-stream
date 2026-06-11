@@ -4,6 +4,7 @@ import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
   AlertCircle,
+  ArrowDown,
   Check,
   Copy,
   Download,
@@ -104,10 +105,18 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
 
   const queryClient = useQueryClient()
   const serverInfo = useServerInfo()
-  // Show the button only for JSONL/NDJSON when the DuckDB-backed convert
-  // endpoint is live (sql_enabled implies auth + [sql] + duckdb build).
+  // Show the button for JSONL/NDJSON and TSV/CSV when the DuckDB-backed
+  // convert endpoint is live (sql_enabled implies auth + [sql] + duckdb build).
   const canConvert =
-    rowsFormat === 'jsonl' && Boolean(serverInfo.data?.sql_enabled) && Boolean(storage)
+    (rowsFormat === 'jsonl' || rowsFormat === 'csv') &&
+    Boolean(serverInfo.data?.sql_enabled) &&
+    Boolean(storage)
+  // Button label reflects the source format so the conversion direction is clear.
+  const convertLabel = useMemo(() => {
+    if (rowsFormat === 'jsonl') return 'JSONL → Parquet'
+    const ext = fileKey.split('.').pop()?.toUpperCase() ?? 'CSV'
+    return `${ext} → Parquet`
+  }, [rowsFormat, fileKey])
   const [converting, setConverting] = useState(false)
   const [showOverwriteDialog, setShowOverwriteDialog] = useState(false)
   // Non-null while a convert was rejected with 401 (write needs a token in the
@@ -432,7 +441,7 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
                   {converting
                     ? <Loader2 className="size-3.5 animate-spin" />
                     : <FileDown className="size-3.5" />}
-                  Convert to Parquet
+                  {converting ? 'Converting…' : convertLabel}
                 </Button>
               </TooltipTrigger>
               <TooltipContent>
@@ -647,10 +656,20 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
           <DialogHeader>
             <DialogTitle>Overwrite existing file?</DialogTitle>
             <DialogDescription>
-              <code className="break-all">{outputKey}</code> already exists. Do
-              you want to replace it?
+              The output file already exists. Converting will replace it.
             </DialogDescription>
           </DialogHeader>
+          <div className="space-y-1 rounded-md border bg-muted/50 px-3 py-2.5 text-sm">
+            <p className="text-xs font-medium text-muted-foreground">Source</p>
+            <p className="break-all font-mono text-foreground">{fileKey}</p>
+            <div className="flex items-center gap-1 pt-0.5 text-muted-foreground">
+              <ArrowDown className="size-3.5" />
+              <p className="text-xs font-medium text-destructive">
+                Output (will be overwritten)
+              </p>
+            </div>
+            <p className="break-all font-mono text-foreground">{outputKey}</p>
+          </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowOverwriteDialog(false)}>
               <X className="size-3.5" />
