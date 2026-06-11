@@ -18,7 +18,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use axum::extract::State;
-use axum::http::HeaderMap;
 use axum::{Extension, Json};
 use serde::{Deserialize, Serialize};
 
@@ -123,7 +122,6 @@ pub struct QueryResponse {
 pub async fn query_handler(
   State(state): State<AppState>,
   Extension(sql_state): Extension<Arc<SqlState>>,
-  headers: HeaderMap,
   Json(req): Json<QueryRequest>,
 ) -> Result<Json<QueryResponse>, AppError> {
   // Runtime gate on top of the compile-time feature: the endpoint only
@@ -135,15 +133,7 @@ pub async fn query_handler(
   }
 
   let target = sql_state.resolve(req.storage.as_deref())?;
-  let kind = validate::validate_readonly(&req.sql)?;
-  // Read-only queries run with read permission (the route middleware already
-  // gated them under a full lockdown). A `COPY (...) TO` export writes to
-  // storage, so it needs the write token even when reads are public.
-  if kind == validate::StatementKind::Export && !state.bearer_ok(&headers) {
-    return Err(AppError::Unauthorized(
-      "COPY (...) TO exports require the auth token".into(),
-    ));
-  }
+  validate::validate_readonly(&req.sql)?;
   let setup = session::setup_statements(&sql_state.cfg, target)?;
 
   let timeout_secs = sql_state.cfg.query_timeout_secs;
@@ -218,10 +208,8 @@ mod tests {
   use crate::config::{LocalConfig, SqlConfig, StorageConfig};
   use crate::storage::factory::BackendRegistry;
 
-  const TEST_TOKEN: &str = "test-token";
-
   /// AppState with no real backends — query_handler only consults
-  /// `sql_enabled()` / `bearer_ok()`, never the registry.
+  /// `sql_enabled()`, never the registry.
   fn app_state(sql_enabled: bool) -> AppState {
     let reg = BackendRegistry {
       backends: HashMap::new(),
@@ -235,19 +223,8 @@ mod tests {
       std::sync::Arc::new("test".into()),
       true,
       true,
-      std::sync::Arc::new(TEST_TOKEN.into()),
       sql_enabled,
     )
-  }
-
-  /// HeaderMap carrying a valid bearer token, for exercising the export gate.
-  fn auth_headers() -> HeaderMap {
-    let mut h = HeaderMap::new();
-    h.insert(
-      axum::http::header::AUTHORIZATION,
-      format!("Bearer {TEST_TOKEN}").parse().unwrap(),
-    );
-    h
   }
 
   fn sql_state(root: &std::path::Path, follow_symlinks: bool) -> Arc<SqlState> {
@@ -288,7 +265,6 @@ mod tests {
     let res = query_handler(
       State(app_state(false)),
       Extension(sql_state(&tmp_root(), true)),
-      HeaderMap::new(),
       req("SELECT 1"),
     )
     .await;
@@ -300,8 +276,20 @@ mod tests {
     let res = query_handler(
       State(app_state(true)),
       Extension(sql_state(&tmp_root(), true)),
-      HeaderMap::new(),
       req("DROP TABLE t"),
+    )
+    .await;
+    assert!(matches!(res, Err(AppError::QueryRejected(_))), "{res:?}");
+  }
+
+  #[tokio::test]
+  async fn rejects_copy_statement() {
+    // COPY is now explicitly forbidden — validate_readonly rejects it before
+    // DuckDB execution.
+    let res = query_handler(
+      State(app_state(true)),
+      Extension(sql_state(&tmp_root(), true)),
+      req("COPY (SELECT 1) TO 'out.parquet' (FORMAT PARQUET)"),
     )
     .await;
     assert!(matches!(res, Err(AppError::QueryRejected(_))), "{res:?}");
@@ -312,7 +300,6 @@ mod tests {
     let res = query_handler(
       State(app_state(true)),
       Extension(sql_state(&tmp_root(), true)),
-      HeaderMap::new(),
       Json(QueryRequest {
         sql: "SELECT 1".into(),
         storage: Some("nope".into()),
@@ -327,7 +314,6 @@ mod tests {
     let res = query_handler(
       State(app_state(true)),
       Extension(sql_state(&tmp_root(), false)),
-      HeaderMap::new(),
       req("SELECT 1"),
     )
     .await;
@@ -344,7 +330,6 @@ mod tests {
     let res = query_handler(
       State(app_state(true)),
       Extension(sql_state(&tmp_root(), true)),
-      HeaderMap::new(),
       req("SELECT 1 AS a, 'x' AS b"),
     )
     .await
@@ -359,45 +344,16 @@ mod tests {
   }
 
   #[tokio::test]
-  async fn copy_export_without_token_is_unauthorized() {
-    // A COPY (...) TO export is a write: with reads public it still needs the
-    // token. The gate fires before execution, so the bogus target is moot.
+  async fn select_query_runs_without_auth_token() {
+    // Read-only queries require only read permission (the route middleware
+    // handles that); no bearer token is needed for SELECT.
     let res = query_handler(
       State(app_state(true)),
       Extension(sql_state(&tmp_root(), true)),
-      HeaderMap::new(),
-      req("COPY (SELECT 1) TO 'out.parquet' (FORMAT PARQUET)"),
-    )
-    .await;
-    assert!(matches!(res, Err(AppError::Unauthorized(_))), "{res:?}");
-  }
-
-  #[tokio::test]
-  async fn read_only_query_needs_no_token() {
-    // A plain SELECT carries no Authorization header and still runs — read-only
-    // queries require only read permission.
-    let res = query_handler(
-      State(app_state(true)),
-      Extension(sql_state(&tmp_root(), true)),
-      HeaderMap::new(),
       req("SELECT 1 AS a"),
     )
     .await
-    .expect("read-only query should run without a token");
+    .expect("read-only query should succeed");
     assert_eq!(res.0.row_count, 1);
-  }
-
-  #[tokio::test]
-  async fn copy_export_with_token_passes_auth_gate() {
-    // A valid token clears the export gate; downstream execution may succeed
-    // or fail on the target path, but never with Unauthorized.
-    let res = query_handler(
-      State(app_state(true)),
-      Extension(sql_state(&tmp_root(), true)),
-      auth_headers(),
-      req("COPY (SELECT 1) TO 'out.parquet' (FORMAT PARQUET)"),
-    )
-    .await;
-    assert!(!matches!(res, Err(AppError::Unauthorized(_))), "{res:?}");
   }
 }

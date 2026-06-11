@@ -77,8 +77,9 @@ root_path = "/var/lib/omni-stream"  # required; absolute or ~-prefixed, no ".." 
 # sweep_interval_secs = 3600                  # default; floored to 60s at runtime
 
 # ---- SQL query endpoint (DuckDB; needs a `--features duckdb` build) --------
-# POST /api/query runs read-mostly SQL (plus `COPY (...) TO` exports) against
-# the selected storage via an embedded DuckDB. The endpoint only activates
+# POST /api/query runs read-only SQL (SELECT / DESCRIBE / EXPLAIN / etc.)
+# against the selected storage via an embedded DuckDB. COPY and all mutating
+# statements are rejected. The endpoint only activates
 # when the binary was built with the `duckdb` cargo feature AND auth.enabled =
 # true above — it never runs on an open API. PyPI wheels ship with the
 # feature; `cargo install omni-stream` does not.

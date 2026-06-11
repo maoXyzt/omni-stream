@@ -124,7 +124,6 @@ async fn main() -> anyhow::Result<()> {
     hostname,
     cfg.auth.enabled,
     cfg.auth.public_read,
-    auth_token.clone(),
     sql_enabled,
   );
 
@@ -171,10 +170,10 @@ async fn main() -> anyhow::Result<()> {
     .route("/raw/{storage}/", get(raw_root_handler))
     .route("/raw/{storage}/{*path}", get(raw_handler));
 
-  // `/api/query` is a *read* surface: a read-only DuckDB query needs only read
-  // permission, and `query_handler` upgrades a `COPY (...) TO` export to a
-  // write-token check itself. So it joins the read group BEFORE the read_auth
-  // route_layer below (routes added after a route_layer aren't covered by it).
+  // `/api/query` is a read-only surface: SELECT / DESCRIBE / EXPLAIN / etc.
+  // COPY and all mutating statements are rejected at the validation layer.
+  // Joins the read group BEFORE the read_auth route_layer below (routes added
+  // after a route_layer aren't covered by it).
   #[cfg(feature = "duckdb")]
   let app = app.route(
     "/api/query",

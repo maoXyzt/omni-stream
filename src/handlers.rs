@@ -34,12 +34,6 @@ pub struct AppState {
   /// The SPA uses (auth_enabled, public_read) to decide when to prompt for a
   /// token: never under `public_read` for browsing, only when a write 401s.
   public_read: bool,
-  /// The shared bearer token (empty when the gate is off). Read routes are
-  /// gated by middleware; this lets the SQL handler additionally gate a
-  /// `COPY (...) TO` export (a write) when reads are public. Unused outside
-  /// the duckdb build, where there are no write-classified handlers yet.
-  #[cfg_attr(not(feature = "duckdb"), allow(dead_code))]
-  auth_token: Arc<String>,
   /// True only when all three hold: built with `--features duckdb`,
   /// `[sql].enabled`, and `auth.enabled`. Always false in non-duckdb builds.
   sql_enabled: bool,
@@ -52,7 +46,6 @@ impl AppState {
     hostname: Arc<String>,
     auth_enabled: bool,
     public_read: bool,
-    auth_token: Arc<String>,
     sql_enabled: bool,
   ) -> Self {
     Self {
@@ -64,7 +57,6 @@ impl AppState {
       hostname,
       auth_enabled,
       public_read,
-      auth_token,
       sql_enabled,
     }
   }
@@ -72,15 +64,6 @@ impl AppState {
   #[cfg(feature = "duckdb")]
   pub fn sql_enabled(&self) -> bool {
     self.sql_enabled
-  }
-
-  /// Whether the request carries the configured bearer token. Used by the SQL
-  /// handler to gate `COPY (...) TO` exports (a write) even when reads are
-  /// public — reaching that handler at all implies `auth.enabled`, so a
-  /// mismatch here means "write token required".
-  #[cfg(feature = "duckdb")]
-  pub fn bearer_ok(&self, headers: &HeaderMap) -> bool {
-    crate::auth::bearer_matches(headers, &self.auth_token)
   }
 
   pub(crate) fn resolve(&self, name: Option<&str>) -> Result<Arc<dyn StorageBackend>, AppError> {

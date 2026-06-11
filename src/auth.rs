@@ -62,9 +62,7 @@ impl AuthLayer {
 }
 
 /// Whether `headers` carry an `Authorization: Bearer <token>` matching
-/// `token` in constant time. Shared by the route middleware and the
-/// in-handler write check on `/api/query` (a `COPY (...) TO` export needs the
-/// write token even when reads are public).
+/// `token` in constant time. Used by the route middleware.
 pub fn bearer_matches(headers: &HeaderMap, token: &str) -> bool {
   let presented = headers
     .get(header::AUTHORIZATION)

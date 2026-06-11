@@ -16,7 +16,6 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
-  Database,
   KeyRound,
   Loader2,
   LogOut,
@@ -1010,30 +1009,6 @@ export function FileList() {
               {viewMode === 'grid' && (
                 <GridFitToggle fit={gridFit} onChange={setGridFit} />
               )}
-              {/* Server-driven visibility: sql_enabled is only true when the
-                  backend was built with the duckdb feature AND auth is on —
-                  and reading /api/server at all proves the stored token
-                  works, so no extra token check is needed here. */}
-              {serverInfo.data?.sql_enabled && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      aria-label="SQL query"
-                      onClick={() =>
-                        navigate(`/q/${encodeURIComponent(storageName)}`)
-                      }
-                    >
-                      <Database className="size-4" />
-                      SQL
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    Query this storage with SQL (DuckDB)
-                  </TooltipContent>
-                </Tooltip>
-              )}
               <ShareLinkButton />
               {serverInfo.data?.auth_enabled && !hasToken && (
                 <Tooltip>
@@ -1049,7 +1024,7 @@ export function FileList() {
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent>
-                    Enter the bearer token (needed for SQL exports / convert)
+                    Enter the bearer token (needed for write operations, e.g. convert)
                   </TooltipContent>
                 </Tooltip>
               )}
