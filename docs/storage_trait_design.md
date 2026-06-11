@@ -276,6 +276,13 @@ pub enum AppError {
     Backend(String),             // 500
     StorageInvalid(String),      // 503  ← lenient 启动产物
     Unsupported(String),         // 400
+
+    // 以下变体仅在 `--features duckdb` 构建下存在（#[cfg(feature = "duckdb")]）
+    // 由 /api/query 和 /api/convert 路径产生，存储层不产生这些变体：
+    Query(String),               // 400 — DuckDB 执行报错（解析/绑定/运行时）
+    QueryRejected(String),       // 400 — 被只读校验拒绝（COPY/写语句等）
+    Conflict(String),            // 409 — convert 目标已存在且未带 overwrite=true
+    QueryTimeout(u64),           // 408 — SQL 查询超时（超过 query_timeout_secs）
 }
 ```
 
