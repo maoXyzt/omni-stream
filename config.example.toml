@@ -90,5 +90,5 @@ root_path = "/var/lib/omni-stream"  # required; absolute or ~-prefixed, no ".." 
 # enabled = true            # default; kill-switch independent of the build feature
 # memory_limit = "512MB"    # default; DuckDB memory_limit per query connection
 # threads = 2               # default; DuckDB threads per query connection
-# query_timeout_secs = 60   # default; query is interrupted past this, HTTP 408
+# query_timeout_secs = 300  # default (5 min); query is interrupted past this, HTTP 408
 # max_rows = 10000          # default; result rows beyond this are dropped (truncated = true)

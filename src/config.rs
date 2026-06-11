@@ -310,7 +310,7 @@ impl Default for SqlConfig {
       enabled: true,
       memory_limit: "512MB".to_string(),
       threads: 2,
-      query_timeout_secs: 60,
+      query_timeout_secs: 300,
       max_rows: 10_000,
     }
   }
@@ -705,7 +705,7 @@ local = { root_path = "/tmp" }
     assert!(cfg.sql.enabled);
     assert_eq!(cfg.sql.memory_limit, "512MB");
     assert_eq!(cfg.sql.threads, 2);
-    assert_eq!(cfg.sql.query_timeout_secs, 60);
+    assert_eq!(cfg.sql.query_timeout_secs, 300);
     assert_eq!(cfg.sql.max_rows, 10_000);
   }
 
