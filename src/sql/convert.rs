@@ -173,7 +173,7 @@ pub async fn convert_handler(
   }))
 }
 
-/// Build the DuckDB-visible URIs for the source JSONL and destination Parquet.
+/// Build the DuckDB-visible URIs for the source file and destination Parquet.
 fn build_uris(
   target: &SqlTarget,
   key: &str,
