@@ -117,7 +117,9 @@ pub async fn convert_handler(
   let start = Instant::now();
 
   // Mirrors the spawn_blocking + watchdog pattern in query_handler.
-  let output_key_for_err = output_key.clone();
+  // The blocking closure returns the raw DuckDB error text (DuckDbRaw) so
+  // the outer async context can classify it with `diag::diagnose` while
+  // still having access to `target` and `out_uri`.
   let (tx, rx) = tokio::sync::oneshot::channel();
   let join = tokio::task::spawn_blocking(move || {
     let conn = match duckdb::Connection::open_in_memory() {
@@ -126,20 +128,21 @@ pub async fn convert_handler(
     };
     let _ = tx.send(conn.interrupt_handle());
     if let Err(e) = conn.execute_batch(&setup) {
+      // SECURITY: setup SQL contains `CREATE SECRET … KEY_ID … SECRET …`.
+      // DuckDB may echo offending SQL fragments in error messages, so the raw
+      // error is deliberately dropped here — never propagate it to logs or the
+      // client.  A generic message is sufficient for operators to investigate.
+      drop(e);
       return (
-        Err(AppError::Backend(format!("sql session setup: {e}"))),
+        Err(AppError::Backend("sql session setup failed".into())),
         Some(conn),
       );
     }
     match conn.execute(&copy_sql, []) {
       Ok(n) => (Ok(n as u64), Some(conn)),
-      Err(e) => (
-        Err(AppError::Backend(format!(
-          "Failed to write '{output_key_for_err}'. The storage may be read-only \
-           or your credentials lack write access. (DuckDB: {e})"
-        ))),
-        Some(conn),
-      ),
+      // Return the raw DuckDB error; classification happens in the outer
+      // async scope where `target` and `out_uri` are available.
+      Err(e) => (Err(AppError::DuckDbRaw(format!("{e}"))), Some(conn)),
     }
   });
   let watchdog = tokio::spawn(async move {
@@ -159,12 +162,69 @@ pub async fn convert_handler(
 
   let rows_written = match result {
     Ok(n) => n,
-    // An interrupted query near the wall-clock limit → surface as timeout.
-    Err(AppError::Backend(_)) if elapsed >= Duration::from_secs(timeout_secs) => {
+    // An interrupted task near the wall-clock limit → surface as timeout.
+    Err(AppError::DuckDbRaw(_)) if elapsed >= Duration::from_secs(timeout_secs) => {
+      tracing::warn!(
+        storage = req.storage.as_deref().unwrap_or("<default>"),
+        out_uri = %out_uri,
+        elapsed_ms = elapsed.as_millis() as u64,
+        "convert timed out",
+      );
       return Err(AppError::QueryTimeout(timeout_secs));
+    }
+    Err(AppError::DuckDbRaw(raw)) => {
+      let target_kind = if matches!(target, SqlTarget::S3(_)) {
+        "s3"
+      } else {
+        "local"
+      };
+      let diag = super::diag::diagnose(target, Some(&out_uri), &raw).unwrap_or_else(|| {
+        // Fallback for errors that don't match a known pattern.
+        let hint = if matches!(target, SqlTarget::S3(_)) {
+          format!(
+            "Could not write '{}'. Review the S3 endpoint, credentials, and bucket \
+             permissions. The DuckDB error is shown below.",
+            out_uri,
+          )
+        } else {
+          format!(
+            "Could not write '{}'. Check that the storage root is writable by \
+             the server process. The DuckDB error is shown below.",
+            out_uri,
+          )
+        };
+        super::diag::Diagnosis {
+          summary: "The conversion failed.".into(),
+          hint,
+        }
+      });
+      // SECURITY: log target kind and out_uri only — never log `setup` (which
+      // contains CREATE SECRET … KEY_ID … SECRET …) or any credential field.
+      tracing::error!(
+        storage = req.storage.as_deref().unwrap_or("<default>"),
+        target = target_kind,
+        out_uri = %out_uri,
+        summary = %diag.summary,
+        duckdb_error = %raw,
+        "convert failed",
+      );
+      return Err(AppError::ConvertFailed {
+        summary: diag.summary,
+        hint: diag.hint,
+        raw,
+      });
     }
     Err(e) => return Err(e),
   };
+
+  // SECURITY: same logging constraint as above — out_uri only, no credentials.
+  tracing::info!(
+    storage = req.storage.as_deref().unwrap_or("<default>"),
+    out_uri = %out_uri,
+    rows_written,
+    elapsed_ms = elapsed.as_millis() as u64,
+    "convert succeeded",
+  );
 
   Ok(Json(ConvertResponse {
     output_key,

@@ -8,6 +8,7 @@
 //! extension is cached on disk.
 
 pub mod convert;
+pub mod diag;
 pub mod exec;
 pub mod session;
 pub mod validate;
@@ -187,6 +188,36 @@ pub async fn query_handler(
     // clock says we fired the interrupt, report it as a timeout instead.
     Err(AppError::Query(_)) if elapsed >= Duration::from_secs(timeout_secs) => {
       return Err(AppError::QueryTimeout(timeout_secs));
+    }
+    Err(AppError::Query(raw)) => {
+      // Try to classify the error as a recognisable infrastructure problem
+      // (S3 fallback, permission, extension load, …).  For pure SQL syntax /
+      // binder errors `diagnose` returns None and we surface the verbatim
+      // DuckDB message unchanged — it's actionable on its own.
+      if let Some(diag) = diag::diagnose(target, None, &raw) {
+        let target_kind = if matches!(target, SqlTarget::S3(_)) {
+          "s3"
+        } else {
+          "local"
+        };
+        // Truncate SQL in the log to avoid dumping large user queries.
+        let sql_preview: String = req.sql.chars().take(200).collect();
+        // SECURITY: log target kind and sql preview only — never log `setup`
+        // (contains CREATE SECRET … KEY_ID … SECRET …) or any credential.
+        tracing::warn!(
+          storage = req.storage.as_deref().unwrap_or("<default>"),
+          target = target_kind,
+          sql = %sql_preview,
+          duckdb_error = %raw,
+          "query failed (infrastructure error)",
+        );
+        return Err(AppError::QueryDiagnosed {
+          message: raw,
+          hint: diag.hint,
+        });
+      }
+      // Not an infrastructure error — return verbatim for the SQL editor.
+      return Err(AppError::Query(raw));
     }
     Err(e) => return Err(e),
   };

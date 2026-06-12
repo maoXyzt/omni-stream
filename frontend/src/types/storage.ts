@@ -36,6 +36,10 @@ export interface FileMeta {
 export interface ApiErrorBody {
   error?: string
   message?: string
+  /** Actionable troubleshooting hint (present for ConvertFailed / QueryDiagnosed). */
+  hint?: string
+  /** Verbatim DuckDB error text (present for ConvertFailed only). */
+  raw?: string
 }
 
 export interface StorageDescriptor {

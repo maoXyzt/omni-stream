@@ -58,6 +58,33 @@ pub enum AppError {
   #[cfg(feature = "duckdb")]
   #[error("query timed out after {0}s")]
   QueryTimeout(u64),
+
+  /// Internal sentinel: raw DuckDB error from a sandboxed blocking task,
+  /// before classification.  Never reaches the client directly — handlers
+  /// convert it into `ConvertFailed` or `QueryDiagnosed`.
+  #[cfg(feature = "duckdb")]
+  #[error("duckdb: {0}")]
+  DuckDbRaw(String),
+
+  /// JSONL/CSV→Parquet conversion failed with a classified diagnosis.
+  /// `summary` replaces the old misleading "read-only" prefix; `hint`
+  /// gives actionable troubleshooting guidance; `raw` preserves the
+  /// verbatim DuckDB error for power users / support.  HTTP 500.
+  #[cfg(feature = "duckdb")]
+  #[error("{summary}")]
+  ConvertFailed {
+    summary: String,
+    hint: String,
+    raw: String,
+  },
+
+  /// SQL query hit a recognisable infrastructure problem (S3 fallback,
+  /// permission, extension load, …).  `message` is the verbatim DuckDB
+  /// text (still useful for SQL errors); `hint` gives a troubleshooting
+  /// pointer.  HTTP 400, same as `Query`.
+  #[cfg(feature = "duckdb")]
+  #[error("{message}")]
+  QueryDiagnosed { message: String, hint: String },
 }
 
 impl AppError {
@@ -76,6 +103,12 @@ impl AppError {
       AppError::Conflict(_) => StatusCode::CONFLICT,
       #[cfg(feature = "duckdb")]
       AppError::QueryTimeout(_) => StatusCode::REQUEST_TIMEOUT,
+      #[cfg(feature = "duckdb")]
+      AppError::DuckDbRaw(_) => StatusCode::INTERNAL_SERVER_ERROR,
+      #[cfg(feature = "duckdb")]
+      AppError::ConvertFailed { .. } => StatusCode::INTERNAL_SERVER_ERROR,
+      #[cfg(feature = "duckdb")]
+      AppError::QueryDiagnosed { .. } => StatusCode::BAD_REQUEST,
     }
   }
 }
@@ -83,8 +116,42 @@ impl AppError {
 impl IntoResponse for AppError {
   fn into_response(self) -> Response {
     let status = self.status();
+
+    // Structured variants: emit extra fields so the SPA can render a rich
+    // error dialog.  All other errors keep the plain {error, message} shape
+    // so existing consumers are unaffected.
+    #[cfg(feature = "duckdb")]
+    if let AppError::ConvertFailed {
+      ref summary,
+      ref hint,
+      ref raw,
+    } = self
+    {
+      let body = Json(json!({
+          "error":   status.canonical_reason().unwrap_or("error"),
+          "message": summary,
+          "hint":    hint,
+          "raw":     raw,
+      }));
+      return (status, body).into_response();
+    }
+
+    #[cfg(feature = "duckdb")]
+    if let AppError::QueryDiagnosed {
+      ref message,
+      ref hint,
+    } = self
+    {
+      let body = Json(json!({
+          "error":   status.canonical_reason().unwrap_or("error"),
+          "message": message,
+          "hint":    hint,
+      }));
+      return (status, body).into_response();
+    }
+
     let body = Json(json!({
-        "error": status.canonical_reason().unwrap_or("error"),
+        "error":   status.canonical_reason().unwrap_or("error"),
         "message": self.to_string(),
     }));
     (status, body).into_response()
