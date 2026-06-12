@@ -34,6 +34,7 @@ import {
 } from '@/components/ui/tooltip'
 import { ApiError } from '@/api/client'
 import { convertToParquet } from '@/api/convert'
+import { extractErrorDetail, type ErrorDetail } from '@/lib/api-error'
 import { TokenPrompt } from '@/components/TokenPrompt'
 import { useLineNumbers } from '@/hooks/use-line-numbers'
 import { useRowsViewHint } from '@/hooks/use-rows-view-hint'
@@ -119,6 +120,9 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
   }, [rowsFormat, fileKey])
   const [converting, setConverting] = useState(false)
   const [showOverwriteDialog, setShowOverwriteDialog] = useState(false)
+  // Non-null while a "Conversion failed" dialog is open.
+  const [convertError, setConvertError] = useState<ErrorDetail | null>(null)
+  const [convertErrRawCopied, setConvertErrRawCopied] = useState(false)
   // Non-null while a convert was rejected with 401 (write needs a token in the
   // default gated mode). Holds the `overwrite` flag so the retry after the
   // token is entered preserves the user's intent.
@@ -150,8 +154,12 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
           setConvertAuthOverwrite(overwrite)
         } else if (err instanceof ApiError && err.status === 409) {
           setShowOverwriteDialog(true)
+        } else if (err instanceof ApiError) {
+          // Show a rich dialog with the server's classified summary, hint,
+          // and the raw DuckDB error so the user can diagnose the failure.
+          setConvertError(extractErrorDetail(err))
         } else {
-          toast.error(err instanceof ApiError ? err.message : String(err))
+          toast.error(String(err))
         }
       } finally {
         setConverting(false)
@@ -688,6 +696,77 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {/* Conversion failed dialog — shows classified error summary, hint, and
+          the raw DuckDB message so users can diagnose and fix the problem. */}
+      <Dialog
+        open={convertError !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setConvertError(null)
+            setConvertErrRawCopied(false)
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Conversion failed</DialogTitle>
+            {convertError && (
+              <DialogDescription>{convertError.message}</DialogDescription>
+            )}
+          </DialogHeader>
+
+          {convertError?.hint && (
+            <Alert>
+              <AlertCircle className="size-4" />
+              <AlertTitle>How to fix</AlertTitle>
+              <AlertDescription>{convertError.hint}</AlertDescription>
+            </Alert>
+          )}
+
+          {convertError?.raw && (
+            <div className="space-y-1">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-medium text-muted-foreground">
+                  DuckDB error
+                </p>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-6"
+                  onClick={() => {
+                    void navigator.clipboard.writeText(convertError.raw ?? '')
+                    setConvertErrRawCopied(true)
+                    setTimeout(() => setConvertErrRawCopied(false), 1500)
+                  }}
+                  aria-label="Copy DuckDB error"
+                >
+                  {convertErrRawCopied ? (
+                    <Check className="size-3.5" />
+                  ) : (
+                    <Copy className="size-3.5" />
+                  )}
+                </Button>
+              </div>
+              <pre className="max-h-40 overflow-auto rounded-md border bg-muted/50 px-3 py-2 text-xs whitespace-pre-wrap break-words">
+                {convertError.raw}
+              </pre>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setConvertError(null)
+                setConvertErrRawCopied(false)
+              }}
+            >
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {convertAuthOverwrite !== null && (
         <TokenPrompt
           onSubmit={() => {

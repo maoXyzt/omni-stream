@@ -13,6 +13,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import {
   AlertCircle,
+  Check,
+  Copy,
   CornerDownLeft,
   Loader2,
   TriangleAlert,
@@ -22,6 +24,7 @@ import { ApiError } from '@/api/client'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { executeQuery } from '@/api/query'
+import { extractErrorDetail } from '@/lib/api-error'
 import { useStorages } from '@/hooks/use-storage'
 import { highlightSql } from '@/lib/highlight-sql'
 import type { StorageDescriptor } from '@/types/storage'
@@ -120,6 +123,7 @@ export function ParquetSqlTab({ fileKey, storage }: Props) {
   })
 
   const result = mutation.data
+  const [queryErrMsgCopied, setQueryErrMsgCopied] = useState(false)
 
   // 401 from the query endpoint — happens in full-lockdown mode (public_read =
   // false) when the user hasn't supplied a bearer token yet.
@@ -199,15 +203,48 @@ export function ParquetSqlTab({ fileKey, storage }: Props) {
         </Alert>
       )}
 
-      {mutation.error && !authError && (
-        <Alert variant="destructive" className="shrink-0 overflow-auto">
-          <AlertCircle className="size-4" />
-          <AlertTitle>Query failed</AlertTitle>
-          <AlertDescription className="font-mono text-xs whitespace-pre-wrap">
-            {mutation.error.message}
-          </AlertDescription>
-        </Alert>
-      )}
+      {mutation.error && !authError && (() => {
+        const detail = extractErrorDetail(mutation.error)
+        return (
+          <Alert variant="destructive" className="shrink-0 overflow-auto">
+            <AlertCircle className="size-4" />
+            <AlertTitle>Query failed</AlertTitle>
+            <AlertDescription className="space-y-2">
+              {/* Verbatim DuckDB / server message — always shown */}
+              <div className="flex items-start gap-2">
+                <pre className="min-w-0 flex-1 font-mono text-xs whitespace-pre-wrap break-words">
+                  {detail.message}
+                </pre>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="mt-0.5 size-6 shrink-0 text-destructive-foreground/70 hover:text-destructive-foreground"
+                  onClick={() => {
+                    void navigator.clipboard.writeText(detail.message)
+                    setQueryErrMsgCopied(true)
+                    setTimeout(() => setQueryErrMsgCopied(false), 1500)
+                  }}
+                  aria-label="Copy error message"
+                >
+                  {queryErrMsgCopied ? (
+                    <Check className="size-3.5" />
+                  ) : (
+                    <Copy className="size-3.5" />
+                  )}
+                </Button>
+              </div>
+              {/* Actionable hint — only present when the server classified
+                  the error as an infrastructure problem (S3, permissions, …) */}
+              {detail.hint && (
+                <p className="text-xs opacity-80">
+                  <span className="font-medium">How to fix: </span>
+                  {detail.hint}
+                </p>
+              )}
+            </AlertDescription>
+          </Alert>
+        )
+      })()}
 
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {mutation.isPending ? (
