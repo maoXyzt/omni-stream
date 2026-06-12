@@ -194,7 +194,7 @@ pub async fn query_handler(
       // (S3 fallback, permission, extension load, …).  For pure SQL syntax /
       // binder errors `diagnose` returns None and we surface the verbatim
       // DuckDB message unchanged — it's actionable on its own.
-      if let Some(diag) = diag::diagnose(target, "<query>", &raw) {
+      if let Some(diag) = diag::diagnose(target, None, &raw) {
         let target_kind = if matches!(target, SqlTarget::S3(_)) {
           "s3"
         } else {

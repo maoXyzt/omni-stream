@@ -118,17 +118,24 @@ export function ParquetSqlTab({ fileKey, storage }: Props) {
     if (!loadDraft(draftKey)) setSql(defaultSql)
   }, [draftKey, defaultSql])
 
+  const [queryErrMsgCopied, setQueryErrMsgCopied] = useState(false)
+
   const mutation = useMutation({
     mutationFn: (statement: string) => executeQuery(statement, storageName),
+    onMutate: () => setQueryErrMsgCopied(false),
   })
 
   const result = mutation.data
-  const [queryErrMsgCopied, setQueryErrMsgCopied] = useState(false)
 
   // 401 from the query endpoint — happens in full-lockdown mode (public_read =
   // false) when the user hasn't supplied a bearer token yet.
   const authError =
     mutation.error instanceof ApiError && mutation.error.status === 401
+
+  const queryErrorDetail = useMemo(
+    () => (mutation.error && !authError ? extractErrorDetail(mutation.error) : null),
+    [mutation.error, authError],
+  )
 
   const runnable = sql.trim().length > 0 && !mutation.isPending
 
@@ -203,48 +210,45 @@ export function ParquetSqlTab({ fileKey, storage }: Props) {
         </Alert>
       )}
 
-      {mutation.error && !authError && (() => {
-        const detail = extractErrorDetail(mutation.error)
-        return (
-          <Alert variant="destructive" className="shrink-0 overflow-auto">
-            <AlertCircle className="size-4" />
-            <AlertTitle>Query failed</AlertTitle>
-            <AlertDescription className="space-y-2">
-              {/* Verbatim DuckDB / server message — always shown */}
-              <div className="flex items-start gap-2">
-                <pre className="min-w-0 flex-1 font-mono text-xs whitespace-pre-wrap break-words">
-                  {detail.message}
-                </pre>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="mt-0.5 size-6 shrink-0 text-destructive-foreground/70 hover:text-destructive-foreground"
-                  onClick={() => {
-                    void navigator.clipboard.writeText(detail.message)
-                    setQueryErrMsgCopied(true)
-                    setTimeout(() => setQueryErrMsgCopied(false), 1500)
-                  }}
-                  aria-label="Copy error message"
-                >
-                  {queryErrMsgCopied ? (
-                    <Check className="size-3.5" />
-                  ) : (
-                    <Copy className="size-3.5" />
-                  )}
-                </Button>
-              </div>
-              {/* Actionable hint — only present when the server classified
-                  the error as an infrastructure problem (S3, permissions, …) */}
-              {detail.hint && (
-                <p className="text-xs opacity-80">
-                  <span className="font-medium">How to fix: </span>
-                  {detail.hint}
-                </p>
-              )}
-            </AlertDescription>
-          </Alert>
-        )
-      })()}
+      {queryErrorDetail && (
+        <Alert variant="destructive" className="shrink-0 overflow-auto">
+          <AlertCircle className="size-4" />
+          <AlertTitle>Query failed</AlertTitle>
+          <AlertDescription className="space-y-2">
+            {/* Verbatim DuckDB / server message — always shown */}
+            <div className="flex items-start gap-2">
+              <pre className="min-w-0 flex-1 font-mono text-xs whitespace-pre-wrap break-words">
+                {queryErrorDetail.message}
+              </pre>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="mt-0.5 size-6 shrink-0 text-destructive-foreground/70 hover:text-destructive-foreground"
+                onClick={() => {
+                  void navigator.clipboard.writeText(queryErrorDetail.message)
+                  setQueryErrMsgCopied(true)
+                  setTimeout(() => setQueryErrMsgCopied(false), 1500)
+                }}
+                aria-label="Copy error message"
+              >
+                {queryErrMsgCopied ? (
+                  <Check className="size-3.5" />
+                ) : (
+                  <Copy className="size-3.5" />
+                )}
+              </Button>
+            </div>
+            {/* Actionable hint — only present when the server classified
+                the error as an infrastructure problem (S3, permissions, …) */}
+            {queryErrorDetail.hint && (
+              <p className="text-xs opacity-80">
+                <span className="font-medium">How to fix: </span>
+                {queryErrorDetail.hint}
+              </p>
+            )}
+          </AlertDescription>
+        </Alert>
+      )}
 
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {mutation.isPending ? (

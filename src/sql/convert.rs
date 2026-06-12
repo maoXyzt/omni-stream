@@ -173,7 +173,7 @@ pub async fn convert_handler(
       } else {
         "local"
       };
-      let diag = super::diag::diagnose(target, &out_uri, &raw).unwrap_or_else(|| {
+      let diag = super::diag::diagnose(target, Some(&out_uri), &raw).unwrap_or_else(|| {
         // Fallback for errors that don't match a known pattern.
         let hint = if matches!(target, SqlTarget::S3(_)) {
           format!(
