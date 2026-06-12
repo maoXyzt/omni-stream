@@ -128,10 +128,15 @@ pub async fn convert_handler(
     };
     let _ = tx.send(conn.interrupt_handle());
     if let Err(e) = conn.execute_batch(&setup) {
-      // Session setup failures (extension install, secret creation, …) are
-      // also infrastructure errors worth diagnosing, so surface them as
-      // DuckDbRaw for the same classification path.
-      return (Err(AppError::DuckDbRaw(format!("{e}"))), Some(conn));
+      // SECURITY: setup SQL contains `CREATE SECRET … KEY_ID … SECRET …`.
+      // DuckDB may echo offending SQL fragments in error messages, so the raw
+      // error is deliberately dropped here — never propagate it to logs or the
+      // client.  A generic message is sufficient for operators to investigate.
+      drop(e);
+      return (
+        Err(AppError::Backend("sql session setup failed".into())),
+        Some(conn),
+      );
     }
     match conn.execute(&copy_sql, []) {
       Ok(n) => (Ok(n as u64), Some(conn)),

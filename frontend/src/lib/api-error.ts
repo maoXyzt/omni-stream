@@ -29,5 +29,6 @@ export function extractErrorDetail(err: unknown): ErrorDetail {
       raw: body.raw,
     }
   }
+  if (err instanceof Error) return { message: err.message }
   return { message: String(err) }
 }

@@ -9,7 +9,7 @@
 /// Only shown when `serverInfo.sql_enabled` is true (i.e. the server was
 /// built with `--features duckdb` and `auth.enabled = true`).
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import {
   AlertCircle,
@@ -119,6 +119,13 @@ export function ParquetSqlTab({ fileKey, storage }: Props) {
   }, [draftKey, defaultSql])
 
   const [queryErrMsgCopied, setQueryErrMsgCopied] = useState(false)
+  const copyErrTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(
+    () => () => {
+      if (copyErrTimeoutRef.current) clearTimeout(copyErrTimeoutRef.current)
+    },
+    [],
+  )
 
   const mutation = useMutation({
     mutationFn: (statement: string) => executeQuery(statement, storageName),
@@ -224,10 +231,15 @@ export function ParquetSqlTab({ fileKey, storage }: Props) {
                 variant="ghost"
                 size="icon"
                 className="mt-0.5 size-6 shrink-0 text-destructive-foreground/70 hover:text-destructive-foreground"
-                onClick={() => {
-                  void navigator.clipboard.writeText(queryErrorDetail.message)
-                  setQueryErrMsgCopied(true)
-                  setTimeout(() => setQueryErrMsgCopied(false), 1500)
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(queryErrorDetail.message)
+                    setQueryErrMsgCopied(true)
+                    if (copyErrTimeoutRef.current) clearTimeout(copyErrTimeoutRef.current)
+                    copyErrTimeoutRef.current = setTimeout(() => setQueryErrMsgCopied(false), 1500)
+                  } catch {
+                    // Clipboard API unavailable in insecure contexts; silent no-op.
+                  }
                 }}
                 aria-label="Copy error message"
               >

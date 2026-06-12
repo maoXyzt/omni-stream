@@ -123,6 +123,13 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
   // Non-null while a "Conversion failed" dialog is open.
   const [convertError, setConvertError] = useState<ErrorDetail | null>(null)
   const [convertErrRawCopied, setConvertErrRawCopied] = useState(false)
+  const convertErrCopyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(
+    () => () => {
+      if (convertErrCopyTimeoutRef.current) clearTimeout(convertErrCopyTimeoutRef.current)
+    },
+    [],
+  )
   // Non-null while a convert was rejected with 401 (write needs a token in the
   // default gated mode). Holds the `overwrite` flag so the retry after the
   // token is entered preserves the user's intent.
@@ -733,10 +740,15 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
                   variant="ghost"
                   size="icon"
                   className="size-6"
-                  onClick={() => {
-                    void navigator.clipboard.writeText(convertError.raw ?? '')
-                    setConvertErrRawCopied(true)
-                    setTimeout(() => setConvertErrRawCopied(false), 1500)
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(convertError.raw ?? '')
+                      setConvertErrRawCopied(true)
+                      if (convertErrCopyTimeoutRef.current) clearTimeout(convertErrCopyTimeoutRef.current)
+                      convertErrCopyTimeoutRef.current = setTimeout(() => setConvertErrRawCopied(false), 1500)
+                    } catch {
+                      // Clipboard API unavailable in insecure contexts; silent no-op.
+                    }
                   }}
                   aria-label="Copy DuckDB error"
                 >

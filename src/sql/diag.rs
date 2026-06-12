@@ -62,11 +62,14 @@ pub fn diagnose(target: &SqlTarget, context: Option<&str>, raw: &str) -> Option<
   }
 
   // Rule 2 — S3 authentication / permission failures.
+  // Use specific HTTP-error strings to avoid matching on SQL that merely
+  // contains the number 403 (e.g. `WHERE id = 403`).
   if lower.contains("signaturedoesnotmatch")
     || lower.contains("invalidaccesskeyid")
     || lower.contains("access denied")
     || lower.contains("accessdenied")
-    || lower.contains(" 403")
+    || lower.contains("http error: 403")
+    || lower.contains("http 403")
     || lower.contains("403 forbidden")
   {
     let (summary, hint) = if is_s3 {
@@ -92,7 +95,9 @@ pub fn diagnose(target: &SqlTarget, context: Option<&str>, raw: &str) -> Option<
   }
 
   // Rule 3 — Generic permission error (not matched by Rule 2).
-  if lower.contains("permission") {
+  // Match "permission denied" / "permission error" only — bare "permission"
+  // would fire on SQL errors referencing a column or table called "permission".
+  if lower.contains("permission denied") || lower.contains("permission error") {
     let (summary, hint) = if is_s3 {
       (
         "The S3 destination rejected the write (permission error).".to_string(),
@@ -117,11 +122,16 @@ pub fn diagnose(target: &SqlTarget, context: Option<&str>, raw: &str) -> Option<
   // Rule 4 — httpfs / aws extension could not be loaded (S3 targets only).
   // Local targets do not load httpfs, so this pattern would be a false positive
   // for them; skip with is_s3 guard.
+  // "unable to connect" alone is too broad — it also fires on S3 endpoint
+  // connection failures.  Require a co-occurring extension/httpfs token.
   let is_extension_failure = is_s3
     && (lower.contains("failed to download extension")
       || (lower.contains("install") && lower.contains("httpfs"))
       || (lower.contains("extension") && (lower.contains("network") || lower.contains("http")))
-      || lower.contains("unable to connect"));
+      || (lower.contains("unable to connect")
+        && (lower.contains("extension")
+          || lower.contains("httpfs")
+          || lower.contains("duckdb.org"))));
   if is_extension_failure {
     return Some(Diagnosis {
       summary: "Could not load the httpfs/aws extension needed for S3 access.".into(),
@@ -154,13 +164,12 @@ pub fn diagnose(target: &SqlTarget, context: Option<&str>, raw: &str) -> Option<
   }
 
   // Rule 6 — JSON / CSV parse error (most relevant for the convert endpoint).
-  // Deliberately excludes the broad "Conversion Error" DuckDB class, which
-  // covers many unrelated type-coercion failures (e.g. invalid casts in SQL).
-  let is_parse_error = lower.contains("read_json")
-    || lower.contains("read_csv")
-    || lower.contains("invalid input syntax")
-    || lower.contains("malformed")
-    || lower.contains("json parse error");
+  // Only fire when a file-reader function name appears in the error — bare
+  // "invalid input syntax" and "malformed" are too broad: they also match
+  // SQL type-cast errors ("invalid input syntax for type INTEGER") and S3
+  // configuration errors ("Malformed URL", "malformed endpoint").
+  let is_parse_error =
+    lower.contains("read_json") || lower.contains("read_csv") || lower.contains("json parse error");
   if is_parse_error {
     return Some(Diagnosis {
       summary: "The source file could not be parsed as JSON/CSV.".into(),
@@ -447,6 +456,53 @@ mod tests {
       diag.hint.contains("the path"),
       "hint should say 'the path' when context is None: {}",
       diag.hint
+    );
+  }
+
+  // ── Rule narrowing: no false positives ───────────────────────────────────
+
+  #[test]
+  fn rule2_bare_number_403_in_sql_not_matched() {
+    // A SQL binder/syntax error that happens to contain "403" should not be
+    // classified as an S3 auth failure.
+    let raw = "Binder Error: WHERE id = 403 — column 'id' not found";
+    assert!(
+      diagnose(&s3_target(), None, raw).is_none(),
+      "bare '403' in SQL error should not trigger Rule 2"
+    );
+  }
+
+  #[test]
+  fn rule3_column_named_permission_not_matched() {
+    // A SQL binder error referencing a column called "permission" must not be
+    // misclassified as a filesystem permission error.
+    let raw = "Binder Error: Referenced column 'permission' not found in FROM clause";
+    assert!(
+      diagnose(&s3_target(), None, raw).is_none(),
+      "binder error with 'permission' column name should return None"
+    );
+  }
+
+  #[test]
+  fn rule4_s3_generic_endpoint_connection_failure_not_matched() {
+    // "unable to connect" without extension/httpfs context should not fire
+    // Rule 4 — it is a plain S3 endpoint connectivity issue, not an extension
+    // loading failure.
+    let raw = "IOException: unable to connect to 'https://my-s3.internal:9000'";
+    assert!(
+      diagnose(&s3_target(), Some("s3://bucket/file"), raw).is_none(),
+      "generic S3 connection failure should not be classified as extension load failure"
+    );
+  }
+
+  #[test]
+  fn rule6_malformed_s3_url_not_matched() {
+    // "malformed" without a file-reader token (read_json/read_csv) must not
+    // be classified as a JSON/CSV parse error — it is an S3 config issue.
+    let raw = "Invalid Input Error: Malformed S3 URL: missing bucket name";
+    assert!(
+      diagnose(&s3_target(), None, raw).is_none(),
+      "Malformed S3 URL without reader context should return None"
     );
   }
 }
