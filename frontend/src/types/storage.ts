@@ -53,6 +53,10 @@ export interface StorageDescriptor {
   /// Init-failure message when `valid` is false. Displayed inside the
   /// storage card so operators know what to fix.
   error?: string | null
+  /// Whether this storage accepts writes (create / edit / delete / rename).
+  /// Mirrors the per-storage `writeable` server config. The SPA gates its
+  /// write affordances on this; always false for invalid storages.
+  writeable: boolean
   /// S3-specific identifying details. Set when `type === 's3'`. Excludes
   /// credentials — only fields a human would use to disambiguate one
   /// storage from another.
@@ -96,6 +100,10 @@ export interface ServerInfo {
   /// Whether POST /api/query is live (server built with the duckdb feature,
   /// [sql] enabled, auth on). Gates the SQL editor entry points.
   sql_enabled: boolean
+  /// Whether at least one storage is writeable. The SPA hides every write
+  /// affordance (edit / new file / delete / rename) when false. Writes still
+  /// require the bearer token at request time regardless of this flag.
+  write_enabled: boolean
 }
 
 export interface ConvertResult {

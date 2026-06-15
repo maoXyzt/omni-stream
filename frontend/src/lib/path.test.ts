@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { basenameOf, extensionOf } from '@/lib/path'
+import { basenameOf, encodeKey, extensionOf } from '@/lib/path'
 
 describe('basenameOf', () => {
   it('returns the final segment of a file key', () => {
@@ -43,5 +43,22 @@ describe('extensionOf', () => {
     expect(extensionOf('foo/')).toBeNull()
     // A dotted directory name must not yield an extension
     expect(extensionOf('foo/bar.d/')).toBeNull()
+  })
+})
+
+describe('encodeKey', () => {
+  it('keeps slash separators literal but encodes each segment', () => {
+    expect(encodeKey('foo/bar/baz.txt')).toBe('foo/bar/baz.txt')
+    expect(encodeKey('dir/a b.txt')).toBe('dir/a%20b.txt')
+  })
+
+  it('encodes reserved and non-ASCII characters inside a segment', () => {
+    expect(encodeKey('a#b?c.txt')).toBe('a%23b%3Fc.txt')
+    expect(encodeKey('数据/中.txt')).toBe('%E6%95%B0%E6%8D%AE/%E4%B8%AD.txt')
+  })
+
+  it('strips trailing slashes before encoding', () => {
+    expect(encodeKey('dir/')).toBe('dir')
+    expect(encodeKey('a/b///')).toBe('a/b')
   })
 })

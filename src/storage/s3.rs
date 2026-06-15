@@ -8,9 +8,13 @@ use aws_sdk_s3::operation::head_object::HeadObjectError;
 use aws_sdk_s3::operation::list_buckets::ListBucketsError;
 use aws_sdk_s3::operation::list_objects::ListObjectsError;
 use aws_sdk_s3::operation::list_objects_v2::ListObjectsV2Error;
+use aws_sdk_s3::primitives::ByteStream as S3ByteStream;
+use bytes::Bytes;
 use tokio_util::io::ReaderStream;
 
-use super::{FileEntry, FileMeta, GetOptions, ListResult, StorageBackend, StorageResponse};
+use super::{
+  FileEntry, FileMeta, GetOptions, ListResult, PutOptions, StorageBackend, StorageResponse,
+};
 use crate::config::S3Config;
 use crate::error::AppError;
 
@@ -98,6 +102,46 @@ fn classify_s3_status(status: u16, code: &str, op: &str, raw: impl std::fmt::Dis
     }
     _ => AppError::Backend(format!("S3 {op} error: {raw}")),
   }
+}
+
+/// Map a write-path SDK error (`put` / `delete` / `copy`) the same way the
+/// read paths do. Generic so the three operations share one mapping; `op`
+/// names the operation in the diagnostic message.
+fn map_write_err<E>(op: &str, err: SdkError<E>) -> AppError
+where
+  E: ProvideErrorMetadata + std::error::Error + Send + Sync + 'static,
+{
+  match err {
+    SdkError::ServiceError(svc) => {
+      let status = svc.raw().status().as_u16();
+      let code = svc.err().code().unwrap_or_default();
+      classify_s3_status(status, code, op, svc.err())
+    }
+    e => AppError::Backend(format!("S3 {op} sdk error: {e}")),
+  }
+}
+
+/// Build the `CopySource` value S3 expects: `"<bucket>/<key>"` with the key
+/// percent-encoded. The AWS SDK forwards this verbatim (it does NOT encode
+/// it), so a key with spaces / `+` / non-ASCII must be encoded here or the
+/// copy targets the wrong object or fails. `/` is preserved as the key path
+/// separator; RFC 3986 unreserved characters pass through.
+fn encode_copy_source(bucket: &str, key: &str) -> String {
+  let mut out = String::with_capacity(bucket.len() + 1 + key.len());
+  out.push_str(bucket);
+  out.push('/');
+  for &b in key.as_bytes() {
+    match b {
+      b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' | b'/' => {
+        out.push(b as char);
+      }
+      _ => {
+        out.push('%');
+        out.push_str(&format!("{b:02X}"));
+      }
+    }
+  }
+  out
 }
 
 pub struct S3Backend {
@@ -562,6 +606,172 @@ impl StorageBackend for S3Backend {
       is_dir: false,
     })
   }
+
+  async fn put_file(
+    &self,
+    path: &str,
+    body: Bytes,
+    opts: PutOptions,
+  ) -> Result<FileMeta, AppError> {
+    let (bucket, key) = self.split_path(path)?;
+    if key.is_empty() {
+      return Err(AppError::InvalidPath(format!(
+        "S3 path '{path}' refers to a bucket root, not a file"
+      )));
+    }
+
+    // PutObject always overwrites, so when the caller didn't ask to overwrite
+    // we probe with HeadObject first. There's a TOCTOU window (a concurrent
+    // writer between head and put) we accept for now — optimistic concurrency
+    // (If-None-Match) is out of scope this round.
+    if !opts.overwrite {
+      match self
+        .client
+        .head_object()
+        .bucket(&bucket)
+        .key(key)
+        .send()
+        .await
+      {
+        Ok(_) => {
+          return Err(AppError::Conflict(format!(
+            "file already exists: '{path}'. Set overwrite=true to replace it."
+          )));
+        }
+        Err(e) => match Self::map_head_err(e) {
+          // NotFound is the happy path — the key is free to write.
+          AppError::NotFound(_) => {}
+          other => return Err(other),
+        },
+      }
+    }
+
+    let content_type = opts
+      .content_type
+      .clone()
+      .or_else(|| mime_guess::from_path(key).first_raw().map(str::to_string));
+    let size = body.len() as u64;
+
+    let mut req = self
+      .client
+      .put_object()
+      .bucket(&bucket)
+      .key(key)
+      .body(S3ByteStream::from(body));
+    if let Some(ct) = content_type.clone() {
+      req = req.content_type(ct);
+    }
+    let resp = req.send().await.map_err(|e| map_write_err("put", e))?;
+
+    Ok(FileMeta {
+      path: path.to_string(),
+      size,
+      etag: resp.e_tag().map(str::to_string),
+      content_type,
+      // PutObject doesn't return Last-Modified; the client refetches the
+      // listing after a write and picks up the real mtime there.
+      last_modified: None,
+      is_dir: false,
+    })
+  }
+
+  async fn delete_file(&self, path: &str) -> Result<(), AppError> {
+    let (bucket, key) = self.split_path(path)?;
+    if key.is_empty() {
+      return Err(AppError::InvalidPath(format!(
+        "S3 path '{path}' refers to a bucket root, not a file"
+      )));
+    }
+    // S3 DeleteObject is idempotent — deleting a missing key still succeeds,
+    // so we can't surface a 404 here. The caller treats success as "gone".
+    self
+      .client
+      .delete_object()
+      .bucket(&bucket)
+      .key(key)
+      .send()
+      .await
+      .map_err(|e| map_write_err("delete", e))?;
+    Ok(())
+  }
+
+  async fn move_file(&self, from: &str, to: &str, opts: PutOptions) -> Result<FileMeta, AppError> {
+    let (from_bucket, from_key) = self.split_path(from)?;
+    let (to_bucket, to_key) = self.split_path(to)?;
+    if from_key.is_empty() || to_key.is_empty() {
+      return Err(AppError::InvalidPath(
+        "S3 move requires <bucket>/<key> file paths, not bucket roots".into(),
+      ));
+    }
+
+    // Guard against moving an object onto itself. The rename is copy+delete,
+    // so for from == to the copy is a no-op but the delete would then remove
+    // the object — silent data loss. (Local fs `rename(x, x)` is a safe no-op,
+    // so this guard is S3-specific.)
+    if from_bucket == to_bucket && from_key == to_key {
+      return Err(AppError::InvalidPath(
+        "S3 move source and destination are the same object".into(),
+      ));
+    }
+
+    if !opts.overwrite {
+      match self
+        .client
+        .head_object()
+        .bucket(&to_bucket)
+        .key(to_key)
+        .send()
+        .await
+      {
+        Ok(_) => {
+          return Err(AppError::Conflict(format!(
+            "file already exists: '{to}'. Set overwrite=true to replace it."
+          )));
+        }
+        Err(e) => match Self::map_head_err(e) {
+          AppError::NotFound(_) => {}
+          other => return Err(other),
+        },
+      }
+    }
+
+    // Rename = server-side copy then delete the source. copy_source must be
+    // percent-encoded (the SDK forwards it verbatim).
+    let copy_source = encode_copy_source(&from_bucket, from_key);
+    let resp = self
+      .client
+      .copy_object()
+      .bucket(&to_bucket)
+      .key(to_key)
+      .copy_source(copy_source)
+      .send()
+      .await
+      .map_err(|e| map_write_err("copy", e))?;
+
+    // Delete the source only after the copy lands.
+    self
+      .client
+      .delete_object()
+      .bucket(&from_bucket)
+      .key(from_key)
+      .send()
+      .await
+      .map_err(|e| map_write_err("delete", e))?;
+
+    Ok(FileMeta {
+      path: to.to_string(),
+      // CopyObject doesn't return the object size; the client refetches the
+      // listing after a move and shows the real size/mtime there.
+      size: 0,
+      etag: resp
+        .copy_object_result()
+        .and_then(|r| r.e_tag())
+        .map(str::to_string),
+      content_type: None,
+      last_modified: None,
+      is_dir: false,
+    })
+  }
 }
 
 #[cfg(test)]
@@ -735,5 +945,29 @@ mod tests {
   fn join_bucket_prefix_prepends_in_multi_bucket() {
     assert_eq!(join_bucket_prefix(Some("b/"), "foo/bar"), "b/foo/bar");
     assert_eq!(join_bucket_prefix(Some("b/"), "sub/"), "b/sub/");
+  }
+
+  // --- copy_source encoding (rename) ------------------------------------
+
+  #[test]
+  fn encode_copy_source_keeps_path_separators_and_unreserved() {
+    assert_eq!(
+      encode_copy_source("my-bucket", "dir/sub/file.txt"),
+      "my-bucket/dir/sub/file.txt",
+    );
+    assert_eq!(encode_copy_source("b", "a-_.~/x.bin"), "b/a-_.~/x.bin",);
+  }
+
+  #[test]
+  fn encode_copy_source_percent_encodes_specials() {
+    // Spaces, '+', and other reserved bytes must be encoded or the copy
+    // targets the wrong object.
+    assert_eq!(encode_copy_source("b", "a b+c.txt"), "b/a%20b%2Bc.txt",);
+  }
+
+  #[test]
+  fn encode_copy_source_percent_encodes_non_ascii() {
+    // "中" is 0xE4 0xB8 0xAD in UTF-8.
+    assert_eq!(encode_copy_source("b", "中"), "b/%E4%B8%AD");
   }
 }

@@ -293,6 +293,7 @@ mod tests {
         name: "t".into(),
         r#type: StorageType::Local,
         active: true,
+        writeable: false,
         s3: None,
         local: Some(LocalConfig {
           root_path: root.to_path_buf(),
@@ -468,6 +469,7 @@ mod tests {
         name: "t".into(),
         r#type: StorageType::Local,
         active: true,
+        writeable: false,
         s3: None,
         local: Some(LocalConfig {
           root_path: root.clone(),
@@ -513,6 +515,7 @@ mod tests {
         name: "t".into(),
         r#type: StorageType::Local,
         active: true,
+        writeable: false,
         s3: None,
         local: Some(LocalConfig {
           root_path: root.clone(),

@@ -7,6 +7,7 @@ const singleBucket = (bucket: string): StorageDescriptor => ({
   name: 's3',
   type: 's3',
   valid: true,
+  writeable: false,
   s3: { bucket },
 })
 
@@ -14,6 +15,7 @@ const multiBucket: StorageDescriptor = {
   name: 's3',
   type: 's3',
   valid: true,
+  writeable: false,
   s3: { bucket: null },
 }
 
@@ -21,6 +23,7 @@ const local: StorageDescriptor = {
   name: 'fs',
   type: 'local',
   valid: true,
+  writeable: false,
   local: { root_path: '/data' },
 }
 
@@ -172,6 +175,7 @@ describe('resolveStorageUri — local absolute paths', () => {
       name: 'fs',
       type: 'local',
       valid: true,
+      writeable: false,
       local: { root_path: '/data/' },
     }
     expect(resolveStorageUri('/data/foo', localTrailing)).toEqual({

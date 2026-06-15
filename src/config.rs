@@ -111,6 +111,13 @@ pub struct StorageConfig {
   pub r#type: StorageType,
   #[serde(default)]
   pub active: bool,
+  /// Allow create / edit / delete / rename through the write API
+  /// (`PUT/DELETE /api/files`, `POST /api/move`) for this storage. Default
+  /// false: every storage is read-only unless explicitly opted in.
+  /// `Config::validate()` requires `auth.enabled = true` whenever any storage
+  /// sets this — writes must sit behind the bearer-token gate.
+  #[serde(default)]
+  pub writeable: bool,
   #[serde(default)]
   pub s3: Option<S3Config>,
   #[serde(default)]
@@ -570,6 +577,14 @@ impl Config {
         bail!("auth.enabled = true but auth.token is missing or empty");
       }
     }
+    // Writes must sit behind the bearer-token gate: a writeable storage with
+    // auth disabled would let anyone who can reach the port mutate files.
+    if self.storages.iter().any(|s| s.writeable) && !self.auth.enabled {
+      bail!(
+        "a storage sets writeable = true but auth.enabled = false; \
+         file writes must sit behind the bearer-token gate (set auth.enabled = true)"
+      );
+    }
     Ok(())
   }
 
@@ -791,6 +806,53 @@ local = { root_path = "/tmp" }
 "#;
     let cfg = parse(raw);
     assert!(cfg.auth.public_read);
+  }
+
+  #[test]
+  fn writeable_storage_requires_auth_enabled() {
+    // A writeable storage with auth off is a misconfiguration: writes would
+    // be open to anyone reaching the port.
+    let raw = r#"
+[[storages]]
+name = "x"
+type = "local"
+active = true
+writeable = true
+local = { root_path = "/tmp" }
+"#;
+    let cfg: Config = toml::from_str(raw).expect("syntactic parse");
+    assert!(cfg.validate().is_err());
+  }
+
+  #[test]
+  fn writeable_storage_validates_with_auth_enabled() {
+    let raw = r#"
+[auth]
+enabled = true
+token = "secret-token"
+
+[[storages]]
+name = "x"
+type = "local"
+active = true
+writeable = true
+local = { root_path = "/tmp" }
+"#;
+    let cfg = parse(raw);
+    assert!(cfg.storages[0].writeable);
+  }
+
+  #[test]
+  fn writeable_defaults_false() {
+    let raw = r#"
+[[storages]]
+name = "x"
+type = "local"
+active = true
+local = { root_path = "/tmp" }
+"#;
+    let cfg = parse(raw);
+    assert!(!cfg.storages[0].writeable);
   }
 
   #[test]

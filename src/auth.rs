@@ -50,9 +50,8 @@ impl AuthLayer {
   }
 
   /// Gate for write/privileged routes: enforced whenever the gate is on.
-  /// Only the `duckdb` build wires up write routes today; without it this is
-  /// dead code rather than a real omission.
-  #[cfg_attr(not(feature = "duckdb"), allow(dead_code))]
+  /// Used by the file write group (`PUT/DELETE /api/files`, `POST /api/move`)
+  /// in every build, and by the duckdb-gated `/api/convert` group.
   pub fn write(cfg: &AuthConfig, token: Arc<String>) -> Self {
     Self {
       required: cfg.enabled,

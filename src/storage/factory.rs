@@ -39,6 +39,10 @@ pub struct NamedBackend {
   pub r#type: StorageType,
   pub backend: Arc<dyn StorageBackend>,
   pub details: StorageDetails,
+  /// Whether this storage accepts writes (create / edit / delete / rename)
+  /// through the write API. Mirrors the per-storage `writeable` config flag;
+  /// the write handlers consult it via `AppState::resolve_writeable`.
+  pub writeable: bool,
 }
 
 /// A configured storage entry whose backend failed to initialize. We keep
@@ -158,6 +162,7 @@ pub async fn create_registry(cfg: &Config) -> anyhow::Result<BackendRegistry> {
             r#type: entry.r#type,
             backend,
             details,
+            writeable: entry.writeable,
           },
         );
       }

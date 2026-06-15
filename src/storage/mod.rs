@@ -18,6 +18,17 @@ pub struct GetOptions {
   pub range: Option<String>,
 }
 
+/// Options for a write (`put_file`) or move (`move_file`).
+#[derive(Debug, Clone, Default)]
+pub struct PutOptions {
+  /// Suggested content type. Honoured by backends that store it (S3); local
+  /// fs derives it from the extension on read, so the field is ignored there.
+  pub content_type: Option<String>,
+  /// When false, a write whose target already exists is rejected with
+  /// [`AppError::Conflict`] so the caller can confirm an overwrite.
+  pub overwrite: bool,
+}
+
 pub struct StorageResponse {
   pub body: ByteStream,
   pub content_length: Option<u64>,
@@ -75,6 +86,43 @@ pub trait StorageBackend: Send + Sync {
   async fn get_file(&self, path: &str, opts: GetOptions) -> Result<StorageResponse, AppError>;
   async fn list_files(&self, prefix: &str, token: Option<String>) -> Result<ListResult, AppError>;
   async fn stat(&self, path: &str) -> Result<FileMeta, AppError>;
+
+  /// Create or overwrite the file at `path` with `body`, returning its
+  /// resulting metadata. With `opts.overwrite = false` an existing target is
+  /// left untouched and [`AppError::Conflict`] is returned. The default is
+  /// `Unsupported` so read-only backends (and the test stub) need not
+  /// implement it; the real local-fs and S3 backends override it.
+  async fn put_file(
+    &self,
+    path: &str,
+    body: Bytes,
+    opts: PutOptions,
+  ) -> Result<FileMeta, AppError> {
+    let _ = (path, body, opts);
+    Err(AppError::Unsupported(
+      "this storage backend does not support writes".into(),
+    ))
+  }
+
+  /// Delete the file at `path`. Default is `Unsupported`; real backends
+  /// override it. Refuses directories (file-level operation only).
+  async fn delete_file(&self, path: &str) -> Result<(), AppError> {
+    let _ = path;
+    Err(AppError::Unsupported(
+      "this storage backend does not support deletes".into(),
+    ))
+  }
+
+  /// Move / rename `from` to `to`, returning the destination's metadata. With
+  /// `opts.overwrite = false` an existing destination yields
+  /// [`AppError::Conflict`]. Default is `Unsupported`; real backends override
+  /// it.
+  async fn move_file(&self, from: &str, to: &str, opts: PutOptions) -> Result<FileMeta, AppError> {
+    let _ = (from, to, opts);
+    Err(AppError::Unsupported(
+      "this storage backend does not support moves".into(),
+    ))
+  }
 
   /// Walk `skip` pages forward from `token`, returning the resulting page
   /// plus the intermediate `next_token`s in `walked_tokens`. The default

@@ -7,6 +7,7 @@ const local: StorageDescriptor = {
   name: 'local-fs',
   type: 'local',
   valid: true,
+  writeable: false,
   local: { root_path: '/data' },
 }
 
@@ -14,6 +15,7 @@ const s3Single: StorageDescriptor = {
   name: 'my-bucket',
   type: 's3',
   valid: true,
+  writeable: false,
   s3: { bucket: 'my-bucket', region: 'us-east-1' },
 }
 
@@ -21,6 +23,7 @@ const s3Multi: StorageDescriptor = {
   name: 'all-buckets',
   type: 's3',
   valid: true,
+  writeable: false,
   s3: { bucket: null },
 }
 
@@ -61,6 +64,7 @@ describe('buildFaviconHref', () => {
       name: 'my local',
       type: 'local',
       valid: true,
+      writeable: false,
       local: { root_path: '/x' },
     }
     expect(buildFaviconHref('/s/my%20local/x', [weird])).toBe('/favicon-local.svg')

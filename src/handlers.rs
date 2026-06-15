@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use axum::Json;
-use axum::body::Body;
+use axum::body::{Body, Bytes};
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::AppError;
 use crate::storage::factory::{BackendRegistry, InvalidStorageEntry, NamedBackend, StorageDetails};
-use crate::storage::{FileMeta, GetOptions, ListResult, StorageBackend};
+use crate::storage::{FileMeta, GetOptions, ListResult, PutOptions, StorageBackend};
 use crate::thumbs::ThumbState;
 
 #[derive(Clone)]
@@ -85,6 +85,41 @@ impl AppState {
     }
     Err(AppError::NotFound(format!("storage '{key}'")))
   }
+
+  /// Resolve a backend that's been opted into writes. Returns `Forbidden` for
+  /// a storage that resolves but isn't `writeable`, so each write handler
+  /// doesn't repeat the check. Read-resolution errors (404 / 503) pass
+  /// through unchanged.
+  pub(crate) fn resolve_writeable(
+    &self,
+    name: Option<&str>,
+  ) -> Result<Arc<dyn StorageBackend>, AppError> {
+    let key = name
+      .map(str::trim)
+      .filter(|s| !s.is_empty())
+      .unwrap_or_else(|| self.default_name.as_str());
+    match self.backends.get(key) {
+      Some(nb) if nb.writeable => Ok(nb.backend.clone()),
+      Some(_) => Err(AppError::Forbidden(format!("storage '{key}' is read-only"))),
+      None => {
+        if let Some(inv) = self.invalid.get(key) {
+          Err(AppError::StorageInvalid(format!(
+            "storage '{key}' is invalid: {}",
+            inv.reason
+          )))
+        } else {
+          Err(AppError::NotFound(format!("storage '{key}'")))
+        }
+      }
+    }
+  }
+
+  /// True when at least one configured storage is writeable. Surfaced to the
+  /// SPA via `/api/server` so it can hide every write affordance when no
+  /// storage accepts writes.
+  pub(crate) fn write_enabled(&self) -> bool {
+    self.backends.values().any(|nb| nb.writeable)
+  }
 }
 
 #[derive(Debug, Deserialize)]
@@ -126,6 +161,10 @@ pub struct StorageDescriptor {
   /// digging through server logs.
   #[serde(skip_serializing_if = "Option::is_none")]
   pub error: Option<String>,
+  /// Whether this storage accepts writes (create / edit / delete / rename).
+  /// Mirrors the per-storage `writeable` config flag. The SPA gates its write
+  /// affordances on this; always `false` for invalid storages.
+  pub writeable: bool,
   /// Type-specific identifying details for the storage-selection dialog.
   /// Exactly one of `s3` / `local` is populated based on `type`. Secrets
   /// (`access_key`, `secret_key`) are never serialized here.
@@ -178,6 +217,10 @@ pub struct ServerInfo {
   /// Whether `POST /api/query` is live (duckdb build + [sql] enabled +
   /// auth on). The SPA hides the SQL editor entry point when false.
   pub sql_enabled: bool,
+  /// Whether at least one storage is writeable. The SPA hides every write
+  /// affordance (edit / new file / delete / rename) when false. Writes still
+  /// require the bearer token at request time regardless of this flag.
+  pub write_enabled: bool,
 }
 
 pub async fn server_info_handler(State(state): State<AppState>) -> Json<ServerInfo> {
@@ -187,6 +230,7 @@ pub async fn server_info_handler(State(state): State<AppState>) -> Json<ServerIn
     auth_enabled: state.auth_enabled,
     public_read: state.public_read,
     sql_enabled: state.sql_enabled,
+    write_enabled: state.write_enabled(),
   })
 }
 
@@ -205,6 +249,7 @@ pub async fn list_storages_handler(State(state): State<AppState>) -> Json<Storag
           r#type: type_label(nb.r#type),
           valid: true,
           error: None,
+          writeable: nb.writeable,
           s3,
           local,
         })
@@ -220,6 +265,7 @@ pub async fn list_storages_handler(State(state): State<AppState>) -> Json<Storag
             r#type: type_label(inv.r#type),
             valid: false,
             error: Some(inv.reason.clone()),
+            writeable: false,
             s3,
             local,
           }
@@ -273,6 +319,89 @@ pub async fn stat_handler(
 ) -> Result<Json<FileMeta>, AppError> {
   let backend = state.resolve(q.storage.as_deref())?;
   let meta = backend.stat(&key).await?;
+  Ok(Json(meta))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PutQuery {
+  pub storage: Option<String>,
+  /// When false (default), writing onto an existing file returns 409 so the
+  /// SPA can confirm an overwrite. New-file creation sends false; saving an
+  /// edit to an existing file sends true.
+  #[serde(default)]
+  pub overwrite: bool,
+}
+
+/// `PUT /api/files/{*key}` — create or overwrite a file. The body is the raw
+/// file content (capped by the route's `DefaultBodyLimit`); `Content-Type` is
+/// forwarded to the backend. Requires a writeable storage (else 403) and a
+/// valid token (the route sits behind `write_auth`).
+#[tracing::instrument(skip_all, fields(storage = ?q.storage, key = %key, overwrite = q.overwrite))]
+pub async fn put_file_handler(
+  State(state): State<AppState>,
+  Query(q): Query<PutQuery>,
+  Path(key): Path<String>,
+  headers: HeaderMap,
+  body: Bytes,
+) -> Result<Json<FileMeta>, AppError> {
+  let backend = state.resolve_writeable(q.storage.as_deref())?;
+  let content_type = headers
+    .get(header::CONTENT_TYPE)
+    .and_then(|v| v.to_str().ok())
+    .map(str::to_string);
+  let meta = backend
+    .put_file(
+      &key,
+      body,
+      PutOptions {
+        content_type,
+        overwrite: q.overwrite,
+      },
+    )
+    .await?;
+  Ok(Json(meta))
+}
+
+/// `DELETE /api/files/{*key}` — delete a file. Returns 204 on success.
+#[tracing::instrument(skip_all, fields(storage = ?q.storage, key = %key))]
+pub async fn delete_file_handler(
+  State(state): State<AppState>,
+  Query(q): Query<StorageSelector>,
+  Path(key): Path<String>,
+) -> Result<StatusCode, AppError> {
+  let backend = state.resolve_writeable(q.storage.as_deref())?;
+  backend.delete_file(&key).await?;
+  Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MoveRequest {
+  pub storage: Option<String>,
+  pub from: String,
+  pub to: String,
+  /// When false (default), an existing destination returns 409.
+  #[serde(default)]
+  pub overwrite: bool,
+}
+
+/// `POST /api/move` — rename / move a file. Body carries `from` + `to` so it
+/// can express both paths (unlike the key-in-path PUT/DELETE).
+#[tracing::instrument(skip_all, fields(storage = ?req.storage, from = %req.from, to = %req.to, overwrite = req.overwrite))]
+pub async fn move_file_handler(
+  State(state): State<AppState>,
+  Json(req): Json<MoveRequest>,
+) -> Result<Json<FileMeta>, AppError> {
+  let backend = state.resolve_writeable(req.storage.as_deref())?;
+  let meta = backend
+    .move_file(
+      &req.from,
+      &req.to,
+      PutOptions {
+        content_type: None,
+        overwrite: req.overwrite,
+      },
+    )
+    .await?;
   Ok(Json(meta))
 }
 
@@ -779,6 +908,56 @@ mod tests {
     // Pin the constant so an accidental bump (e.g. 100 → 100_000) shows up
     // in review. The handler clamps `skip_pages` to this value.
     assert_eq!(MAX_SKIP_PAGES, 100);
+  }
+
+  fn app_state_with(name: &str, writeable: bool) -> AppState {
+    let mut backends = HashMap::new();
+    backends.insert(
+      name.to_string(),
+      NamedBackend {
+        name: name.to_string(),
+        r#type: crate::config::StorageType::Local,
+        backend: Arc::new(StubBackend::new(0, 1)),
+        details: StorageDetails::Local {
+          root_path: "/tmp".into(),
+        },
+        writeable,
+      },
+    );
+    let reg = BackendRegistry {
+      backends,
+      invalid: HashMap::new(),
+      order: vec![name.to_string()],
+      default_name: name.to_string(),
+    };
+    AppState::new(reg, None, Arc::new("host".into()), true, true, false)
+  }
+
+  #[test]
+  fn resolve_writeable_allows_writeable_storage() {
+    let state = app_state_with("rw", true);
+    assert!(state.resolve_writeable(Some("rw")).is_ok());
+    assert!(state.write_enabled());
+  }
+
+  #[test]
+  fn resolve_writeable_forbids_readonly_storage() {
+    let state = app_state_with("ro", false);
+    // `Arc<dyn StorageBackend>` isn't Debug, so match instead of unwrap_err.
+    assert!(matches!(
+      state.resolve_writeable(Some("ro")),
+      Err(AppError::Forbidden(_))
+    ));
+    assert!(!state.write_enabled());
+  }
+
+  #[test]
+  fn resolve_writeable_not_found_for_unknown_storage() {
+    let state = app_state_with("rw", true);
+    assert!(matches!(
+      state.resolve_writeable(Some("nope")),
+      Err(AppError::NotFound(_))
+    ));
   }
 
   #[test]

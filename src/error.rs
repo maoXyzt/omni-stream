@@ -37,6 +37,13 @@ pub enum AppError {
   #[error("unsupported operation: {0}")]
   Unsupported(String),
 
+  /// A write target already exists and overwrite wasn't requested. 409 so the
+  /// SPA can offer to overwrite. Used by the file write API (`PUT /api/files`,
+  /// `POST /api/move`) and the JSONL→Parquet `/api/convert` endpoint. Not
+  /// duckdb-gated: the file write routes exist in every build.
+  #[error("conflict: {0}")]
+  Conflict(String),
+
   /// DuckDB-side failure (parser / binder / runtime). The engine message is
   /// passed through verbatim so the SQL editor shows actionable diagnostics.
   #[cfg(feature = "duckdb")]
@@ -47,13 +54,6 @@ pub enum AppError {
   #[cfg(feature = "duckdb")]
   #[error("query rejected: {0}")]
   QueryRejected(String),
-
-  /// Convert target already exists and overwrite wasn't requested (the
-  /// JSONL→Parquet `/api/convert` endpoint). 409 so the SPA can offer to
-  /// overwrite. duckdb-gated like the other SQL-path variants.
-  #[cfg(feature = "duckdb")]
-  #[error("conflict: {0}")]
-  Conflict(String),
 
   #[cfg(feature = "duckdb")]
   #[error("query timed out after {0}s")]
@@ -97,10 +97,9 @@ impl AppError {
       AppError::Io(e) if e.kind() == io::ErrorKind::NotFound => StatusCode::NOT_FOUND,
       AppError::StorageInvalid(_) => StatusCode::SERVICE_UNAVAILABLE,
       AppError::Io(_) | AppError::Backend(_) => StatusCode::INTERNAL_SERVER_ERROR,
+      AppError::Conflict(_) => StatusCode::CONFLICT,
       #[cfg(feature = "duckdb")]
       AppError::Query(_) | AppError::QueryRejected(_) => StatusCode::BAD_REQUEST,
-      #[cfg(feature = "duckdb")]
-      AppError::Conflict(_) => StatusCode::CONFLICT,
       #[cfg(feature = "duckdb")]
       AppError::QueryTimeout(_) => StatusCode::REQUEST_TIMEOUT,
       #[cfg(feature = "duckdb")]

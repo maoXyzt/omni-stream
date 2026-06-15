@@ -1,4 +1,6 @@
-import type { ReactNode } from 'react'
+import { useCallback, useState, type ReactNode } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import {
   Copy,
   Download,
@@ -6,9 +8,16 @@ import {
   FolderTree,
   Globe,
   Link as LinkIcon,
+  Pencil,
+  Trash2,
 } from 'lucide-react'
 
+import { ApiError } from '@/api/client'
+import { deleteFile, moveFile } from '@/api/files'
 import { proxyUrl, rawUrl } from '@/api/storage'
+import { ConfirmDialog } from '@/components/ConfirmDialog'
+import { TokenPrompt } from '@/components/TokenPrompt'
+import { Button } from '@/components/ui/button'
 import {
   ContextMenu,
   ContextMenuContent,
@@ -16,6 +25,15 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
 import { useStorages } from '@/hooks/use-storage'
 import { basenameOf } from '@/lib/path'
 import type { FileEntry, StorageDescriptor } from '@/types/storage'
@@ -29,7 +47,7 @@ interface EntryContextMenuProps {
 /// Right-click menu for any directory entry. Shared across grid tiles, list
 /// rows, and the sidebar's folder list so users see the same actions
 /// regardless of view. Folder entries get only the name/URL pair; files add
-/// open-in-new-tab and download.
+/// open-in-new-tab and download, plus rename/delete on writeable storages.
 export function EntryContextMenu({
   entry,
   storageName,
@@ -46,6 +64,87 @@ export function EntryContextMenu({
   const { data: storagesData } = useStorages()
   const storage = storagesData?.storages.find((s) => s.name === storageName)
   const absPath = storage ? absolutePathOf(storage, entry.key) : null
+  // Write actions appear only for files on a writeable storage. A storage's
+  // `writeable` already implies the server's write gate is on, so no extra
+  // check is needed; the token itself is verified lazily (401 → prompt).
+  const canWrite = !entry.is_dir && Boolean(storage?.writeable) && !!storageName
+
+  const queryClient = useQueryClient()
+  // Directory prefix of this entry, in the trailing-slash form the listing
+  // cache is keyed by. Used to build the rename target and to invalidate the
+  // right listing after a write.
+  const dir = entry.key.includes('/')
+    ? entry.key.slice(0, entry.key.lastIndexOf('/') + 1)
+    : ''
+
+  const [busy, setBusy] = useState(false)
+  const [renameOpen, setRenameOpen] = useState(false)
+  const [renameValue, setRenameValue] = useState(name)
+  const [overwriteOpen, setOverwriteOpen] = useState(false)
+  const [deleteOpen, setDeleteOpen] = useState(false)
+  // 401 retry intents: rename carries the overwrite flag; delete is a plain bool.
+  const [renameAuth, setRenameAuth] = useState<boolean | null>(null)
+  const [deleteAuth, setDeleteAuth] = useState(false)
+
+  const renameTarget = renameValue.trim()
+  const canRename =
+    renameTarget.length > 0 &&
+    !renameTarget.includes('/') &&
+    renameTarget !== '.' &&
+    renameTarget !== '..' &&
+    renameTarget !== name &&
+    !busy
+
+  const doRename = useCallback(
+    async (overwrite: boolean) => {
+      const target = renameValue.trim()
+      if (!target) return
+      const newKey = `${dir}${target}`
+      setBusy(true)
+      try {
+        await moveFile(storageName, entry.key, newKey, overwrite)
+        toast.success(`Renamed to ${target}`)
+        queryClient.invalidateQueries({ queryKey: ['list', storageName, dir] })
+        setOverwriteOpen(false)
+        setRenameOpen(false)
+      } catch (err) {
+        setOverwriteOpen(false)
+        if (err instanceof ApiError && err.status === 401) {
+          setRenameAuth(overwrite)
+        } else if (err instanceof ApiError && err.status === 409) {
+          setOverwriteOpen(true)
+        } else if (err instanceof ApiError) {
+          toast.error(err.message)
+        } else {
+          toast.error(String(err))
+        }
+      } finally {
+        setBusy(false)
+      }
+    },
+    [renameValue, dir, storageName, entry.key, queryClient],
+  )
+
+  const doDelete = useCallback(async () => {
+    setBusy(true)
+    try {
+      await deleteFile(storageName, entry.key)
+      toast.success(`Deleted ${name}`)
+      queryClient.invalidateQueries({ queryKey: ['list', storageName, dir] })
+      setDeleteOpen(false)
+    } catch (err) {
+      setDeleteOpen(false)
+      if (err instanceof ApiError && err.status === 401) {
+        setDeleteAuth(true)
+      } else if (err instanceof ApiError) {
+        toast.error(err.message)
+      } else {
+        toast.error(String(err))
+      }
+    } finally {
+      setBusy(false)
+    }
+  }, [storageName, entry.key, name, dir, queryClient])
 
   function copyText(text: string) {
     void navigator.clipboard?.writeText(text)
@@ -93,47 +192,168 @@ export function EntryContextMenu({
   }
 
   return (
-    <ContextMenu>
-      <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
-      <ContextMenuContent>
-        <ContextMenuItem onClick={() => copyText(name)}>
-          <Copy />
-          Copy name
-        </ContextMenuItem>
-        {absPath && (
-          <ContextMenuItem onClick={() => copyText(absPath)}>
-            <FolderTree />
-            Copy path
+    <>
+      <ContextMenu>
+        <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
+        <ContextMenuContent>
+          <ContextMenuItem onClick={() => copyText(name)}>
+            <Copy />
+            Copy name
           </ContextMenuItem>
-        )}
-        <ContextMenuSeparator />
-        <ContextMenuItem onClick={() => copyText(entryUrl())}>
-          <LinkIcon />
-          Copy URL
-        </ContextMenuItem>
-        {!entry.is_dir && (
-          <>
-            {isHtml && (
-              <ContextMenuItem onClick={openRendered}>
-                <Globe />
-                Render in new tab
+          {absPath && (
+            <ContextMenuItem onClick={() => copyText(absPath)}>
+              <FolderTree />
+              Copy path
+            </ContextMenuItem>
+          )}
+          <ContextMenuSeparator />
+          <ContextMenuItem onClick={() => copyText(entryUrl())}>
+            <LinkIcon />
+            Copy URL
+          </ContextMenuItem>
+          {!entry.is_dir && (
+            <>
+              {isHtml && (
+                <ContextMenuItem onClick={openRendered}>
+                  <Globe />
+                  Render in new tab
+                </ContextMenuItem>
+              )}
+              <ContextMenuItem onClick={openInNewTab}>
+                <ExternalLink />
+                Open in new tab
               </ContextMenuItem>
-            )}
-            <ContextMenuItem onClick={openInNewTab}>
-              <ExternalLink />
-              Open in new tab
-            </ContextMenuItem>
-            <ContextMenuItem onClick={downloadFile}>
-              <Download />
-              Download
-            </ContextMenuItem>
+              <ContextMenuItem onClick={downloadFile}>
+                <Download />
+                Download
+              </ContextMenuItem>
+            </>
+          )}
+          {canWrite && (
+            <>
+              <ContextMenuSeparator />
+              <ContextMenuItem
+                onClick={() => {
+                  setRenameValue(name)
+                  setRenameOpen(true)
+                }}
+              >
+                <Pencil />
+                Rename
+              </ContextMenuItem>
+              <ContextMenuItem
+                className="text-destructive focus:text-destructive focus:bg-destructive/10"
+                onClick={() => setDeleteOpen(true)}
+              >
+                <Trash2 />
+                Delete
+              </ContextMenuItem>
+            </>
+          )}
+        </ContextMenuContent>
+      </ContextMenu>
+
+      {/* Rename — the dialog (old → new) is itself the deliberate confirmation;
+          a 409 escalates to an explicit overwrite confirm. */}
+      <Dialog
+        open={renameOpen}
+        onOpenChange={(o) => {
+          if (!o && !busy) setRenameOpen(false)
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Rename file</DialogTitle>
+            <DialogDescription className="break-all">
+              {name}
+            </DialogDescription>
+          </DialogHeader>
+          <Input
+            autoFocus
+            value={renameValue}
+            onChange={(e) => setRenameValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && canRename) {
+                e.preventDefault()
+                void doRename(false)
+              }
+            }}
+          />
+          <DialogFooter>
+            <Button
+              variant="outline"
+              disabled={busy}
+              onClick={() => setRenameOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button disabled={!canRename} onClick={() => void doRename(false)}>
+              <Pencil className="size-3.5" />
+              Rename
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <ConfirmDialog
+        open={overwriteOpen}
+        title="Overwrite existing file?"
+        description={
+          <>
+            <span className="font-mono break-all text-foreground">
+              {dir}
+              {renameTarget}
+            </span>{' '}
+            already exists. Overwrite it?
           </>
-        )}
-      </ContextMenuContent>
-    </ContextMenu>
+        }
+        confirmLabel="Overwrite"
+        destructive
+        busy={busy}
+        onConfirm={() => void doRename(true)}
+        onCancel={() => setOverwriteOpen(false)}
+      />
+
+      <ConfirmDialog
+        open={deleteOpen}
+        title="Delete file?"
+        description={
+          <>
+            <span className="font-mono break-all text-foreground">
+              {entry.key}
+            </span>{' '}
+            will be permanently deleted.
+          </>
+        }
+        confirmLabel="Delete"
+        destructive
+        busy={busy}
+        onConfirm={() => void doDelete()}
+        onCancel={() => setDeleteOpen(false)}
+      />
+
+      {renameAuth !== null && (
+        <TokenPrompt
+          onSubmit={() => {
+            const ow = renameAuth
+            setRenameAuth(null)
+            void doRename(ow)
+          }}
+          onCancel={() => setRenameAuth(null)}
+        />
+      )}
+      {deleteAuth && (
+        <TokenPrompt
+          onSubmit={() => {
+            setDeleteAuth(false)
+            void doDelete()
+          }}
+          onCancel={() => setDeleteAuth(false)}
+        />
+      )}
+    </>
   )
 }
-
 
 /// Absolute, human-pasteable location of an entry on its backing storage.
 ///   S3 (single bucket):    `s3://<bucket>/<key>`

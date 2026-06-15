@@ -12,9 +12,13 @@ import {
   LayoutList,
   ListOrdered,
   Loader2,
+  Pencil,
   RotateCw,
+  Save,
   X,
 } from 'lucide-react'
+
+import EditorImport from 'react-simple-code-editor'
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -34,11 +38,13 @@ import {
 } from '@/components/ui/tooltip'
 import { ApiError } from '@/api/client'
 import { convertToParquet } from '@/api/convert'
+import { putFile } from '@/api/files'
 import { extractErrorDetail, type ErrorDetail } from '@/lib/api-error'
+import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { TokenPrompt } from '@/components/TokenPrompt'
 import { useLineNumbers } from '@/hooks/use-line-numbers'
 import { useRowsViewHint } from '@/hooks/use-rows-view-hint'
-import { useServerInfo } from '@/hooks/use-storage'
+import { useServerInfo, useStorages } from '@/hooks/use-storage'
 import {
   SUPPORTED_LANGUAGES,
   detectLanguage,
@@ -73,6 +79,20 @@ const ROWS_PARAM = 'rows'
 // or OOM, so the heavy tier intentionally reads as "are you sure".
 const LOAD_ALL_WARN_BYTES = 5 * 1024 * 1024
 const LOAD_ALL_HEAVY_BYTES = 20 * 1024 * 1024
+
+// Editor-usability cap, intentionally far below the backend's 16 MiB
+// MAX_PUT_BYTES (which is the hard save limit). react-simple-code-editor
+// re-highlights and re-renders the entire document on every keystroke, so
+// multi-MiB files make typing janky; 2 MiB keeps inline editing responsive.
+// Above this the Edit button is disabled (the file can still be downloaded).
+const MAX_EDIT_BYTES = 2 * 1024 * 1024
+
+// react-simple-code-editor 0.14.x ships a CJS bundle whose default export is
+// the component; ESM interop wraps it as { default }. Handle both shapes (same
+// workaround as ParquetSqlTab).
+const Editor =
+  (EditorImport as unknown as { default?: typeof EditorImport }).default ??
+  EditorImport
 
 type LoadAllSeverity = 'light' | 'warn' | 'heavy'
 
@@ -362,6 +382,90 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
   // "wait a moment".
   const showSpinner = loading || (!ready && lang !== 'plaintext')
 
+  // --- Inline editing ----------------------------------------------------
+
+  // Editing needs a writeable storage and the server's write gate on. The
+  // token itself is checked lazily at save time (401 → TokenPrompt → retry),
+  // matching the convert flow — so the Edit button shows even before sign-in.
+  const storages = useStorages()
+  const descriptor = storages.data?.storages.find((s) => s.name === storage)
+  const canWrite = Boolean(
+    storage && descriptor?.writeable && serverInfo.data?.write_enabled,
+  )
+  // Files past the write cap can't be saved (the PUT would 413), so offer no
+  // edit affordance for them.
+  const tooLargeToEdit =
+    state.totalBytes !== null && state.totalBytes > MAX_EDIT_BYTES
+
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState('')
+  // Set when Edit is clicked on a not-yet-fully-loaded file: a load-all runs
+  // and the effect below enters edit mode once the whole file is in memory.
+  // Editing a partial buffer would truncate the file on save.
+  const [wantEdit, setWantEdit] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [confirmSave, setConfirmSave] = useState(false)
+  const [discardConfirm, setDiscardConfirm] = useState(false)
+  // True while a save was rejected with 401 and the token prompt is showing.
+  const [saveAuth, setSaveAuth] = useState(false)
+
+  const dirty = editing && draft !== state.text
+
+  const enterEdit = useCallback(() => {
+    if (tooLargeToEdit) return
+    if (state.done) {
+      setDraft(state.text)
+      setEditing(true)
+    } else {
+      setWantEdit(true)
+      void startLoadAll()
+    }
+  }, [tooLargeToEdit, state.done, state.text, startLoadAll])
+
+  // Enter edit mode once a requested load-all has pulled the whole file.
+  useEffect(() => {
+    if (wantEdit && state.done) {
+      setDraft(state.text)
+      setEditing(true)
+      setWantEdit(false)
+    }
+  }, [wantEdit, state.done, state.text])
+
+  const doSave = useCallback(async () => {
+    if (!storage) return
+    setSaving(true)
+    try {
+      await putFile(storage, fileKey, draft, true)
+      toast.success(`Saved ${fileKey}`)
+      setConfirmSave(false)
+      setEditing(false)
+      // Refresh the preview buffer + listing + stat so the new content/size show.
+      queryClient.invalidateQueries({ queryKey: ['text-preview', src] })
+      const dirPrefix = fileKey.includes('/')
+        ? fileKey.slice(0, fileKey.lastIndexOf('/') + 1)
+        : ''
+      queryClient.invalidateQueries({ queryKey: ['list', storage, dirPrefix] })
+      queryClient.invalidateQueries({ queryKey: ['stat', storage, fileKey] })
+    } catch (err) {
+      setConfirmSave(false)
+      if (err instanceof ApiError && err.status === 401) {
+        // Stay in edit mode; the token prompt's retry re-runs doSave.
+        setSaveAuth(true)
+      } else if (err instanceof ApiError) {
+        toast.error(err.message)
+      } else {
+        toast.error(String(err))
+      }
+    } finally {
+      setSaving(false)
+    }
+  }, [storage, fileKey, draft, src, queryClient])
+
+  const cancelEdit = useCallback(() => {
+    if (dirty) setDiscardConfirm(true)
+    else setEditing(false)
+  }, [dirty])
+
   return (
     <div className="flex h-full w-full flex-col overflow-hidden rounded-md bg-muted/30">
       <div className="flex items-center justify-between gap-3 border-b border-border bg-background/50 px-3 py-2">
@@ -381,6 +485,36 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
           {showSpinner && (
             <Loader2 className="size-4 animate-spin text-muted-foreground" />
           )}
+          {editing ? (
+            <>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-7"
+                disabled={saving}
+                onClick={cancelEdit}
+              >
+                <X className="size-3.5" />
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                className="h-7 shadow-sm"
+                disabled={saving || !dirty}
+                onClick={() => setConfirmSave(true)}
+              >
+                {saving ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <Save className="size-3.5" />
+                )}
+                Save
+              </Button>
+            </>
+          ) : (
+            <>
           {/* Persistent across modal opens via localStorage. Variant swap
               (`default` filled when pressed, `outline` bordered when off)
               gives the toggle a louder visual state than a colour change
@@ -464,6 +598,30 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
               </TooltipContent>
             </Tooltip>
           )}
+              {canWrite && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-7 shadow-sm"
+                      disabled={tooLargeToEdit}
+                      onClick={enterEdit}
+                    >
+                      <Pencil className="size-3.5" />
+                      Edit
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {tooLargeToEdit
+                      ? 'File is too large to edit in the browser'
+                      : 'Edit this file'}
+                  </TooltipContent>
+                </Tooltip>
+              )}
+            </>
+          )}
           <select
             value={lang}
             onChange={(e) => setLang(e.target.value)}
@@ -487,6 +645,29 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
 
       {/* `relative` anchors the floating "Load more" overlay below. */}
       <div className="relative flex-1 overflow-hidden">
+        {editing ? (
+          <div
+            className="hljs h-full w-full overflow-auto"
+            onKeyDown={(e) => {
+              // Cmd/Ctrl+S opens the save confirmation (mirrors editors).
+              if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
+                e.preventDefault()
+                if (dirty && !saving) setConfirmSave(true)
+              }
+            }}
+          >
+            <Editor
+              value={draft}
+              onValueChange={setDraft}
+              highlight={(code) => highlight(code, lang)}
+              padding={16}
+              textareaClassName="focus:outline-none"
+              className="min-h-full font-mono text-xs leading-relaxed"
+              style={{ minHeight: '100%' }}
+            />
+          </div>
+        ) : (
+          <>
         {errorMessage && (
           <div className="p-3">
             <Alert variant="destructive">
@@ -608,6 +789,8 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
               </>
             )}
           </div>
+        )}
+          </>
         )}
       </div>
       <Dialog open={loadAllOpen} onOpenChange={setLoadAllOpen}>
@@ -793,6 +976,45 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
             void handleConvert(overwrite)
           }}
           onCancel={() => setConvertAuthOverwrite(null)}
+        />
+      )}
+
+      {/* Save confirmation — every write passes through a confirm step. */}
+      <ConfirmDialog
+        open={confirmSave}
+        title="Save changes?"
+        description={
+          <>
+            This overwrites{' '}
+            <span className="font-mono break-all text-foreground">{fileKey}</span>{' '}
+            on the server.
+          </>
+        }
+        confirmLabel="Save"
+        busy={saving}
+        onConfirm={() => void doSave()}
+        onCancel={() => setConfirmSave(false)}
+      />
+      <ConfirmDialog
+        open={discardConfirm}
+        title="Discard changes?"
+        description="Your unsaved edits will be lost."
+        confirmLabel="Discard"
+        destructive
+        onConfirm={() => {
+          setDiscardConfirm(false)
+          setEditing(false)
+        }}
+        onCancel={() => setDiscardConfirm(false)}
+      />
+      {saveAuth && (
+        <TokenPrompt
+          onSubmit={() => {
+            // Token stored; retry the save now that the request can authenticate.
+            setSaveAuth(false)
+            void doSave()
+          }}
+          onCancel={() => setSaveAuth(false)}
         />
       )}
     </div>
