@@ -725,7 +725,7 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
           </DialogHeader>
 
           {convertError?.hint && (
-            <Alert>
+            <Alert className="min-w-0">
               <AlertCircle className="size-4" />
               <AlertTitle>How to fix</AlertTitle>
               <AlertDescription className="min-w-0 break-words">
