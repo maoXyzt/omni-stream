@@ -37,6 +37,11 @@ pub struct AppState {
   /// True only when all three hold: built with `--features duckdb`,
   /// `[sql].enabled`, and `auth.enabled`. Always false in non-duckdb builds.
   sql_enabled: bool,
+  /// Caches the httpfs probe result for 30 s so repeated `/api/server`
+  /// requests (multi-tab, monitoring) pay only a mutex lock on cache hits.
+  /// Absent in non-duckdb builds.
+  #[cfg(feature = "duckdb")]
+  httpfs_probe_cache: Arc<crate::sql::probe::ProbeCache>,
 }
 
 impl AppState {
@@ -58,6 +63,8 @@ impl AppState {
       auth_enabled,
       public_read,
       sql_enabled,
+      #[cfg(feature = "duckdb")]
+      httpfs_probe_cache: Arc::new(crate::sql::probe::ProbeCache::new(None)),
     }
   }
 
@@ -240,7 +247,7 @@ pub async fn server_info_handler(State(state): State<AppState>) -> Json<ServerIn
   // link against the extension machinery.
   #[cfg(feature = "duckdb")]
   let httpfs_ready: Option<bool> = if state.sql_enabled {
-    Some(crate::sql::probe::probe_httpfs().await)
+    Some(crate::sql::probe::probe_httpfs_cached(&state.httpfs_probe_cache).await)
   } else {
     None
   };

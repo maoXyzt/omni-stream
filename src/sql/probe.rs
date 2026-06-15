@@ -5,15 +5,45 @@
 //! `INSTALL httpfs; LOAD httpfs;` — once the extension is cached in ~/.duckdb
 //! subsequent probes are fast no-ops (~10 ms). Mirrors the watchdog pattern
 //! from `query_handler` so a slow first download never stalls `/api/server`.
+//!
+//! `probe_httpfs_cached` wraps the raw probe with a 30-second in-memory TTL
+//! so repeated `/api/server` requests (multi-tab, monitoring) pay only a mutex
+//! lock + timestamp check on cache hits.
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tokio::sync::oneshot;
 
 /// Seconds to wait for the httpfs extension to download on first use.
-/// Short enough to keep `/api/server` responsive in offline deployments;
-/// long enough for a first-time fetch on a modest connection.
 const PROBE_TIMEOUT_SECS: u64 = 5;
+
+/// Cache TTL for the probe result. httpfs availability is effectively static
+/// (it doesn't change without a server restart or manual cache eviction), so
+/// 30 s is conservative.
+const CACHE_TTL_SECS: u64 = 30;
+
+/// Shared cache type stored in `AppState`. Holds the last probe result and
+/// the instant it was recorded; `None` means the probe has never run.
+pub type ProbeCache = tokio::sync::Mutex<Option<(bool, Instant)>>;
+
+/// Like [`probe_httpfs`], but caches the result for [`CACHE_TTL_SECS`]
+/// seconds. On a cache hit only a mutex lock + timestamp check is paid; no
+/// DuckDB connection is opened.
+pub async fn probe_httpfs_cached(cache: &ProbeCache) -> bool {
+  // Fast path: return cached result if still fresh.
+  {
+    let guard = cache.lock().await;
+    if let Some((result, ts)) = *guard {
+      if ts.elapsed().as_secs() < CACHE_TTL_SECS {
+        return result;
+      }
+    }
+  }
+  // Cache miss or expired — run the real probe then update the cache.
+  let result = probe_httpfs().await;
+  *cache.lock().await = Some((result, Instant::now()));
+  result
+}
 
 /// Returns `true` if the `httpfs` DuckDB extension can be installed and
 /// loaded, `false` on any error or timeout.
@@ -29,9 +59,8 @@ pub async fn probe_httpfs() -> bool {
       Ok(c) => c,
       Err(e) => {
         tracing::warn!(error = %e, "httpfs probe: failed to open in-memory connection");
-        // Return a dummy conn placeholder — can't send an interrupt handle
-        // without one, but the blocking task is already done here so the
-        // watchdog will just time out without an interrupt (safe).
+        // Can't send an interrupt handle without a connection; the watchdog
+        // will time out and fire into nothing (safe — rx is dropped here).
         return (false, None::<duckdb::Connection>);
       }
     };
@@ -63,19 +92,21 @@ pub async fn probe_httpfs() -> bool {
     }
   });
 
-  let result = match join.await {
+  // Abort and await the watchdog BEFORE destructuring `joined` so that conn
+  // (returned inside the Ok arm) is dropped only after the watchdog has
+  // fully exited — prevents the InterruptHandle::interrupt() / Connection::drop()
+  // race described in query_handler's inline comment.
+  let joined = join.await;
+  watchdog.abort();
+  let _ = watchdog.await;
+
+  match joined {
     Ok((ok, _conn)) => ok,
     Err(e) => {
       tracing::warn!(error = %e, "httpfs probe: blocking task panicked");
       false
     }
-  };
-  // abort() doesn't wait for a task already past its last await point;
-  // join it so a mid-interrupt watchdog finishes before conn (held inside
-  // the join result's Ok arm) is dropped.
-  watchdog.abort();
-  let _ = watchdog.await;
-  result
+  }
 }
 
 #[cfg(test)]
@@ -95,12 +126,29 @@ mod tests {
     );
   }
 
-  /// Smoke-test that the probe completes within PROBE_TIMEOUT_SECS + margin
-  /// even when the extension is already cached (the typical case).
+  /// Smoke-test that the probe completes without hanging or panicking.
+  /// Any outcome is acceptable in a non-networked environment.
   #[tokio::test]
   async fn probe_completes_promptly() {
-    // Just run it; any outcome is acceptable in a non-networked environment.
-    // The goal is to verify there's no hang or panic.
     let _result = probe_httpfs().await;
+  }
+
+  /// Cache hit: second call returns the cached value without re-probing.
+  #[tokio::test]
+  async fn cached_probe_returns_cached_result() {
+    let cache = ProbeCache::new(Some((true, Instant::now())));
+    // Should return true from cache without touching DuckDB.
+    assert!(probe_httpfs_cached(&cache).await);
+  }
+
+  /// Cache miss: expired entry triggers a new probe.
+  #[tokio::test]
+  async fn cached_probe_re_runs_when_expired() {
+    // Forge an entry that is clearly past the TTL.
+    let old = Instant::now() - Duration::from_secs(CACHE_TTL_SECS + 1);
+    let cache = ProbeCache::new(Some((true, old)));
+    // The re-probe may succeed or fail depending on environment; just verify
+    // it returns without hanging.
+    let _result = probe_httpfs_cached(&cache).await;
   }
 }
