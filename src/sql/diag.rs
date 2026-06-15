@@ -36,18 +36,24 @@ pub fn diagnose(target: &SqlTarget, context: Option<&str>, raw: &str) -> Option<
     .map(|c| format!("'{c}'"))
     .unwrap_or_else(|| "the path".to_string());
 
-  // Rule 1 — S3 write fell back to the sandboxed local filesystem.
-  // This is the most common root cause when httpfs or credentials are
-  // misconfigured: DuckDB cannot route the s3:// URI through httpfs and
-  // attempts the local filesystem, which is explicitly disabled in S3 mode.
+  // Rule 1 — an S3 operation needed the local filesystem, which is disabled in
+  // S3 mode. The s3:// path itself is fine; the local-FS access is incidental:
+  // typically DuckDB's httpfs extension was not active for this connection, so
+  // it could not route the s3:// URI and fell back to the (disabled) local
+  // filesystem. Note: with extension autoload disabled during session setup
+  // (see session::setup_statements), a missing httpfs now surfaces as a clearer
+  // "requires the extension httpfs" error caught by Rule 4 — so this rule
+  // mainly guards residual cases and keeps the message non-misleading.
   if lower.contains("localfilesystem") && lower.contains("disabled") {
     let hint = if is_s3 {
       format!(
-        "DuckDB tried to access {path_desc} through the local filesystem instead of S3/httpfs. \
-         Verify that: (1) the storage's S3 endpoint, region, and credentials are configured \
-         correctly; (2) the httpfs extension loaded successfully — it requires outbound network \
-         access to the DuckDB extension repository on first install; \
-         (3) the path resolves to an s3:// URI (not a local path).",
+        "The operation on {path_desc} required access to the server's local filesystem, which is \
+         disabled in S3 mode. The path is already an s3:// URI, so this is not a wrong-path \
+         problem — it usually means the httpfs extension was not active for this connection. \
+         Check that: (1) httpfs is installed and loads successfully — on first use it is fetched \
+         from the DuckDB extension repository, which needs outbound network access (pre-install \
+         it on the host if the server is offline); (2) the S3 endpoint, region, and credentials \
+         are configured so DuckDB can route the request through httpfs.",
       )
     } else {
       format!(
@@ -56,7 +62,7 @@ pub fn diagnose(target: &SqlTarget, context: Option<&str>, raw: &str) -> Option<
       )
     };
     return Some(Diagnosis {
-      summary: "S3 write fell back to the sandboxed local filesystem.".into(),
+      summary: "An S3 operation needed the local filesystem, which is disabled.".into(),
       hint,
     });
   }
@@ -230,6 +236,13 @@ mod tests {
       "hint must not say read-only: {}",
       diag.hint
     );
+    // Must NOT second-guess the path: the user already has an s3:// URI, so the
+    // old "(not a local path)" phrasing was misleading.
+    assert!(
+      !diag.hint.to_lowercase().contains("not a local path"),
+      "hint must not second-guess the s3:// path: {}",
+      diag.hint
+    );
   }
 
   #[test]
@@ -328,6 +341,28 @@ mod tests {
     assert!(
       diagnose(&local_target(), Some("/data/file"), raw).is_none(),
       "extension failure on local target should return None, not an httpfs hint"
+    );
+  }
+
+  #[test]
+  fn rule4_missing_extension_after_autoload_disabled() {
+    // With extension autoload disabled in session setup, a not-loaded httpfs
+    // surfaces as this "Missing Extension" error instead of the misleading
+    // "LocalFileSystem disabled" (Rule 1). It must classify as an extension
+    // problem (Rule 4), not the local-filesystem fallback (Rule 1).
+    let raw = "Missing Extension Error: File s3://infographics/x.parquet requires the \
+               extension httpfs to be loaded\nPlease try installing and loading the httpfs \
+               extension by running:\nINSTALL httpfs;\nLOAD httpfs;";
+    let diag = diagnose(&s3_target(), Some("s3://infographics/x.parquet"), raw).unwrap();
+    assert!(
+      diag.summary.to_lowercase().contains("extension"),
+      "summary should flag the extension problem: {}",
+      diag.summary
+    );
+    assert!(
+      !diag.summary.to_lowercase().contains("local filesystem"),
+      "should be Rule 4, not Rule 1: {}",
+      diag.summary
     );
   }
 
