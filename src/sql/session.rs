@@ -28,6 +28,16 @@ pub fn setup_statements(cfg: &SqlConfig, target: &SqlTarget) -> Result<String, A
       }
       out.push_str(&secret_sql(s3)?);
       push_resource_limits(&mut out, cfg);
+      // All required extensions are loaded explicitly above, so turn OFF lazy
+      // autoload/autoinstall. Once `disabled_filesystems` blocks LocalFileSystem
+      // (next line), DuckDB's autoloader can no longer read its on-disk
+      // extension cache; a lazy load triggered by first touching an s3:// URI
+      // then fails with the misleading "File system LocalFileSystem has been
+      // disabled by configuration". With autoload off, a genuinely missing
+      // httpfs instead surfaces as a clear "requires the extension httpfs to be
+      // loaded" error. Must come before `disabled_filesystems`.
+      out.push_str("SET autoinstall_known_extensions = false;\n");
+      out.push_str("SET autoload_known_extensions = false;\n");
       // Keep remote access (httpfs) but cut off the server's local disk.
       // `enable_external_access = false` would kill httpfs too, hence this
       // narrower setting.
@@ -215,6 +225,13 @@ mod tests {
     assert!(sql.contains("SET memory_limit = '512MB'"));
     assert!(sql.contains("SET threads = 2"));
     assert!(!sql.contains("INSTALL aws"), "static creds need no aws ext");
+    // Lazy extension autoload is disabled after the explicit loads and before
+    // the filesystem lockdown, so an s3:// reference never triggers an autoload
+    // that would hit the now-disabled LocalFileSystem.
+    assert!(sql.contains("SET autoinstall_known_extensions = false"));
+    assert!(sql.contains("SET autoload_known_extensions = false"));
+    assert!(pos("LOAD httpfs") < pos("autoload_known_extensions"));
+    assert!(pos("autoload_known_extensions") < pos("disabled_filesystems"));
   }
 
   #[test]
