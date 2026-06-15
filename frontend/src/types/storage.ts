@@ -104,6 +104,11 @@ export interface ServerInfo {
   /// affordance (edit / new file / delete / rename) when false. Writes still
   /// require the bearer token at request time regardless of this flag.
   write_enabled: boolean
+  /// Whether the DuckDB httpfs extension is available — prerequisite for SQL
+  /// queries against S3 storages. null when sql_enabled is false (non-duckdb
+  /// build or SQL gate off); true/false is the result of a real-time probe.
+  /// SPA shows a warning when false and the active storage is S3.
+  httpfs_ready: boolean | null
 }
 
 export interface ConvertResult {

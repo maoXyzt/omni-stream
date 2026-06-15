@@ -221,9 +221,32 @@ pub struct ServerInfo {
   /// affordance (edit / new file / delete / rename) when false. Writes still
   /// require the bearer token at request time regardless of this flag.
   pub write_enabled: bool,
+  /// Whether the DuckDB `httpfs` extension can be loaded — the prerequisite
+  /// for running SQL against S3 storages. `None` when `sql_enabled` is false
+  /// (non-duckdb build or SQL disabled); `Some(true/false)` is the result of
+  /// a real-time probe (`INSTALL httpfs; LOAD httpfs;`) run on each request.
+  /// The SPA shows a warning when this is `Some(false)` and the active
+  /// storage is S3, so the user learns about the missing extension before
+  /// their first query fails.
+  pub httpfs_ready: Option<bool>,
 }
 
 pub async fn server_info_handler(State(state): State<AppState>) -> Json<ServerInfo> {
+  // Probe httpfs availability when SQL is live. The probe opens a fresh
+  // in-memory DuckDB connection and executes `INSTALL httpfs; LOAD httpfs;`,
+  // which is fast (~10 ms) once the extension is cached in ~/.duckdb.
+  // A 5-second watchdog ensures offline deployments don't stall the response.
+  // Gated on the `duckdb` feature at compile time so non-duckdb builds never
+  // link against the extension machinery.
+  #[cfg(feature = "duckdb")]
+  let httpfs_ready: Option<bool> = if state.sql_enabled {
+    Some(crate::sql::probe::probe_httpfs().await)
+  } else {
+    None
+  };
+  #[cfg(not(feature = "duckdb"))]
+  let httpfs_ready: Option<bool> = None;
+
   Json(ServerInfo {
     hostname: state.hostname.as_str().to_string(),
     version: env!("CARGO_PKG_VERSION"),
@@ -231,6 +254,7 @@ pub async fn server_info_handler(State(state): State<AppState>) -> Json<ServerIn
     public_read: state.public_read,
     sql_enabled: state.sql_enabled,
     write_enabled: state.write_enabled(),
+    httpfs_ready,
   })
 }
 

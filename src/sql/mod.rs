@@ -10,6 +10,7 @@
 pub mod convert;
 pub mod diag;
 pub mod exec;
+pub mod probe;
 pub mod session;
 pub mod validate;
 

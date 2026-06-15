@@ -25,7 +25,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { executeQuery } from '@/api/query'
 import { extractErrorDetail } from '@/lib/api-error'
-import { useStorages } from '@/hooks/use-storage'
+import { useServerInfo, useStorages } from '@/hooks/use-storage'
 import { highlightSql } from '@/lib/highlight-sql'
 import type { StorageDescriptor } from '@/types/storage'
 import { TokenPrompt } from '@/components/TokenPrompt'
@@ -84,6 +84,7 @@ interface Props {
 
 export function ParquetSqlTab({ fileKey, storage }: Props) {
   const storagesQuery = useStorages()
+  const { data: serverInfo } = useServerInfo()
 
   /// Resolve the storage descriptor — used only for building the pre-fill SQL
   /// path. Prefer the explicitly passed storage name; fall back to the server's
@@ -94,6 +95,11 @@ export function ParquetSqlTab({ fileKey, storage }: Props) {
     const name = storage ?? storagesQuery.data?.default
     return list.find((s) => s.name === name) ?? list.find((s) => s.valid)
   }, [storagesQuery.data, storage])
+
+  /// Show a pre-query warning when httpfs is unavailable and the storage is S3.
+  /// Local storages do not use httpfs, so the warning is suppressed for them.
+  const httpfsUnavailable =
+    descriptor?.type === 's3' && serverInfo?.httpfs_ready === false
 
   /// The storage name to pass to executeQuery.
   const storageName = storage ?? storagesQuery.data?.default ?? ''
@@ -206,6 +212,22 @@ export function ParquetSqlTab({ fileKey, storage }: Props) {
           </span>
         )}
       </div>
+
+      {httpfsUnavailable && (
+        <Alert className="shrink-0 border-amber-500/50 text-amber-600 dark:text-amber-400">
+          <TriangleAlert className="size-4" />
+          <AlertTitle>httpfs extension unavailable</AlertTitle>
+          <AlertDescription>
+            The DuckDB httpfs extension could not be loaded — S3 SQL queries
+            will fail. The server needs outbound network access to the DuckDB
+            extension repository on first use. Alternatively, pre-install on
+            the host:{' '}
+            <code className="font-mono text-xs">
+              duckdb -c &quot;INSTALL httpfs; INSTALL aws;&quot;
+            </code>
+          </AlertDescription>
+        </Alert>
+      )}
 
       {result?.truncated && (
         <Alert className="shrink-0 border-amber-500/50 text-amber-600 dark:text-amber-400">

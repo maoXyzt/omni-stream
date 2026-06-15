@@ -132,6 +132,15 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
     (rowsFormat === 'jsonl' || rowsFormat === 'csv') &&
     Boolean(serverInfo.data?.sql_enabled) &&
     Boolean(storage)
+  // Warn when the storage is S3 and the httpfs extension is confirmed
+  // unavailable — local storages do not use httpfs, so the flag is suppressed
+  // for them. Only shown when canConvert is true (the convert button is visible)
+  // so the warning is contextual, not always-on noise.
+  const showHttpfsWarning =
+    canConvert &&
+    descriptor?.type === 's3' &&
+    serverInfo.data?.httpfs_ready === false
+
   // Button label reflects the source format so the conversion direction is clear.
   const convertLabel = useMemo(() => {
     if (rowsFormat === 'jsonl') return 'JSONL → Parquet'
@@ -636,6 +645,24 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
           </select>
         </div>
       </div>
+
+      {showHttpfsWarning && (
+        <div className="px-3 pt-3">
+          <Alert className="border-amber-500/50 text-amber-600 dark:text-amber-400">
+            <AlertCircle className="size-4" />
+            <AlertTitle>httpfs extension unavailable</AlertTitle>
+            <AlertDescription>
+              The DuckDB httpfs extension could not be loaded — the conversion
+              will fail. The server needs outbound network access to the DuckDB
+              extension repository on first use. Alternatively, pre-install on
+              the host:{' '}
+              <code className="font-mono text-xs">
+                duckdb -c &quot;INSTALL httpfs; INSTALL aws;&quot;
+              </code>
+            </AlertDescription>
+          </Alert>
+        </div>
+      )}
 
       {showRowsHint && (
         <div className="px-3 pt-3">
