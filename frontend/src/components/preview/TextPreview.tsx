@@ -132,14 +132,6 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
     (rowsFormat === 'jsonl' || rowsFormat === 'csv') &&
     Boolean(serverInfo.data?.sql_enabled) &&
     Boolean(storage)
-  // Warn when the storage is S3 and the httpfs extension is confirmed
-  // unavailable — local storages do not use httpfs, so the flag is suppressed
-  // for them. Only shown when canConvert is true (the convert button is visible)
-  // so the warning is contextual, not always-on noise.
-  const showHttpfsWarning =
-    canConvert &&
-    descriptor?.type === 's3' &&
-    serverInfo.data?.httpfs_ready === false
 
   // Button label reflects the source format so the conversion direction is clear.
   const convertLabel = useMemo(() => {
@@ -398,6 +390,13 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
   // matching the convert flow — so the Edit button shows even before sign-in.
   const storages = useStorages()
   const descriptor = storages.data?.storages.find((s) => s.name === storage)
+  // Warn when the storage is S3 and httpfs is confirmed unavailable — local
+  // storages don't use httpfs, so the flag is suppressed for them. Only shown
+  // when canConvert is true (the convert button is visible).
+  const showHttpfsWarning =
+    canConvert &&
+    descriptor?.type === 's3' &&
+    serverInfo.data?.httpfs_ready === false
   const canWrite = Boolean(
     storage && descriptor?.writeable && serverInfo.data?.write_enabled,
   )
