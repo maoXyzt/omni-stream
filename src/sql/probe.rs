@@ -33,10 +33,10 @@ pub async fn probe_httpfs_cached(cache: &ProbeCache) -> bool {
   // Fast path: return cached result if still fresh.
   {
     let guard = cache.lock().await;
-    if let Some((result, ts)) = *guard {
-      if ts.elapsed().as_secs() < CACHE_TTL_SECS {
-        return result;
-      }
+    if let Some((result, ts)) = *guard
+      && ts.elapsed().as_secs() < CACHE_TTL_SECS
+    {
+      return result;
     }
   }
   // Cache miss or expired — run the real probe then update the cache.
