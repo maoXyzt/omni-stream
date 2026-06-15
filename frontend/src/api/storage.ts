@@ -1,4 +1,5 @@
 import { apiClient } from '@/api/client'
+import { encodeKey } from '@/lib/path'
 import type {
   FileMeta,
   ListResult,
@@ -93,14 +94,4 @@ export function thumbUrl(key: string, opts: ThumbOptions = {}): string {
   const qs = params.toString()
   const base = `/api/thumb/${encodeKey(key)}`
   return qs ? `${base}?${qs}` : base
-}
-
-// Path segments are encoded individually so that `/` separators stay literal
-// (the backend route is `/api/proxy/{*key}` — a wildcard that wants raw slashes).
-function encodeKey(key: string): string {
-  return key
-    .replace(/\/+$/, '')
-    .split('/')
-    .map(encodeURIComponent)
-    .join('/')
 }

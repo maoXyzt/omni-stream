@@ -255,6 +255,7 @@ const MULTI_BUCKET_S3: StorageDescriptor = {
   name: 'main',
   type: 's3',
   valid: true,
+  writeable: false,
   s3: { bucket: null },
 }
 
@@ -263,6 +264,7 @@ const SINGLE_BUCKET_S3: StorageDescriptor = {
   name: 'mybucket-storage',
   type: 's3',
   valid: true,
+  writeable: false,
   s3: { bucket: 'mybucket' },
 }
 
@@ -271,6 +273,7 @@ const LOCAL_STORAGE: StorageDescriptor = {
   name: 'local',
   type: 'local',
   valid: true,
+  writeable: false,
   local: { root_path: '/data' },
 }
 

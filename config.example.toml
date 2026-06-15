@@ -23,7 +23,7 @@
 # Read/write granularity (only applies when enabled = true):
 #   public_read = true   # DEFAULT — browsing / preview / download stay open;
 #                        # only writes (SQL queries, JSONL->Parquet convert,
-#                        # plus any future upload / delete) require the token.
+#                        # file create / edit / delete / rename) require the token.
 #   public_read = false  # full lockdown — every request requires the token.
 #                        # NOTE: the /raw file mount relies on bearer-header
 #                        # auth; browsers can't inject bearer headers on
@@ -42,6 +42,8 @@
 [[storages]]
 name = "production-s3"  # required; shown in UI, used as ?storage=<name>
 type = "s3"             # required
+# writeable = false     # default; true → allow create/edit/delete/rename of
+#                       # files via the write API. Requires auth.enabled = true.
 
 [storages.s3]
 access_key = "minioadmin"              # required for static creds (omit for IAM role / anonymous)
@@ -56,6 +58,8 @@ secret_key = "minioadmin"              # required for static creds
 name = "local-data"  # required
 type = "local"       # required
 # active = false     # default
+# writeable = false  # default; true → allow create/edit/delete/rename of files
+#                    # via the write API. Requires auth.enabled = true.
 
 [storages.local]
 root_path = "/var/lib/omni-stream"  # required; absolute or ~-prefixed, no ".." traversal

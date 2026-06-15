@@ -16,6 +16,7 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
+  FilePlus,
   KeyRound,
   Loader2,
   LogOut,
@@ -49,6 +50,7 @@ import { formatBytes, formatTime } from '@/lib/format'
 import { sortEntries } from '@/lib/sort'
 import { EntryContextMenu } from '@/components/EntryContextMenu'
 import { EntryIcon } from '@/components/EntryIcon'
+import { NewFileDialog } from '@/components/NewFileDialog'
 import { FileGrid } from '@/components/FileGrid'
 import { PathBreadcrumb } from '@/components/PathBreadcrumb'
 import { PathNavigator } from '@/components/PathNavigator'
@@ -127,9 +129,16 @@ export function FileList() {
   // user with no token never hits a read 401 — this lets them enter the token
   // up front (e.g. before running a write) instead of waiting to be prompted.
   const [showTokenPrompt, setShowTokenPrompt] = useState(false)
+  // Toggles the "New file" creation dialog (only shown for writeable storages).
+  const [showNewFile, setShowNewFile] = useState(false)
   const activeStorage = useMemo(
     () => storagesQuery.data?.storages.find((s) => s.name === storageName),
     [storagesQuery.data, storageName],
+  )
+  // A storage opted into writes, with the server's write gate on. Gates the
+  // "New file" entry point (and, downstream, the row context-menu actions).
+  const canWrite = Boolean(
+    storageName && activeStorage?.writeable && serverInfo.data?.write_enabled,
   )
   // True only when this storage hands out raw buckets at the root (S3
   // multi-bucket mode). Threaded into the list / grid / sidebar so entry
@@ -1005,6 +1014,21 @@ export function FileList() {
                 </TooltipTrigger>
                 <TooltipContent>Refresh listing</TooltipContent>
               </Tooltip>
+              {canWrite && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      aria-label="New file"
+                      onClick={() => setShowNewFile(true)}
+                    >
+                      <FilePlus className="size-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Create a new file here</TooltipContent>
+                </Tooltip>
+              )}
               <ViewToggle mode={viewMode} onChange={setViewMode} />
               {viewMode === 'grid' && (
                 <GridFitToggle fit={gridFit} onChange={setGridFit} />
@@ -1057,6 +1081,14 @@ export function FileList() {
                 queryClient.invalidateQueries()
               }}
               onCancel={() => setShowTokenPrompt(false)}
+            />
+          )}
+
+          {showNewFile && storageName && (
+            <NewFileDialog
+              storage={storageName}
+              prefix={prefix}
+              onClose={() => setShowNewFile(false)}
             />
           )}
 

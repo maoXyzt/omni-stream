@@ -5,11 +5,14 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
 use async_trait::async_trait;
+use bytes::Bytes;
 use tokio::fs;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio_util::io::ReaderStream;
 
-use super::{FileEntry, FileMeta, GetOptions, ListResult, StorageBackend, StorageResponse};
+use super::{
+  FileEntry, FileMeta, GetOptions, ListResult, PutOptions, StorageBackend, StorageResponse,
+};
 use crate::error::AppError;
 
 const LIST_PAGE_SIZE: usize = 1000;
@@ -67,6 +70,14 @@ impl ListingCache {
       return None;
     }
     Some(entry.keys.clone())
+  }
+
+  /// Drop the cached listing for `prefix` so the next list re-scans. Called
+  /// after a write / delete / move changed that directory's contents — the
+  /// 10s TTL would otherwise serve a stale snapshot right after the user's
+  /// own edit.
+  fn invalidate(&self, prefix: &str) {
+    self.inner.lock().unwrap().remove(prefix);
   }
 
   fn put(&self, prefix: &str, keys: Arc<Vec<(String, bool, bool)>>) {
@@ -321,6 +332,28 @@ fn system_time_to_unix_string(t: SystemTime) -> Option<String> {
     .map(|d| d.as_secs().to_string())
 }
 
+/// The directory prefix a key lives under, in the same form the listing cache
+/// is keyed by (trailing slash, or `""` for the root). `"a/b/c.txt"` →
+/// `"a/b/"`, `"c.txt"` → `""`. Used to invalidate the right cache entry after
+/// a write / delete / move.
+fn parent_prefix(key: &str) -> String {
+  let trimmed = key.trim_end_matches('/');
+  match trimmed.rfind('/') {
+    Some(i) => trimmed[..=i].to_string(),
+    None => String::new(),
+  }
+}
+
+/// A unique-enough temp filename for the write-then-rename atomic publish.
+/// Lives in the target's own directory so the rename stays on one filesystem.
+fn temp_name() -> String {
+  let nanos = SystemTime::now()
+    .duration_since(SystemTime::UNIX_EPOCH)
+    .map(|d| d.as_nanos())
+    .unwrap_or(0);
+  format!(".omni-tmp-{}-{}", std::process::id(), nanos)
+}
+
 #[async_trait]
 impl StorageBackend for LocalFsBackend {
   async fn get_file(&self, path: &str, opts: GetOptions) -> Result<StorageResponse, AppError> {
@@ -491,6 +524,139 @@ impl StorageBackend for LocalFsBackend {
         .and_then(system_time_to_unix_string),
       is_dir,
     })
+  }
+
+  async fn put_file(
+    &self,
+    path: &str,
+    body: Bytes,
+    opts: PutOptions,
+  ) -> Result<FileMeta, AppError> {
+    let full = self.resolve(path)?;
+
+    // Inspect any existing entry with lstat (never follow): writing *through*
+    // a symlink could land outside the root, so a symlink at the target is
+    // always refused, regardless of `follow_symlinks`.
+    match fs::symlink_metadata(&full).await {
+      Ok(m) => {
+        if m.file_type().is_symlink() {
+          return Err(AppError::Forbidden(format!(
+            "refusing to write through a symlink: {path}"
+          )));
+        }
+        if m.is_dir() {
+          return Err(AppError::Unsupported(format!(
+            "path is a directory: {path}"
+          )));
+        }
+        if !opts.overwrite {
+          return Err(AppError::Conflict(format!(
+            "file already exists: '{path}'. Set overwrite=true to replace it."
+          )));
+        }
+      }
+      Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+      Err(e) => return Err(AppError::Io(e)),
+    }
+
+    let parent = full
+      .parent()
+      .ok_or_else(|| AppError::InvalidPath(path.to_string()))?;
+    fs::create_dir_all(parent).await?;
+
+    // Atomic publish: write a temp file in the same directory, then rename it
+    // over the target. Readers never observe a half-written file, and the
+    // rename is atomic on a single filesystem. Clean up the temp on failure.
+    let tmp = parent.join(temp_name());
+    if let Err(e) = fs::write(&tmp, &body).await {
+      let _ = fs::remove_file(&tmp).await;
+      return Err(AppError::Io(e));
+    }
+    if let Err(e) = fs::rename(&tmp, &full).await {
+      let _ = fs::remove_file(&tmp).await;
+      return Err(AppError::Io(e));
+    }
+
+    self.cache.invalidate(&parent_prefix(path));
+    self.stat(path).await
+  }
+
+  async fn delete_file(&self, path: &str) -> Result<(), AppError> {
+    let full = self.resolve(path)?;
+    let meta = match fs::symlink_metadata(&full).await {
+      Ok(m) => m,
+      Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+        return Err(AppError::NotFound(path.to_string()));
+      }
+      Err(e) => return Err(AppError::Io(e)),
+    };
+    if meta.file_type().is_symlink() {
+      return Err(AppError::Forbidden(format!(
+        "refusing to delete a symlink: {path}"
+      )));
+    }
+    if meta.is_dir() {
+      return Err(AppError::Unsupported(format!(
+        "refusing to delete a directory: {path}"
+      )));
+    }
+    fs::remove_file(&full).await?;
+    self.cache.invalidate(&parent_prefix(path));
+    Ok(())
+  }
+
+  async fn move_file(&self, from: &str, to: &str, opts: PutOptions) -> Result<FileMeta, AppError> {
+    let from_full = self.resolve(from)?;
+    let to_full = self.resolve(to)?;
+
+    let from_meta = match fs::symlink_metadata(&from_full).await {
+      Ok(m) => m,
+      Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+        return Err(AppError::NotFound(from.to_string()));
+      }
+      Err(e) => return Err(AppError::Io(e)),
+    };
+    if from_meta.file_type().is_symlink() {
+      return Err(AppError::Forbidden(format!(
+        "refusing to move a symlink: {from}"
+      )));
+    }
+    if from_meta.is_dir() {
+      return Err(AppError::Unsupported(format!(
+        "refusing to move a directory: {from}"
+      )));
+    }
+
+    match fs::symlink_metadata(&to_full).await {
+      Ok(m) => {
+        if m.file_type().is_symlink() {
+          return Err(AppError::Forbidden(format!(
+            "refusing to overwrite a symlink: {to}"
+          )));
+        }
+        if m.is_dir() {
+          return Err(AppError::Unsupported(format!(
+            "target is a directory: {to}"
+          )));
+        }
+        if !opts.overwrite {
+          return Err(AppError::Conflict(format!(
+            "file already exists: '{to}'. Set overwrite=true to replace it."
+          )));
+        }
+      }
+      Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+      Err(e) => return Err(AppError::Io(e)),
+    }
+
+    if let Some(parent) = to_full.parent() {
+      fs::create_dir_all(parent).await?;
+    }
+    fs::rename(&from_full, &to_full).await?;
+
+    self.cache.invalidate(&parent_prefix(from));
+    self.cache.invalidate(&parent_prefix(to));
+    self.stat(to).await
   }
 }
 
@@ -776,5 +942,183 @@ mod tests {
     assert_eq!(resp.content_length, Some(0));
     assert!(!resp.is_partial);
     assert!(resp.content_range.is_none());
+  }
+
+  // --- writes ------------------------------------------------------------
+
+  #[test]
+  fn parent_prefix_strips_basename() {
+    assert_eq!(parent_prefix("a/b/c.txt"), "a/b/");
+    assert_eq!(parent_prefix("c.txt"), "");
+    assert_eq!(parent_prefix("a/b/"), "a/");
+    assert_eq!(parent_prefix("top/"), "");
+  }
+
+  #[tokio::test]
+  async fn put_creates_new_file_and_nested_dirs() {
+    let dir = tempdir();
+    let backend = LocalFsBackend::new(&dir, true);
+
+    let meta = backend
+      .put_file(
+        "sub/deep/new.txt",
+        Bytes::from_static(b"hello"),
+        PutOptions::default(),
+      )
+      .await
+      .expect("create");
+    assert_eq!(meta.size, 5);
+    assert!(!meta.is_dir);
+    assert_eq!(
+      std::fs::read(dir.join("sub/deep/new.txt")).unwrap(),
+      b"hello"
+    );
+  }
+
+  #[tokio::test]
+  async fn put_without_overwrite_conflicts_on_existing() {
+    let dir = tempdir();
+    seed_files(&dir, &["a.txt"]);
+    let backend = LocalFsBackend::new(&dir, true);
+
+    let err = backend
+      .put_file("a.txt", Bytes::from_static(b"new"), PutOptions::default())
+      .await
+      .expect_err("should conflict");
+    assert!(matches!(err, AppError::Conflict(_)));
+    // Original content untouched.
+    assert_eq!(std::fs::read(dir.join("a.txt")).unwrap(), b"x");
+  }
+
+  #[tokio::test]
+  async fn put_with_overwrite_replaces() {
+    let dir = tempdir();
+    seed_files(&dir, &["a.txt"]);
+    let backend = LocalFsBackend::new(&dir, true);
+
+    backend
+      .put_file(
+        "a.txt",
+        Bytes::from_static(b"replaced"),
+        PutOptions {
+          overwrite: true,
+          ..Default::default()
+        },
+      )
+      .await
+      .expect("overwrite");
+    assert_eq!(std::fs::read(dir.join("a.txt")).unwrap(), b"replaced");
+  }
+
+  #[tokio::test]
+  async fn put_rejects_parent_traversal() {
+    let dir = tempdir();
+    let backend = LocalFsBackend::new(&dir, true);
+    let err = backend
+      .put_file(
+        "../escape.txt",
+        Bytes::from_static(b"x"),
+        PutOptions::default(),
+      )
+      .await
+      .expect_err("should reject ..");
+    assert!(matches!(err, AppError::InvalidPath(_)));
+  }
+
+  #[tokio::test]
+  async fn put_invalidates_listing_cache() {
+    let dir = tempdir();
+    seed_files(&dir, &["a.txt"]);
+    let backend = LocalFsBackend::new(&dir, true);
+
+    // Warm the cache.
+    let first = backend.list_files("", None).await.unwrap();
+    assert_eq!(first.entries.len(), 1);
+
+    backend
+      .put_file("b.txt", Bytes::from_static(b"x"), PutOptions::default())
+      .await
+      .unwrap();
+
+    // Without invalidation the 10s TTL would still report 1 entry.
+    let second = backend.list_files("", None).await.unwrap();
+    assert_eq!(second.entries.len(), 2);
+  }
+
+  #[tokio::test]
+  async fn delete_removes_file_and_404s_when_missing() {
+    let dir = tempdir();
+    seed_files(&dir, &["a.txt"]);
+    let backend = LocalFsBackend::new(&dir, true);
+
+    backend.delete_file("a.txt").await.expect("delete");
+    assert!(!dir.join("a.txt").exists());
+
+    let err = backend.delete_file("a.txt").await.expect_err("missing");
+    assert!(matches!(err, AppError::NotFound(_)));
+  }
+
+  #[tokio::test]
+  async fn delete_refuses_directory() {
+    let dir = tempdir();
+    std::fs::create_dir(dir.join("d")).unwrap();
+    let backend = LocalFsBackend::new(&dir, true);
+    let err = backend.delete_file("d").await.expect_err("dir");
+    assert!(matches!(err, AppError::Unsupported(_)));
+  }
+
+  #[tokio::test]
+  async fn move_renames_file() {
+    let dir = tempdir();
+    seed_files(&dir, &["a.txt"]);
+    let backend = LocalFsBackend::new(&dir, true);
+
+    let meta = backend
+      .move_file("a.txt", "sub/b.txt", PutOptions::default())
+      .await
+      .expect("move");
+    assert_eq!(meta.path, "sub/b.txt");
+    assert!(!dir.join("a.txt").exists());
+    assert_eq!(std::fs::read(dir.join("sub/b.txt")).unwrap(), b"x");
+  }
+
+  #[tokio::test]
+  async fn move_conflicts_on_existing_target() {
+    let dir = tempdir();
+    seed_files(&dir, &["a.txt", "b.txt"]);
+    let backend = LocalFsBackend::new(&dir, true);
+
+    let err = backend
+      .move_file("a.txt", "b.txt", PutOptions::default())
+      .await
+      .expect_err("should conflict");
+    assert!(matches!(err, AppError::Conflict(_)));
+    // Both still present.
+    assert!(dir.join("a.txt").exists());
+    assert!(dir.join("b.txt").exists());
+  }
+
+  #[cfg(unix)]
+  #[tokio::test]
+  async fn put_refuses_to_write_through_symlink() {
+    let dir = tempdir();
+    std::fs::write(dir.join("real.txt"), b"orig").unwrap();
+    std::os::unix::fs::symlink(dir.join("real.txt"), dir.join("link.txt")).unwrap();
+    let backend = LocalFsBackend::new(&dir, true);
+
+    let err = backend
+      .put_file(
+        "link.txt",
+        Bytes::from_static(b"pwn"),
+        PutOptions {
+          overwrite: true,
+          ..Default::default()
+        },
+      )
+      .await
+      .expect_err("should refuse symlink");
+    assert!(matches!(err, AppError::Forbidden(_)));
+    // Target of the symlink was not modified.
+    assert_eq!(std::fs::read(dir.join("real.txt")).unwrap(), b"orig");
   }
 }

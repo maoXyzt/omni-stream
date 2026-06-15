@@ -7,6 +7,19 @@ export function basenameOf(key: string): string {
   return slash < 0 ? stripped : stripped.slice(slash + 1)
 }
 
+/// Encode a storage key for use in a path-wildcard API route
+/// (`/api/proxy/{*key}`, `/api/files/{*key}`, …). Each segment is
+/// percent-encoded individually so `/` separators stay literal (the backend
+/// wildcard wants raw slashes) while spaces, `#`, `?`, non-ASCII, etc. inside
+/// a segment are escaped. Trailing slashes are stripped first.
+export function encodeKey(key: string): string {
+  return key
+    .replace(/\/+$/, '')
+    .split('/')
+    .map(encodeURIComponent)
+    .join('/')
+}
+
 /// Lowercase file extension of a storage key, without the leading dot.
 /// Returns `null` for directory keys (trailing `/`), extension-less keys,
 /// and keys whose final `.` is the last character (e.g. `Makefile`, `archive.tar.`).

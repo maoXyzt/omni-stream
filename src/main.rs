@@ -15,6 +15,7 @@ use std::time::{Duration, SystemTime};
 
 use anyhow::Context;
 use axum::Router;
+use axum::extract::DefaultBodyLimit;
 use axum::http::StatusCode;
 use axum::middleware;
 use axum::routing::get;
@@ -28,11 +29,19 @@ use tracing_subscriber::util::SubscriberInitExt;
 use crate::auth::{AuthLayer, auth_middleware};
 use crate::config::Config;
 use crate::handlers::{
-  AppState, list_handler, list_storages_handler, proxy_handler, raw_handler, raw_root_handler,
-  server_info_handler, stat_handler, static_handler, thumb_handler,
+  AppState, delete_file_handler, list_handler, list_storages_handler, move_file_handler,
+  proxy_handler, put_file_handler, raw_handler, raw_root_handler, server_info_handler,
+  stat_handler, static_handler, thumb_handler,
 };
 use crate::storage::factory::create_registry;
 use crate::thumbs::ThumbState;
+
+/// Upper bound on a single file-write request body (`PUT /api/files`). Text
+/// and code files are small; the cap keeps a write from buffering an
+/// unbounded request into memory (the handler collects the body into `Bytes`).
+/// axum's default extractor limit is 2 MiB, so this is set explicitly to allow
+/// larger edits. Mirrored in the SPA, which disables the editor above it.
+const MAX_PUT_BYTES: usize = 16 * 1024 * 1024;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -93,8 +102,9 @@ async fn main() -> anyhow::Result<()> {
   // write group enforces it whenever the gate is on.
   let auth_token = AuthLayer::token_from_config(&cfg.auth).context("init auth gate")?;
   let read_auth = AuthLayer::read(&cfg.auth, auth_token.clone());
-  // `write_auth` is consumed only inside the `duckdb` cfg block below; binding
-  // it here (vs at the use site) would warn as unused in non-duckdb builds.
+  // `write_auth` is bound at each write-router site below (the file write
+  // group, and the duckdb-gated convert group) rather than here, so it isn't
+  // left dangling in builds that compile only one of them.
   if !cfg.auth.enabled {
     tracing::info!("auth gate disabled (open API)");
   } else if cfg.auth.public_read {
@@ -184,6 +194,24 @@ async fn main() -> anyhow::Result<()> {
   );
 
   let app = app.route_layer(middleware::from_fn_with_state(read_auth, auth_middleware));
+
+  // File write group — create / edit / delete / rename. Independent of the
+  // `duckdb` feature (unlike `/api/convert` below), so it lives in its own
+  // router. `write_auth` requires the token whenever the gate is on; the
+  // per-storage `writeable` flag is enforced inside the handlers via
+  // `resolve_writeable`. The body cap bounds how much a single PUT can buffer.
+  let app = {
+    let write_auth = AuthLayer::write(&cfg.auth, auth_token.clone());
+    let files_router = Router::new()
+      .route(
+        "/api/files/{*key}",
+        axum::routing::put(put_file_handler).delete(delete_file_handler),
+      )
+      .route("/api/move", axum::routing::post(move_file_handler))
+      .layer(DefaultBodyLimit::max(MAX_PUT_BYTES))
+      .route_layer(middleware::from_fn_with_state(write_auth, auth_middleware));
+    app.merge(files_router)
+  };
 
   // Write / privileged group. `/api/convert` writes a Parquet file, so it
   // always requires the token when the gate is on (`write_auth`), independent
