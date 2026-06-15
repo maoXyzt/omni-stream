@@ -718,7 +718,9 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
           <DialogHeader>
             <DialogTitle>Conversion failed</DialogTitle>
             {convertError && (
-              <DialogDescription>{convertError.message}</DialogDescription>
+              <DialogDescription className="break-words">
+                {convertError.message}
+              </DialogDescription>
             )}
           </DialogHeader>
 
@@ -726,12 +728,14 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
             <Alert>
               <AlertCircle className="size-4" />
               <AlertTitle>How to fix</AlertTitle>
-              <AlertDescription>{convertError.hint}</AlertDescription>
+              <AlertDescription className="min-w-0 break-words">
+                {convertError.hint}
+              </AlertDescription>
             </Alert>
           )}
 
           {convertError?.raw && (
-            <div className="space-y-1">
+            <div className="min-w-0 space-y-1">
               <div className="flex items-center justify-between">
                 <p className="text-xs font-medium text-muted-foreground">
                   DuckDB error
