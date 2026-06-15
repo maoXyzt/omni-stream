@@ -704,6 +704,16 @@ impl StorageBackend for S3Backend {
       ));
     }
 
+    // Guard against moving an object onto itself. The rename is copy+delete,
+    // so for from == to the copy is a no-op but the delete would then remove
+    // the object — silent data loss. (Local fs `rename(x, x)` is a safe no-op,
+    // so this guard is S3-specific.)
+    if from_bucket == to_bucket && from_key == to_key {
+      return Err(AppError::InvalidPath(
+        "S3 move source and destination are the same object".into(),
+      ));
+    }
+
     if !opts.overwrite {
       match self
         .client

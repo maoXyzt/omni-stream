@@ -80,9 +80,12 @@ const ROWS_PARAM = 'rows'
 const LOAD_ALL_WARN_BYTES = 5 * 1024 * 1024
 const LOAD_ALL_HEAVY_BYTES = 20 * 1024 * 1024
 
-// Mirror of the backend's MAX_PUT_BYTES (16 MiB). Files above this can't be
-// saved (the PUT would 413), so the Edit button is disabled for them.
-const MAX_EDIT_BYTES = 16 * 1024 * 1024
+// Editor-usability cap, intentionally far below the backend's 16 MiB
+// MAX_PUT_BYTES (which is the hard save limit). react-simple-code-editor
+// re-highlights and re-renders the entire document on every keystroke, so
+// multi-MiB files make typing janky; 2 MiB keeps inline editing responsive.
+// Above this the Edit button is disabled (the file can still be downloaded).
+const MAX_EDIT_BYTES = 2 * 1024 * 1024
 
 // react-simple-code-editor 0.14.x ships a CJS bundle whose default export is
 // the component; ESM interop wraps it as { default }. Handle both shapes (same

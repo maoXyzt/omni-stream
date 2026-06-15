@@ -336,6 +336,7 @@ pub struct PutQuery {
 /// file content (capped by the route's `DefaultBodyLimit`); `Content-Type` is
 /// forwarded to the backend. Requires a writeable storage (else 403) and a
 /// valid token (the route sits behind `write_auth`).
+#[tracing::instrument(skip_all, fields(storage = ?q.storage, key = %key, overwrite = q.overwrite))]
 pub async fn put_file_handler(
   State(state): State<AppState>,
   Query(q): Query<PutQuery>,
@@ -362,6 +363,7 @@ pub async fn put_file_handler(
 }
 
 /// `DELETE /api/files/{*key}` — delete a file. Returns 204 on success.
+#[tracing::instrument(skip_all, fields(storage = ?q.storage, key = %key))]
 pub async fn delete_file_handler(
   State(state): State<AppState>,
   Query(q): Query<StorageSelector>,
@@ -384,6 +386,7 @@ pub struct MoveRequest {
 
 /// `POST /api/move` — rename / move a file. Body carries `from` + `to` so it
 /// can express both paths (unlike the key-in-path PUT/DELETE).
+#[tracing::instrument(skip_all, fields(storage = ?req.storage, from = %req.from, to = %req.to, overwrite = req.overwrite))]
 pub async fn move_file_handler(
   State(state): State<AppState>,
   Json(req): Json<MoveRequest>,

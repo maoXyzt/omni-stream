@@ -7,7 +7,7 @@ use std::time::{Duration, Instant, SystemTime};
 use async_trait::async_trait;
 use bytes::Bytes;
 use tokio::fs;
-use tokio::io::{AsyncReadExt, AsyncSeekExt};
+use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 use tokio_util::io::ReaderStream;
 
 use super::{
@@ -567,8 +567,24 @@ impl StorageBackend for LocalFsBackend {
     // Atomic publish: write a temp file in the same directory, then rename it
     // over the target. Readers never observe a half-written file, and the
     // rename is atomic on a single filesystem. Clean up the temp on failure.
+    //
+    // `create_new(true)` (O_CREAT|O_EXCL) refuses to open if the temp path
+    // already exists — including as a symlink, which it will NOT follow. That
+    // closes a symlink-swap window: even though the temp lives inside the
+    // storage root (not a world-writable dir), an attacker who could pre-plant
+    // a symlink there must not be able to redirect our write through it.
     let tmp = parent.join(temp_name());
-    if let Err(e) = fs::write(&tmp, &body).await {
+    let write_res = async {
+      let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&tmp)
+        .await?;
+      file.write_all(&body).await?;
+      file.sync_all().await
+    }
+    .await;
+    if let Err(e) = write_res {
       let _ = fs::remove_file(&tmp).await;
       return Err(AppError::Io(e));
     }
@@ -1080,6 +1096,29 @@ mod tests {
     assert_eq!(meta.path, "sub/b.txt");
     assert!(!dir.join("a.txt").exists());
     assert_eq!(std::fs::read(dir.join("sub/b.txt")).unwrap(), b"x");
+  }
+
+  #[tokio::test]
+  async fn move_onto_itself_keeps_the_file() {
+    // Local rename(x, x) is a safe no-op, so a same-path move with overwrite
+    // must leave the file intact — unlike S3, where move is copy+delete and a
+    // self-move is guarded against in the backend to avoid data loss.
+    let dir = tempdir();
+    std::fs::write(dir.join("a.txt"), b"keep").unwrap();
+    let backend = LocalFsBackend::new(&dir, true);
+
+    backend
+      .move_file(
+        "a.txt",
+        "a.txt",
+        PutOptions {
+          overwrite: true,
+          ..Default::default()
+        },
+      )
+      .await
+      .expect("self-move is a no-op");
+    assert_eq!(std::fs::read(dir.join("a.txt")).unwrap(), b"keep");
   }
 
   #[tokio::test]
