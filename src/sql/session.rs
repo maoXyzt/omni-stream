@@ -21,10 +21,16 @@ pub fn resolve_scratch_dir(configured: Option<&str>) -> std::path::PathBuf {
 }
 
 fn expand_tilde(s: &str) -> std::path::PathBuf {
-  if let Some(rest) = s.strip_prefix("~/")
+  if let Some(rest) = s.strip_prefix('~')
+    && (rest.is_empty() || rest.starts_with('/'))
     && let Some(home) = std::env::var_os("HOME")
   {
-    return std::path::PathBuf::from(home).join(rest);
+    let mut p = std::path::PathBuf::from(home);
+    let trimmed = rest.strip_prefix('/').unwrap_or(rest);
+    if !trimmed.is_empty() {
+      p.push(trimmed);
+    }
+    return p;
   }
   std::path::PathBuf::from(s)
 }

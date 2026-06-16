@@ -238,7 +238,7 @@ async fn main() -> anyhow::Result<()> {
   #[cfg(feature = "duckdb")]
   let sql_state = sql::SqlState::from_config(&cfg);
   #[cfg(feature = "duckdb")]
-  if let Err(e) = std::fs::create_dir_all(&sql_state.scratch_dir) {
+  if let Err(e) = tokio::fs::create_dir_all(&sql_state.scratch_dir).await {
     tracing::warn!(
       path = %sql_state.scratch_dir.display(),
       error = %e,
