@@ -238,6 +238,10 @@ pub struct ServerInfo {
   pub httpfs_ready: Option<bool>,
 }
 
+// Unlike pure read handlers (list, stat, proxy), server_info_handler may
+// block up to PROBE_TIMEOUT_SECS when the httpfs cache is cold, so tracing
+// the request lifecycle is worth the overhead.
+#[tracing::instrument(skip_all)]
 pub async fn server_info_handler(State(state): State<AppState>) -> Json<ServerInfo> {
   // Probe httpfs availability when SQL is live. The probe opens a fresh
   // in-memory DuckDB connection and executes `INSTALL httpfs; LOAD httpfs;`,
