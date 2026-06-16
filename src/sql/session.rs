@@ -105,6 +105,12 @@ fn push_resource_limits(out: &mut String, cfg: &SqlConfig) {
     sql_escape(&cfg.memory_limit),
   ));
   out.push_str(&format!("SET threads = {};\n", cfg.threads));
+  // Allow DuckDB to reorder rows internally during aggregation and Parquet
+  // writes. This avoids buffering the entire result set in memory to maintain
+  // insertion order — critical for large JSONL→Parquet conversions that would
+  // otherwise OOM. SELECT output order is still controlled by ORDER BY; this
+  // setting only affects internal row-group packing.
+  out.push_str("SET preserve_insertion_order = false;\n");
 }
 
 /// `CREATE SECRET` for the storage's S3 credentials, mapped from the same
@@ -271,6 +277,7 @@ mod tests {
     assert!(pos("allowed_directories") < pos("lock_configuration"));
     assert!(sql.contains("SET memory_limit = '512MB'"));
     assert!(sql.contains("SET threads = 2"));
+    assert!(sql.contains("SET preserve_insertion_order = false"));
     assert!(!sql.contains("INSTALL aws"), "static creds need no aws ext");
     assert!(
       !sql.contains("disabled_filesystems"),
