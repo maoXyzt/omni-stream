@@ -5,9 +5,10 @@
 
 import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { BookOpen, Code2 } from 'lucide-react'
+import { AlertCircle, BookOpen, Code2, Loader2, RotateCw } from 'lucide-react'
 
 import { proxyUrl } from '@/api/storage'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { renderMarkdown } from '@/lib/markdown'
@@ -26,7 +27,7 @@ export function ReadmePanel({ fileKey, storage, version, onViewSource }: ReadmeP
   const src = proxyUrl(fileKey, storage, version)
   const name = basenameOf(fileKey)
 
-  const { data, isPending, isError, error } = useQuery({
+  const { data, isPending, isError, isFetching, error, refetch } = useQuery({
     queryKey: ['readme', storage ?? '', fileKey, version ?? ''],
     queryFn: () => fetchRange(src, 0, CHUNK_BYTES - 1),
     // README contents are stable across the session; no need to refetch on
@@ -54,10 +55,10 @@ export function ReadmePanel({ fileKey, storage, version, onViewSource }: ReadmeP
           size="sm"
           className="shrink-0 gap-1.5 text-xs text-muted-foreground hover:text-foreground"
           onClick={onViewSource}
-          aria-label="查看源码"
+          aria-label="View source"
         >
           <Code2 className="size-3.5" />
-          查看源码
+          View source
         </Button>
       </div>
 
@@ -73,9 +74,27 @@ export function ReadmePanel({ fileKey, storage, version, onViewSource }: ReadmeP
         )}
 
         {isError && (
-          <p className="text-sm text-destructive">
-            Failed to load README: {describeFetchError(error)}
-          </p>
+          <Alert variant="destructive" className="max-w-xl">
+            <AlertCircle className="size-4" />
+            <AlertTitle>Failed to load README</AlertTitle>
+            <AlertDescription className="flex flex-col gap-3">
+              <span>{describeFetchError(error)}</span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void refetch()}
+                disabled={isFetching}
+                className="self-start"
+              >
+                {isFetching ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <RotateCw className="size-4" />
+                )}
+                Retry
+              </Button>
+            </AlertDescription>
+          </Alert>
         )}
 
         {!isPending && !isError && html === '' && (

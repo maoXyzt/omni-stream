@@ -729,22 +729,28 @@ export function FileList() {
     retry: false,
     staleTime: 5 * 60 * 1000,
     queryFn: async (): Promise<FileEntry | null> => {
-      try {
-        const meta = await statFile(prefix + 'README.md', storageName || undefined)
-        if (meta.is_dir) return null
-        return {
-          key: meta.path,
-          last_modified: meta.last_modified,
-          is_dir: false,
-          size: meta.size,
-          is_symlink: false,
+      // Try the two most common README naming conventions in order. Using two
+      // stat calls avoids enumerating all case variants while still covering
+      // case-sensitive filesystems and S3 where `readme.md` is common.
+      for (const name of ['README.md', 'readme.md']) {
+        try {
+          const meta = await statFile(prefix + name, storageName || undefined)
+          if (meta.is_dir) continue
+          return {
+            key: meta.path,
+            last_modified: meta.last_modified,
+            is_dir: false,
+            size: meta.size,
+            is_symlink: false,
+          }
+        } catch (err) {
+          if (err instanceof ApiError && err.status === 404) continue
+          // Any non-404 error (transient 5xx, auth, network) → give up silently.
+          // A missing panel is better than a broken one.
+          return null
         }
-      } catch (err) {
-        // 404 → README doesn't exist here; any other error → propagate so
-        // React Query can retry (network blips etc.). Don't swallow 5xx.
-        if (err instanceof ApiError && err.status === 404) return null
-        throw err
       }
+      return null
     },
   })
 
