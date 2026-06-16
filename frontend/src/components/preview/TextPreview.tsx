@@ -1135,8 +1135,9 @@ function ConvertProgressDialog({
         raw: status.raw,
       })
     }
-    // onDone / onFailed are stable callbacks — not needed in deps; only
-    // re-run when status or error state changes.
+    // Omit onDone/onFailed from deps: they're recreated on every parent
+    // render (inline arrows), but we only want to fire when terminal state
+    // arrives, not on unrelated TextPreview re-renders.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status, query.isError, query.error])
 

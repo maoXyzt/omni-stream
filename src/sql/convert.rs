@@ -147,7 +147,6 @@ pub async fn convert_handler(
   // are no lifetime issues crossing the spawn boundary.
   let sql_state_task = Arc::clone(&sql_state);
   let job_id_task = job_id.clone();
-  let output_key_task = output_key.clone();
   tokio::spawn(async move {
     run_conversion_task(
       sql_state_task,
@@ -157,7 +156,7 @@ pub async fn convert_handler(
         setup,
         copy_sql,
         out_uri,
-        output_key: output_key_task,
+        output_key,
         is_s3,
       },
     )
