@@ -66,7 +66,7 @@ export const PREVIEW_TYPES: readonly PreviewType[] = [
       // `jsonl` / `ndjson` route through TextPreview too — its Range-based
       // chunked loader kicks in above 1 MiB so large log dumps don't pull
       // the whole file before anything renders.
-      'json', 'jsonl', 'ndjson', 'xml', 'yml', 'yaml', 'toml', 'ini', 'conf', 'cfg', 'env',
+      'json', 'jsonl', 'ndjson', 'xml', 'yml', 'yaml', 'dvc', 'toml', 'ini', 'conf', 'cfg', 'env',
       'sh', 'bash', 'zsh', 'fish', 'ps1',
       'py', 'rb', 'pl', 'lua', 'r',
       'js', 'mjs', 'cjs', 'ts', 'tsx', 'jsx', 'vue', 'svelte',
@@ -213,7 +213,7 @@ const VISUAL_GROUPS: readonly VisualGroup[] = [
       'sh', 'bash', 'zsh', 'fish', 'ps1',
       'sql', 'graphql', 'gql', 'proto', 'dart', 'm', 'mm', 'asm', 's',
       'json', 'jsonl', 'ndjson',
-      'yml', 'yaml', 'toml', 'ini', 'conf', 'cfg', 'env',
+      'yml', 'yaml', 'dvc', 'toml', 'ini', 'conf', 'cfg', 'env',
       'xml', 'plist',
       'html', 'htm', 'xhtml',
       'css', 'scss', 'sass', 'less',
