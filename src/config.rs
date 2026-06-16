@@ -540,6 +540,9 @@ impl Config {
   }
 
   fn validate(&self) -> anyhow::Result<()> {
+    if self.sql.convert_timeout_secs == 0 {
+      bail!("sql.convert_timeout_secs must be greater than 0");
+    }
     if self.storages.is_empty() {
       bail!("no storages configured; define at least one [[storages]] entry");
     }

@@ -580,25 +580,30 @@ mod tests {
   }
 
   /// Helper: poll `convert_status_handler` until the job reaches a terminal
-  /// state, then return the response.
+  /// state, then return the response. Bounded by a 15s timeout so a regression
+  /// that leaves a job stuck in `"running"` doesn't hang CI indefinitely.
   async fn poll_until_done(
     app: AppState,
     sql_st: Arc<SqlState>,
     job_id: &str,
   ) -> crate::sql::jobs::JobStatusResponse {
-    loop {
-      let res = convert_status_handler(
-        State(app.clone()),
-        Extension(Arc::clone(&sql_st)),
-        Path(job_id.to_string()),
-      )
-      .await
-      .expect("status handler should not error while job exists");
-      if res.0.state != "running" {
-        return res.0;
+    tokio::time::timeout(Duration::from_secs(15), async {
+      loop {
+        let res = convert_status_handler(
+          State(app.clone()),
+          Extension(Arc::clone(&sql_st)),
+          Path(job_id.to_string()),
+        )
+        .await
+        .expect("status handler should not error while job exists");
+        if res.0.state != "running" {
+          return res.0;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
       }
-      tokio::time::sleep(Duration::from_millis(50)).await;
-    }
+    })
+    .await
+    .expect("convert job did not reach a terminal state within 15s")
   }
 
   #[tokio::test]

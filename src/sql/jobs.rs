@@ -21,6 +21,11 @@ use serde::Serialize;
 /// state at least once before it disappears.
 const JOB_TTL: Duration = Duration::from_secs(300); // 5 minutes
 
+/// Maximum age for a still-running job before it is considered abandoned and
+/// pruned. A detached task that panics without updating the registry would
+/// otherwise keep the entry alive forever.
+const RUNNING_JOB_MAX_AGE: Duration = Duration::from_secs(86400); // 24 hours
+
 // --- internal state ----------------------------------------------------------
 
 enum JobState {
@@ -89,12 +94,16 @@ impl JobRegistry {
   /// Lazily prunes terminal entries that have exceeded `JOB_TTL`.
   pub fn register(&self) -> String {
     let id = self.next.fetch_add(1, Ordering::Relaxed).to_string();
-    let mut map = self.inner.lock().unwrap();
-    // Prune stale terminal entries so the map doesn't grow without bound.
+    let mut map = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+    // Prune stale entries so the map doesn't grow without bound.
+    // `saturating_duration_since` avoids panics on clock anomalies (VM
+    // scheduling jitter, NTP steps).
     let now = Instant::now();
     map.retain(|_, e| match e.finished {
-      Some(f) => now.duration_since(f) < JOB_TTL,
-      None => true, // still running — keep
+      Some(f) => now.saturating_duration_since(f) < JOB_TTL,
+      // Keep running jobs; prune those that have been running impossibly long
+      // (e.g. detached task panicked before calling complete/fail).
+      None => now.saturating_duration_since(e.started) < RUNNING_JOB_MAX_AGE,
     });
     map.insert(
       id.clone(),
@@ -109,7 +118,7 @@ impl JobRegistry {
 
   /// Mark a job as successfully completed.
   pub fn complete(&self, id: &str, output_key: String, rows_written: u64) {
-    let mut map = self.inner.lock().unwrap();
+    let mut map = self.inner.lock().unwrap_or_else(|p| p.into_inner());
     if let Some(e) = map.get_mut(id) {
       e.state = JobState::Done {
         output_key,
@@ -121,7 +130,7 @@ impl JobRegistry {
 
   /// Mark a job as failed with a classified diagnosis.
   pub fn fail(&self, id: &str, summary: String, hint: String, raw: String) {
-    let mut map = self.inner.lock().unwrap();
+    let mut map = self.inner.lock().unwrap_or_else(|p| p.into_inner());
     if let Some(e) = map.get_mut(id) {
       e.state = JobState::Failed { summary, hint, raw };
       e.finished = Some(Instant::now());
@@ -131,10 +140,11 @@ impl JobRegistry {
   /// Query current status. Returns `None` if the id is unknown or has been
   /// pruned (front-end should treat this as a 404).
   pub fn status(&self, id: &str) -> Option<JobStatusResponse> {
-    let map = self.inner.lock().unwrap();
+    let map = self.inner.lock().unwrap_or_else(|p| p.into_inner());
     let e = map.get(id)?;
     let elapsed_ms = match e.finished {
-      Some(f) => f.duration_since(e.started).as_millis() as u64,
+      // `saturating_duration_since` avoids panics on clock anomalies.
+      Some(f) => f.saturating_duration_since(e.started).as_millis() as u64,
       None => e.started.elapsed().as_millis() as u64,
     };
     let resp = match &e.state {

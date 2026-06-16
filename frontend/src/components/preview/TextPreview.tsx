@@ -1048,7 +1048,6 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
         <ConvertProgressDialog
           jobId={convertJobId}
           fileKey={fileKey}
-          storage={storage}
           onDone={(outputKey, rowsWritten, elapsedMs) => {
             setConvertJobId(null)
             toast.success(
@@ -1075,7 +1074,6 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
 interface ConvertProgressDialogProps {
   jobId: string
   fileKey: string
-  storage: string
   onDone: (outputKey: string, rowsWritten: number, elapsedMs: number) => void
   onFailed: (detail: ErrorDetail) => void
 }
@@ -1098,8 +1096,12 @@ function ConvertProgressDialog({
   const query = useQuery({
     queryKey: ['convert-status', jobId],
     queryFn: () => getConvertStatus(jobId),
-    // Stop refetching once the job reaches a terminal state.
+    // Treat all query errors as terminal — don't retry so a 404 (job pruned
+    // or server restarted) surfaces immediately instead of spinning forever.
+    retry: false,
+    // Stop refetching once the job reaches a terminal state or errors out.
     refetchInterval: (q) => {
+      if (q.state.error) return false
       const s = q.state.data?.state
       return s === 'done' || s === 'failed' ? false : 1500
     },
@@ -1107,10 +1109,18 @@ function ConvertProgressDialog({
 
   const status = query.data
 
-  // When the status transitions to a terminal state, bubble the result up to
-  // the parent (which unmounts this component and updates its own state).
-  // useEffect is the correct place — never call setState / callbacks in render.
+  // When the status transitions to a terminal state (or errors), bubble the
+  // result up to the parent. useEffect is the correct place — never call
+  // state-setters / callbacks in render.
   useEffect(() => {
+    if (query.isError) {
+      if (query.error instanceof ApiError) {
+        onFailed(extractErrorDetail(query.error))
+      } else {
+        onFailed({ message: String(query.error) })
+      }
+      return
+    }
     if (!status) return
     if (status.state === 'done') {
       onDone(
@@ -1126,9 +1136,9 @@ function ConvertProgressDialog({
       })
     }
     // onDone / onFailed are stable callbacks — not needed in deps; only
-    // re-run when `status` changes.
+    // re-run when status or error state changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status])
+  }, [status, query.isError, query.error])
 
   // Format elapsed seconds for display.
   const elapsedSec = status ? Math.floor(status.elapsed_ms / 1000) : 0
@@ -1155,11 +1165,6 @@ function ConvertProgressDialog({
               {elapsedSec}s
             </span>
           </p>
-          {query.isError && (
-            <p className="text-xs text-destructive">
-              Lost connection to server; the conversion may still be running.
-            </p>
-          )}
         </div>
       </DialogContent>
     </Dialog>
