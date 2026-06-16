@@ -315,6 +315,13 @@ pub struct SqlConfig {
   /// background conversion is interrupted and the job marked failed.
   /// Default: 1800 (30 minutes).
   pub convert_timeout_secs: u64,
+  /// DuckDB `threads` for the conversion connection only. Intentionally lower
+  /// than `threads` (the query-connection setting) because each conversion
+  /// thread holds one non-spillable Parquet row-group write buffer (~64 MiB
+  /// with `ROW_GROUP_SIZE_BYTES '64MB'`). Keeping this at 1 ensures the peak
+  /// footprint stays well within the default `memory_limit` of 512 MB even for
+  /// files of several hundred megabytes. Increase on hosts with more RAM.
+  pub convert_threads: u16,
   /// Row cap on results; responses set `truncated = true` beyond it.
   pub max_rows: u32,
   /// DuckDB scratch / spill directory. Large queries and conversions write
@@ -332,6 +339,7 @@ impl Default for SqlConfig {
       threads: 2,
       query_timeout_secs: 300,
       convert_timeout_secs: 1800,
+      convert_threads: 1,
       max_rows: 10_000,
       temp_directory: None,
     }

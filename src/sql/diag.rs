@@ -36,13 +36,31 @@ pub fn diagnose(target: &SqlTarget, context: Option<&str>, raw: &str) -> Option<
     .map(|c| format!("'{c}'"))
     .unwrap_or_else(|| "the path".to_string());
 
-  // Rule 1 — an S3 operation needed the local filesystem, which is disabled in
+  // Rule 1 — Out of Memory.
+  // Placed first because OOM errors from read_json_auto / read_csv_auto can
+  // contain those function names and would otherwise be mis-classified as a
+  // parse error (Rule 7) instead of a memory error.  The OOM keywords are
+  // unambiguous and should always win.
+  if lower.contains("out of memory") || lower.contains("failed to allocate") {
+    return Some(Diagnosis {
+      summary: "The conversion ran out of memory.".into(),
+      hint: format!(
+        "Converting {path_desc} exceeded the server's DuckDB memory budget \
+         (`[sql].memory_limit`, default 512MB). Conversions stream and spill to \
+         disk where possible, but very wide rows or many columns enlarge the \
+         non-spillable Parquet write buffer. Raise `[sql].memory_limit` (e.g. \
+         '2GB') if the host has the RAM, or lower `[sql].convert_threads`."
+      ),
+    });
+  }
+
+  // Rule 2 — an S3 operation needed the local filesystem, which is disabled in
   // S3 mode. The s3:// path itself is fine; the local-FS access is incidental:
   // typically DuckDB's httpfs extension was not active for this connection, so
   // it could not route the s3:// URI and fell back to the (disabled) local
   // filesystem. Note: with extension autoload disabled during session setup
   // (see session::setup_statements), a missing httpfs now surfaces as a clearer
-  // "requires the extension httpfs" error caught by Rule 4 — so this rule
+  // "requires the extension httpfs" error caught by Rule 5 — so this rule
   // mainly guards residual cases and keeps the message non-misleading.
   if lower.contains("localfilesystem") && lower.contains("disabled") {
     let hint = if is_s3 {
@@ -67,7 +85,7 @@ pub fn diagnose(target: &SqlTarget, context: Option<&str>, raw: &str) -> Option<
     });
   }
 
-  // Rule 2 — S3 authentication / permission failures.
+  // Rule 3 — S3 authentication / permission failures.
   // Use specific HTTP-error strings to avoid matching on SQL that merely
   // contains the number 403 (e.g. `WHERE id = 403`).
   if lower.contains("signaturedoesnotmatch")
@@ -100,7 +118,7 @@ pub fn diagnose(target: &SqlTarget, context: Option<&str>, raw: &str) -> Option<
     return Some(Diagnosis { summary, hint });
   }
 
-  // Rule 3 — Generic permission error (not matched by Rule 2).
+  // Rule 4 — Generic permission error (not matched by Rule 3).
   // Match "permission denied" / "permission error" only — bare "permission"
   // would fire on SQL errors referencing a column or table called "permission".
   if lower.contains("permission denied") || lower.contains("permission error") {
@@ -125,7 +143,7 @@ pub fn diagnose(target: &SqlTarget, context: Option<&str>, raw: &str) -> Option<
     return Some(Diagnosis { summary, hint });
   }
 
-  // Rule 4 — httpfs / aws extension could not be loaded (S3 targets only).
+  // Rule 5 — httpfs / aws extension could not be loaded (S3 targets only).
   // Local targets do not load httpfs, so this pattern would be a false positive
   // for them; skip with is_s3 guard.
   // "unable to connect" alone is too broad — it also fires on S3 endpoint
@@ -149,7 +167,7 @@ pub fn diagnose(target: &SqlTarget, context: Option<&str>, raw: &str) -> Option<
     });
   }
 
-  // Rule 5 — Source file could not be read.
+  // Rule 6 — Source file could not be read.
   let is_not_found = lower.contains("no files found")
     || (lower.contains("io error") && lower.contains("read"))
     || lower.contains("no such file")
@@ -169,7 +187,7 @@ pub fn diagnose(target: &SqlTarget, context: Option<&str>, raw: &str) -> Option<
     });
   }
 
-  // Rule 6 — JSON / CSV parse error (most relevant for the convert endpoint).
+  // Rule 7 — JSON / CSV parse error (most relevant for the convert endpoint).
   // Only fire when a file-reader function name appears in the error — bare
   // "invalid input syntax" and "malformed" are too broad: they also match
   // SQL type-cast errors ("invalid input syntax for type INTEGER") and S3
@@ -217,7 +235,39 @@ mod tests {
     }
   }
 
-  // ── Rule 1: LocalFileSystem disabled ─────────────────────────────────────
+  // ── Rule 1: Out of Memory ────────────────────────────────────────────────
+
+  #[test]
+  fn rule1_oom_out_of_memory() {
+    let raw =
+      "Out of Memory Error: failed to allocate data of size 116.6 MiB (463.8 MiB/488.2 MiB used)";
+    let diag = diagnose(&s3_target(), Some("s3://bucket/data.parquet"), raw).unwrap();
+    assert!(
+      diag.summary.to_lowercase().contains("memory"),
+      "summary should mention memory: {}",
+      diag.summary
+    );
+    assert!(
+      diag.hint.contains("memory_limit"),
+      "hint should reference memory_limit: {}",
+      diag.hint
+    );
+  }
+
+  #[test]
+  fn rule1_oom_with_read_json_still_classified_as_oom() {
+    // OOM from read_json_auto may contain the function name and would otherwise
+    // be mis-classified by Rule 7 (parse error).  Rule 1 must win.
+    let raw = "Out of Memory Error: failed to allocate (read_json_auto internal buffer)";
+    let diag = diagnose(&local_target(), Some("/data/big.jsonl"), raw).unwrap();
+    assert!(
+      diag.summary.to_lowercase().contains("memory"),
+      "OOM with read_json text must classify as OOM, not parse error: {}",
+      diag.summary
+    );
+  }
+
+  // ── Rule 2: LocalFileSystem disabled ─────────────────────────────────────
 
   #[test]
   fn rule1_s3_localfilesystem_disabled() {
@@ -256,7 +306,7 @@ mod tests {
     );
   }
 
-  // ── Rule 2: auth / permission ─────────────────────────────────────────────
+  // ── Rule 3: auth / permission ─────────────────────────────────────────────
 
   #[test]
   fn rule2_signature_mismatch_s3() {
@@ -294,7 +344,7 @@ mod tests {
     );
   }
 
-  // ── Rule 3: generic permission ────────────────────────────────────────────
+  // ── Rule 4: generic permission ────────────────────────────────────────────
 
   #[test]
   fn rule3_permission_local() {
@@ -315,7 +365,7 @@ mod tests {
     assert!(diag.hint.contains("s3:PutObject"), "hint: {}", diag.hint);
   }
 
-  // ── Rule 4: extension load failure (S3 only) ──────────────────────────────
+  // ── Rule 5: extension load failure (S3 only) ──────────────────────────────
 
   #[test]
   fn rule4_extension_download_failed_s3() {
@@ -348,8 +398,8 @@ mod tests {
   fn rule4_missing_extension_after_autoload_disabled() {
     // With extension autoload disabled in session setup, a not-loaded httpfs
     // surfaces as this "Missing Extension" error instead of the misleading
-    // "LocalFileSystem disabled" (Rule 1). It must classify as an extension
-    // problem (Rule 4), not the local-filesystem fallback (Rule 1).
+    // "LocalFileSystem disabled" (Rule 2). It must classify as an extension
+    // problem (Rule 5), not the local-filesystem fallback (Rule 2).
     let raw = "Missing Extension Error: File s3://infographics/x.parquet requires the \
                extension httpfs to be loaded\nPlease try installing and loading the httpfs \
                extension by running:\nINSTALL httpfs;\nLOAD httpfs;";
@@ -361,12 +411,12 @@ mod tests {
     );
     assert!(
       !diag.summary.to_lowercase().contains("local filesystem"),
-      "should be Rule 4, not Rule 1: {}",
+      "should be Rule 5, not Rule 2: {}",
       diag.summary
     );
   }
 
-  // ── Rule 5: source file not found ────────────────────────────────────────
+  // ── Rule 6: source file not found ────────────────────────────────────────
 
   #[test]
   fn rule5_no_files_found() {
@@ -391,7 +441,7 @@ mod tests {
     );
   }
 
-  // ── Rule 6: parse error ───────────────────────────────────────────────────
+  // ── Rule 7: parse error ───────────────────────────────────────────────────
 
   #[test]
   fn rule6_json_parse_error() {
@@ -431,7 +481,7 @@ mod tests {
     );
   }
 
-  // ── Rule 7 (fallback): unknown error returns None ────────────────────────
+  // ── Rule 8 (fallback): unknown error returns None ────────────────────────
 
   #[test]
   fn fallback_unknown_returns_none() {
@@ -448,7 +498,7 @@ mod tests {
     assert!(diagnose(&local_target(), None, raw).is_none());
   }
 
-  // ── Ordering: Rule 1 wins over Rule 3 when both could match ──────────────
+  // ── Ordering: Rule 2 wins over Rule 4 when both could match ──────────────
 
   #[test]
   fn rule1_takes_priority_over_rule3() {
@@ -456,7 +506,7 @@ mod tests {
     let diag = diagnose(&s3_target(), Some("s3://b/f"), raw).unwrap();
     assert!(
       diag.summary.contains("local filesystem"),
-      "rule 1 should win: {}",
+      "rule 2 should win over rule 4: {}",
       diag.summary
     );
   }
@@ -503,7 +553,7 @@ mod tests {
     let raw = "Binder Error: WHERE id = 403 — column 'id' not found";
     assert!(
       diagnose(&s3_target(), None, raw).is_none(),
-      "bare '403' in SQL error should not trigger Rule 2"
+      "bare '403' in SQL error should not trigger Rule 3"
     );
   }
 
@@ -521,12 +571,12 @@ mod tests {
   #[test]
   fn rule4_s3_generic_endpoint_connection_failure_not_matched() {
     // "unable to connect" without extension/httpfs context should not fire
-    // Rule 4 — it is a plain S3 endpoint connectivity issue, not an extension
+    // Rule 5 — it is a plain S3 endpoint connectivity issue, not an extension
     // loading failure.
     let raw = "IOException: unable to connect to 'https://my-s3.internal:9000'";
     assert!(
       diagnose(&s3_target(), Some("s3://bucket/file"), raw).is_none(),
-      "generic S3 connection failure should not be classified as extension load failure"
+      "generic S3 connection failure should not be classified as extension load failure (Rule 5)"
     );
   }
 

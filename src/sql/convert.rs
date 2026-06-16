@@ -117,7 +117,12 @@ pub async fn convert_handler(
   // Build the DuckDB-visible URIs for source and destination.
   let (in_uri, out_uri) = build_uris(target, key, &output_key)?;
 
-  let setup = session::setup_statements(&sql_state.cfg, target, &sql_state.scratch_dir)?;
+  // Conversions use a separate thread count (typically 1) so the per-thread
+  // non-spillable Parquet row-group write buffer (~64 MiB × threads) fits
+  // within memory_limit even for files of several hundred megabytes.
+  let mut convert_cfg = sql_state.cfg.clone();
+  convert_cfg.threads = convert_cfg.convert_threads;
+  let setup = session::setup_statements(&convert_cfg, target, &sql_state.scratch_dir)?;
   // TSV/CSV: read_csv_auto auto-detects comma vs tab (and other delimiters).
   // JSONL/NDJSON: read_json_auto handles newline-delimited JSON.
   let read_fn = if is_json_lines {
@@ -125,11 +130,7 @@ pub async fn convert_handler(
   } else {
     "read_csv_auto"
   };
-  let copy_sql = format!(
-    "COPY (SELECT * FROM {read_fn}('{}')) TO '{}' (FORMAT PARQUET)",
-    session::sql_escape(&in_uri),
-    session::sql_escape(&out_uri),
-  );
+  let copy_sql = build_copy_sql(read_fn, &in_uri, &out_uri);
 
   // All synchronous validation passed — register the job and detach.
   let job_id = sql_state.jobs.register();
@@ -355,6 +356,28 @@ async fn run_conversion_task(sql_state: Arc<SqlState>, task: ConversionTask) {
         .fail(&job_id, "Conversion failed.".into(), msg.clone(), msg);
     }
   }
+}
+
+// --- SQL helpers -------------------------------------------------------------
+
+/// Build the COPY statement that converts a JSONL/CSV source to Parquet.
+///
+/// `ROW_GROUP_SIZE_BYTES '64MB'` caps the per-thread non-spillable Parquet
+/// write buffer that DuckDB allocates while writing.  The default (~120 MiB
+/// per thread) causes OOM on files of a few hundred megabytes when
+/// `memory_limit` is at its default of 512 MB.  Limiting to 64 MiB gives
+/// headroom for the JSON/CSV read buffers and the DuckDB buffer pool.
+///
+/// Note: only the byte ceiling is overridden; `ROW_GROUP_SIZE` (row count)
+/// keeps its default of 122,880 rows so the decision is "whichever limit is
+/// hit first", which preserves good row-group quality for narrow tables while
+/// bounding memory for wide-row datasets.
+pub(crate) fn build_copy_sql(read_fn: &str, in_uri: &str, out_uri: &str) -> String {
+  format!(
+    "COPY (SELECT * FROM {read_fn}('{}')) TO '{}' (FORMAT PARQUET, ROW_GROUP_SIZE_BYTES '64MB')",
+    session::sql_escape(in_uri),
+    session::sql_escape(out_uri),
+  )
 }
 
 // --- URI helpers -------------------------------------------------------------
