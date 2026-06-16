@@ -100,6 +100,11 @@ fn classify_s3_status(status: u16, code: &str, op: &str, raw: impl std::fmt::Dis
     (416, _) | (_, "InvalidRange") => {
       AppError::InvalidRange(format!("S3 {op} range invalid: {raw}"))
     }
+    // `If-None-Match: *` on a conditional create — the object already exists.
+    // Surfaces as a 409 so the caller treats it like the HeadObject pre-check.
+    (412, _) | (_, "PreconditionFailed") => {
+      AppError::Conflict(format!("S3 {op} precondition failed: {raw}"))
+    }
     _ => AppError::Backend(format!("S3 {op} error: {raw}")),
   }
 }
@@ -621,9 +626,11 @@ impl StorageBackend for S3Backend {
     }
 
     // PutObject always overwrites, so when the caller didn't ask to overwrite
-    // we probe with HeadObject first. There's a TOCTOU window (a concurrent
-    // writer between head and put) we accept for now — optimistic concurrency
-    // (If-None-Match) is out of scope this round.
+    // we probe with HeadObject first — the common "already exists" case then
+    // returns a clean 409 with a friendly message. That probe alone has a
+    // TOCTOU window (a concurrent writer between head and put), so the actual
+    // PutObject below also carries `If-None-Match: *`: S3 (and recent MinIO)
+    // reject a clobbering write atomically with 412, closing the race.
     if !opts.overwrite {
       match self
         .client
@@ -652,16 +659,59 @@ impl StorageBackend for S3Backend {
       .or_else(|| mime_guess::from_path(key).first_raw().map(str::to_string));
     let size = body.len() as u64;
 
-    let mut req = self
-      .client
-      .put_object()
-      .bucket(&bucket)
-      .key(key)
-      .body(S3ByteStream::from(body));
-    if let Some(ct) = content_type.clone() {
-      req = req.content_type(ct);
-    }
-    let resp = req.send().await.map_err(|e| map_write_err("put", e))?;
+    // Build the PutObject request. `conditional` adds `If-None-Match: *` so an
+    // existing object makes S3 fail with 412 rather than silently overwriting.
+    // `Bytes` is refcounted, so cloning the body to allow a fallback retry is
+    // cheap.
+    let build_put = |conditional: bool| {
+      let mut req = self
+        .client
+        .put_object()
+        .bucket(&bucket)
+        .key(key)
+        .body(S3ByteStream::from(body.clone()));
+      if let Some(ct) = content_type.clone() {
+        req = req.content_type(ct);
+      }
+      if conditional {
+        req = req.if_none_match("*");
+      }
+      req
+    };
+
+    let resp = if opts.overwrite {
+      build_put(false)
+        .send()
+        .await
+        .map_err(|e| map_write_err("put", e))?
+    } else {
+      match build_put(true).send().await {
+        Ok(r) => r,
+        Err(e) => {
+          let status = match &e {
+            SdkError::ServiceError(svc) => Some(svc.raw().status().as_u16()),
+            _ => None,
+          };
+          match status {
+            // A concurrent writer created the key between our HEAD and the
+            // conditional PUT — the race we set out to close.
+            Some(412) => {
+              return Err(AppError::Conflict(format!(
+                "file already exists: '{path}'. Set overwrite=true to replace it."
+              )));
+            }
+            // The backend doesn't implement conditional writes (older
+            // S3-compatible servers answer 501). Retry without the header so we
+            // degrade to a plain PutObject rather than failing the write.
+            Some(501) => build_put(false)
+              .send()
+              .await
+              .map_err(|e| map_write_err("put", e))?,
+            _ => return Err(map_write_err("put", e)),
+          }
+        }
+      }
+    };
 
     Ok(FileMeta {
       path: path.to_string(),
@@ -969,5 +1019,26 @@ mod tests {
   fn encode_copy_source_percent_encodes_non_ascii() {
     // "中" is 0xE4 0xB8 0xAD in UTF-8.
     assert_eq!(encode_copy_source("b", "中"), "b/%E4%B8%AD");
+  }
+
+  // --- status classification --------------------------------------------
+
+  #[test]
+  fn classify_412_precondition_failed_is_conflict() {
+    // A conditional PutObject (`If-None-Match: *`) that loses the race comes
+    // back as 412 / PreconditionFailed — both the status and the code must map
+    // to Conflict so put_file can surface a 409.
+    assert!(matches!(
+      classify_s3_status(412, "PreconditionFailed", "put", "exists"),
+      AppError::Conflict(_)
+    ));
+    assert!(matches!(
+      classify_s3_status(412, "", "put", "exists"),
+      AppError::Conflict(_)
+    ));
+    assert!(matches!(
+      classify_s3_status(200, "PreconditionFailed", "put", "exists"),
+      AppError::Conflict(_)
+    ));
   }
 }
