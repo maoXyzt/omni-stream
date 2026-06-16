@@ -254,12 +254,14 @@ mod tests {
     let inside = dir.join("ok.csv");
     std::fs::write(&inside, "a,b\n1,2\n").unwrap();
 
+    let scratch = std::env::temp_dir().join("omni-sql-scratch-test");
     let c = conn();
     let setup = crate::sql::session::setup_statements(
       &SqlConfig::default(),
       &SqlTarget::Local {
         root_path: dir.clone(),
       },
+      &scratch,
     )
     .unwrap();
     c.execute_batch(&setup).unwrap();

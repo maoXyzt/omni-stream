@@ -99,7 +99,7 @@ pub async fn convert_handler(
   // Build the DuckDB-visible URIs for source and destination.
   let (in_uri, out_uri) = build_uris(target, key, &output_key)?;
 
-  let setup = session::setup_statements(&sql_state.cfg, target)?;
+  let setup = session::setup_statements(&sql_state.cfg, target, &sql_state.scratch_dir)?;
   // TSV/CSV: read_csv_auto auto-detects comma vs tab (and other delimiters).
   // JSONL/NDJSON: read_json_auto handles newline-delimited JSON.
   let read_fn = if is_json_lines {

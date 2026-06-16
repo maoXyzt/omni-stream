@@ -236,9 +236,17 @@ async fn main() -> anyhow::Result<()> {
   // and `/api/convert` (write group), so apply it once to the merged router;
   // non-SQL handlers ignore it.
   #[cfg(feature = "duckdb")]
-  let app = app.layer(axum::Extension(std::sync::Arc::new(
-    sql::SqlState::from_config(&cfg),
-  )));
+  let sql_state = sql::SqlState::from_config(&cfg);
+  #[cfg(feature = "duckdb")]
+  if let Err(e) = std::fs::create_dir_all(&sql_state.scratch_dir) {
+    tracing::warn!(
+      path = %sql_state.scratch_dir.display(),
+      error = %e,
+      "could not create DuckDB scratch directory; large queries may fail to spill to disk",
+    );
+  }
+  #[cfg(feature = "duckdb")]
+  let app = app.layer(axum::Extension(std::sync::Arc::new(sql_state)));
 
   let app = app
     .fallback(static_handler)
