@@ -37,6 +37,12 @@ pub enum SqlTarget {
 
 pub struct SqlState {
   pub cfg: crate::config::SqlConfig,
+  /// Host-local directory DuckDB may use for spill-to-disk. Created at
+  /// server startup (best-effort). Passed to every connection's session
+  /// setup so DuckDB can write intermediate data when it exceeds
+  /// `memory_limit` — without this, large S3 conversions fail with
+  /// "LocalFileSystem has been disabled".
+  pub scratch_dir: PathBuf,
   targets: HashMap<String, SqlTarget>,
   /// Storages that exist but refuse SQL, with the reason (currently: local
   /// storages with `follow_symlinks = false` — DuckDB's
@@ -78,6 +84,7 @@ impl SqlState {
       .map(|s| s.name.clone())
       .unwrap_or_default();
     Self {
+      scratch_dir: session::resolve_scratch_dir(cfg.sql.temp_directory.as_deref()),
       cfg: cfg.sql.clone(),
       targets,
       disabled,
@@ -136,7 +143,7 @@ pub async fn query_handler(
 
   let target = sql_state.resolve(req.storage.as_deref())?;
   validate::validate_readonly(&req.sql)?;
-  let setup = session::setup_statements(&sql_state.cfg, target)?;
+  let setup = session::setup_statements(&sql_state.cfg, target, &sql_state.scratch_dir)?;
 
   let timeout_secs = sql_state.cfg.query_timeout_secs;
   let max_rows = sql_state.cfg.max_rows as usize;

@@ -309,6 +309,11 @@ pub struct SqlConfig {
   pub query_timeout_secs: u64,
   /// Row cap on results; responses set `truncated = true` beyond it.
   pub max_rows: u32,
+  /// DuckDB scratch / spill directory. Large queries and conversions write
+  /// intermediate data here when they exceed `memory_limit`. Defaults to
+  /// `<system temp>/omni-stream-sql` when absent. Tilde-expanded; always
+  /// host-local — never a storage root or S3 path.
+  pub temp_directory: Option<String>,
 }
 
 impl Default for SqlConfig {
@@ -319,6 +324,7 @@ impl Default for SqlConfig {
       threads: 2,
       query_timeout_secs: 300,
       max_rows: 10_000,
+      temp_directory: None,
     }
   }
 }
