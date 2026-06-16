@@ -117,7 +117,21 @@ pub async fn convert_handler(
   // Build the DuckDB-visible URIs for source and destination.
   let (in_uri, out_uri) = build_uris(target, key, &output_key)?;
 
-  let setup = session::setup_statements(&sql_state.cfg, target, &sql_state.scratch_dir)?;
+  // Conversions use a separate thread count (typically 1) so the per-thread
+  // non-spillable Parquet row-group write buffer (~64 MiB × threads) fits
+  // within memory_limit even for files of several hundred megabytes.
+  let mut convert_cfg = sql_state.cfg.clone();
+  // Clamp to at least 1: convert_threads = 0 would be invalid for DuckDB
+  // (SET threads = 0 is rejected at runtime).  Warn so operators can spot
+  // the misconfiguration in logs rather than silently getting threads = 1.
+  if convert_cfg.convert_threads == 0 {
+    tracing::warn!(
+      "convert_threads = 0 is invalid; clamping to 1. \
+       Set [sql].convert_threads to a positive integer in the server config."
+    );
+  }
+  convert_cfg.threads = convert_cfg.convert_threads.max(1);
+  let setup = session::setup_statements(&convert_cfg, target, &sql_state.scratch_dir)?;
   // TSV/CSV: read_csv_auto auto-detects comma vs tab (and other delimiters).
   // JSONL/NDJSON: read_json_auto handles newline-delimited JSON.
   let read_fn = if is_json_lines {
@@ -125,11 +139,7 @@ pub async fn convert_handler(
   } else {
     "read_csv_auto"
   };
-  let copy_sql = format!(
-    "COPY (SELECT * FROM {read_fn}('{}')) TO '{}' (FORMAT PARQUET)",
-    session::sql_escape(&in_uri),
-    session::sql_escape(&out_uri),
-  );
+  let copy_sql = build_copy_sql(read_fn, &in_uri, &out_uri);
 
   // All synchronous validation passed — register the job and detach.
   let job_id = sql_state.jobs.register();
@@ -357,6 +367,28 @@ async fn run_conversion_task(sql_state: Arc<SqlState>, task: ConversionTask) {
   }
 }
 
+// --- SQL helpers -------------------------------------------------------------
+
+/// Build the COPY statement that converts a JSONL/CSV source to Parquet.
+///
+/// `ROW_GROUP_SIZE_BYTES '64MB'` caps the per-thread non-spillable Parquet
+/// write buffer that DuckDB allocates while writing.  The default (~120 MiB
+/// per thread) causes OOM on files of a few hundred megabytes when
+/// `memory_limit` is at its default of 512 MB.  Limiting to 64 MiB gives
+/// headroom for the JSON/CSV read buffers and the DuckDB buffer pool.
+///
+/// Note: only the byte ceiling is overridden; `ROW_GROUP_SIZE` (row count)
+/// keeps its default of 122,880 rows so the decision is "whichever limit is
+/// hit first", which preserves good row-group quality for narrow tables while
+/// bounding memory for wide-row datasets.
+pub(crate) fn build_copy_sql(read_fn: &str, in_uri: &str, out_uri: &str) -> String {
+  format!(
+    "COPY (SELECT * FROM {read_fn}('{}')) TO '{}' (FORMAT PARQUET, ROW_GROUP_SIZE_BYTES '64MB')",
+    session::sql_escape(in_uri),
+    session::sql_escape(out_uri),
+  )
+}
+
 // --- URI helpers -------------------------------------------------------------
 
 /// Build the DuckDB-visible URIs for the source file and destination Parquet.
@@ -450,6 +482,36 @@ mod tests {
   }
 
   // --- Unit tests (no DuckDB execution) ------------------------------------
+
+  #[test]
+  fn build_copy_sql_contains_row_group_size_bytes() {
+    let sql = build_copy_sql("read_json_auto", "/data/in.jsonl", "/data/out.parquet");
+    assert!(
+      sql.contains("ROW_GROUP_SIZE_BYTES '64MB'"),
+      "COPY must cap row-group size to limit non-spillable write buffer: {sql}"
+    );
+    assert!(
+      sql.contains("/data/in.jsonl"),
+      "in_uri must appear in SQL: {sql}"
+    );
+    assert!(
+      sql.contains("/data/out.parquet"),
+      "out_uri must appear in SQL: {sql}"
+    );
+  }
+
+  #[test]
+  fn build_copy_sql_escapes_single_quotes_in_uris() {
+    let sql = build_copy_sql("read_csv_auto", "/data/it's.csv", "/data/out's.parquet");
+    assert!(
+      sql.contains("/data/it''s.csv"),
+      "single quotes in in_uri must be escaped: {sql}"
+    );
+    assert!(
+      sql.contains("/data/out''s.parquet"),
+      "single quotes in out_uri must be escaped: {sql}"
+    );
+  }
 
   #[test]
   fn build_uris_local() {
