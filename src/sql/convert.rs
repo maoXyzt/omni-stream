@@ -121,7 +121,15 @@ pub async fn convert_handler(
   // non-spillable Parquet row-group write buffer (~64 MiB × threads) fits
   // within memory_limit even for files of several hundred megabytes.
   let mut convert_cfg = sql_state.cfg.clone();
-  // Clamp to at least 1: convert_threads = 0 would be invalid for DuckDB.
+  // Clamp to at least 1: convert_threads = 0 would be invalid for DuckDB
+  // (SET threads = 0 is rejected at runtime).  Warn so operators can spot
+  // the misconfiguration in logs rather than silently getting threads = 1.
+  if convert_cfg.convert_threads == 0 {
+    tracing::warn!(
+      "convert_threads = 0 is invalid; clamping to 1. \
+       Set [sql].convert_threads to a positive integer in the server config."
+    );
+  }
   convert_cfg.threads = convert_cfg.convert_threads.max(1);
   let setup = session::setup_statements(&convert_cfg, target, &sql_state.scratch_dir)?;
   // TSV/CSV: read_csv_auto auto-detects comma vs tab (and other delimiters).

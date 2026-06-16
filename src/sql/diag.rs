@@ -41,9 +41,15 @@ pub fn diagnose(target: &SqlTarget, context: Option<&str>, raw: &str) -> Option<
   // contain those function names and would otherwise be mis-classified as a
   // parse error (Rule 7) instead of a memory error.  The OOM keywords are
   // unambiguous and should always win.
-  if lower.contains("out of memory") || lower.contains("failed to allocate") {
+  // "failed to allocate data" is the DuckDB-specific fragment from the OOM
+  // message ("failed to allocate data of size X MiB (Y/Z used)").  The more
+  // general "failed to allocate" is deliberately NOT matched to avoid
+  // false-positives on unrelated allocation messages (e.g. extension loading).
+  // "out of memory" covers the full message prefix and any variant that does
+  // not contain the word "data".
+  if lower.contains("out of memory") || lower.contains("failed to allocate data") {
     return Some(Diagnosis {
-      summary: "The conversion ran out of memory.".into(),
+      summary: "DuckDB ran out of memory.".into(),
       hint: format!(
         "The operation on {path_desc} exceeded the server's DuckDB memory budget \
          (`[sql].memory_limit`, default 512MB). Try raising `[sql].memory_limit` \
@@ -264,6 +270,45 @@ mod tests {
       diag.summary.to_lowercase().contains("memory"),
       "OOM with read_json text must classify as OOM, not parse error: {}",
       diag.summary
+    );
+  }
+
+  #[test]
+  fn rule1_oom_query_path_no_context() {
+    // sql/mod.rs calls diagnose(target, None, &raw) — no URI context.
+    // The OOM rule must still fire and the hint must use the generic path_desc.
+    let raw =
+      "Out of Memory Error: failed to allocate data of size 512.0 MiB (510.0 MiB/512.0 MiB used)";
+    let diag = diagnose(&local_target(), None, raw).unwrap();
+    assert!(
+      diag.summary.to_lowercase().contains("memory"),
+      "query-path OOM (context=None) must classify as OOM: {}",
+      diag.summary
+    );
+    assert!(
+      diag.hint.contains("memory_limit"),
+      "hint should reference memory_limit: {}",
+      diag.hint
+    );
+    // Generic path_desc ("the path") must appear when context is None.
+    assert!(
+      diag.hint.contains("the path"),
+      "hint must use generic path_desc when context is None: {}",
+      diag.hint
+    );
+  }
+
+  #[test]
+  fn rule1_failed_to_allocate_without_data_not_matched() {
+    // "failed to allocate" alone (without "out of memory" or the DuckDB-specific
+    // "failed to allocate data" fragment) must NOT trigger Rule 1 to avoid
+    // false-positives on unrelated allocation messages.
+    // Note: the string must not contain words that trigger other rules
+    // (e.g. "extension"+"http" triggers Rule 5 on s3 targets).
+    let raw = "System error: failed to allocate buffer pool slot";
+    assert!(
+      diagnose(&local_target(), None, raw).is_none(),
+      "bare 'failed to allocate' without OOM context must return None"
     );
   }
 
