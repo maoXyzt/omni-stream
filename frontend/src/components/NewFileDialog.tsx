@@ -3,7 +3,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { FilePlus } from 'lucide-react'
 
-import EditorImport from 'react-simple-code-editor'
+import { Editor } from '@/lib/code-editor'
 
 import { ApiError } from '@/api/client'
 import { putFile } from '@/api/files'
@@ -25,11 +25,6 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
-
-// Same CJS/ESM interop shim as ParquetSqlTab / TextPreview.
-const Editor =
-  (EditorImport as unknown as { default?: typeof EditorImport }).default ??
-  EditorImport
 
 interface Props {
   storage: string

@@ -18,7 +18,7 @@ import {
   X,
 } from 'lucide-react'
 
-import EditorImport from 'react-simple-code-editor'
+import { Editor } from '@/lib/code-editor'
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -86,13 +86,6 @@ const LOAD_ALL_HEAVY_BYTES = 20 * 1024 * 1024
 // multi-MiB files make typing janky; 2 MiB keeps inline editing responsive.
 // Above this the Edit button is disabled (the file can still be downloaded).
 const MAX_EDIT_BYTES = 2 * 1024 * 1024
-
-// react-simple-code-editor 0.14.x ships a CJS bundle whose default export is
-// the component; ESM interop wraps it as { default }. Handle both shapes (same
-// workaround as ParquetSqlTab).
-const Editor =
-  (EditorImport as unknown as { default?: typeof EditorImport }).default ??
-  EditorImport
 
 type LoadAllSeverity = 'light' | 'warn' | 'heavy'
 
