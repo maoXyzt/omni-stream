@@ -140,7 +140,20 @@ impl JobRegistry {
   /// Query current status. Returns `None` if the id is unknown or has been
   /// pruned (front-end should treat this as a 404).
   pub fn status(&self, id: &str) -> Option<JobStatusResponse> {
-    let map = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+    let mut map = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+    // Eagerly expire a running entry that has exceeded RUNNING_JOB_MAX_AGE.
+    // register() only prunes on write; status() may be called indefinitely
+    // for a job whose detached task panicked before calling complete/fail.
+    let now = Instant::now();
+    if matches!(
+      map.get(id),
+      Some(e)
+        if e.finished.is_none()
+          && now.saturating_duration_since(e.started) >= RUNNING_JOB_MAX_AGE
+    ) {
+      map.remove(id);
+      return None;
+    }
     let e = map.get(id)?;
     let elapsed_ms = match e.finished {
       // `saturating_duration_since` avoids panics on clock anomalies.
