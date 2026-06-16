@@ -111,12 +111,34 @@ export interface ServerInfo {
   httpfs_ready: boolean | null
 }
 
+/** @deprecated Kept for reference; POST /api/convert now returns ConvertAccepted (202). */
 export interface ConvertResult {
   /// Storage-relative path of the written Parquet file.
   output_key: string
   /// Number of rows written as reported by DuckDB.
   rows_written: number
   elapsed_ms: number
+}
+
+/** Immediate response from POST /api/convert (202 Accepted). */
+export interface ConvertAccepted {
+  job_id: string
+}
+
+/** Response from GET /api/convert/{job_id}. */
+export interface ConvertStatus {
+  job_id: string
+  /** `"running"` | `"done"` | `"failed"` */
+  state: 'running' | 'done' | 'failed'
+  /** Wall-clock milliseconds elapsed (or total duration when terminal). */
+  elapsed_ms: number
+  // Present when state === 'done'
+  output_key?: string
+  rows_written?: number
+  // Present when state === 'failed'
+  summary?: string
+  hint?: string
+  raw?: string
 }
 
 export interface QueryColumn {

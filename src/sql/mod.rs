@@ -10,6 +10,7 @@
 pub mod convert;
 pub mod diag;
 pub mod exec;
+pub mod jobs;
 pub mod probe;
 pub mod session;
 pub mod validate;
@@ -43,6 +44,10 @@ pub struct SqlState {
   /// `memory_limit` — without this, large S3 conversions fail with
   /// "LocalFileSystem has been disabled".
   pub scratch_dir: PathBuf,
+  /// In-memory registry of background conversion jobs. `POST /api/convert`
+  /// registers a job and returns its id; the detached task updates this when
+  /// the conversion finishes. `GET /api/convert/{id}` queries it.
+  pub jobs: jobs::JobRegistry,
   targets: HashMap<String, SqlTarget>,
   /// Storages that exist but refuse SQL, with the reason (currently: local
   /// storages with `follow_symlinks = false` — DuckDB's
@@ -86,6 +91,7 @@ impl SqlState {
     Self {
       scratch_dir: session::resolve_scratch_dir(cfg.sql.temp_directory.as_deref()),
       cfg: cfg.sql.clone(),
+      jobs: jobs::JobRegistry::new(),
       targets,
       disabled,
       default_name,

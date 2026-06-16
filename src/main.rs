@@ -217,16 +217,22 @@ async fn main() -> anyhow::Result<()> {
   // always requires the token when the gate is on (`write_auth`), independent
   // of `public_read`. Future mutating endpoints (upload / delete) belong here
   // too. Merged in so it keeps its own auth layer.
+  //
+  // NOTE: `/api/convert` (POST) has NO TimeoutLayer — the HTTP handler returns
+  // immediately (202 Accepted) after spawning a background task, so there is
+  // nothing to time out at the HTTP layer. The background task enforces
+  // `convert_timeout_secs` internally via the watchdog pattern.
   #[cfg(feature = "duckdb")]
   let app = {
     let write_auth = AuthLayer::write(&cfg.auth, auth_token.clone());
     let write_router = Router::new()
       .route(
         "/api/convert",
-        axum::routing::post(sql::convert::convert_handler).layer(TimeoutLayer::with_status_code(
-          StatusCode::REQUEST_TIMEOUT,
-          Duration::from_secs(cfg.sql.query_timeout_secs + 5),
-        )),
+        axum::routing::post(sql::convert::convert_handler),
+      )
+      .route(
+        "/api/convert/{job_id}",
+        axum::routing::get(sql::convert::convert_status_handler),
       )
       .route_layer(middleware::from_fn_with_state(write_auth, auth_middleware));
     app.merge(write_router)
