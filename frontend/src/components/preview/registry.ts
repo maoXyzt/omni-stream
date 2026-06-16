@@ -1,11 +1,15 @@
 import {
+  Code,
   Database,
   File as FileIcon,
   FileArchive,
   FileAudio,
   FileCode,
+  FileCog,
   FileImage,
+  FileJson,
   FileSpreadsheet,
+  FileTerminal,
   FileText,
   FileVideo,
   Folder,
@@ -202,21 +206,49 @@ const VISUAL_GROUPS: readonly VisualGroup[] = [
     label: 'Document',
     exts: ['doc', 'docx', 'odt', 'rtf'],
   },
+  // JSON / newline-delimited data — brace icon distinguishes structured data
+  // from generic code or config.
+  {
+    Icon: FileJson,
+    color: 'text-amber-500',
+    label: 'JSON',
+    exts: ['json', 'jsonl', 'ndjson'],
+  },
+  // Configuration / manifest files — gear icon signals "project settings"
+  // rather than executable code.
+  {
+    Icon: FileCog,
+    color: 'text-teal-500',
+    label: 'Config',
+    exts: ['yml', 'yaml', 'dvc', 'toml', 'ini', 'conf', 'cfg', 'env', 'plist'],
+  },
+  // Interpreted / scripting languages — terminal icon signals "runs directly"
+  // without a compile step (python, shell, ruby, lua, r, …).
+  {
+    Icon: FileTerminal,
+    color: 'text-green-600',
+    label: 'Script',
+    exts: ['py', 'rb', 'pl', 'lua', 'r', 'sh', 'bash', 'zsh', 'fish', 'ps1'],
+  },
+  // Markup / Web — angle-bracket icon matches the angle-bracket syntax of
+  // HTML/XML/CSS (distinct from the file-with-slashes FileCode icon).
+  {
+    Icon: Code,
+    color: 'text-blue-500',
+    label: 'Markup',
+    exts: ['html', 'htm', 'xhtml', 'xml', 'css', 'scss', 'sass', 'less'],
+  },
+  // General-purpose compiled / typed languages (JS/TS ecosystem, systems,
+  // JVM, functional, query, …) — the classic "file with angle brackets" icon.
   {
     Icon: FileCode,
     color: 'text-cyan-600',
     label: 'Code',
     exts: [
       'js', 'mjs', 'cjs', 'ts', 'tsx', 'jsx', 'vue', 'svelte',
-      'py', 'rb', 'go', 'rs', 'c', 'cc', 'cpp', 'cxx', 'h', 'hpp', 'java', 'kt', 'swift',
-      'php', 'cs', 'fs', 'scala', 'clj', 'ex', 'exs', 'erl', 'hs', 'lua', 'r', 'pl',
-      'sh', 'bash', 'zsh', 'fish', 'ps1',
+      'go', 'rs', 'c', 'cc', 'cpp', 'cxx', 'h', 'hpp', 'java', 'kt', 'swift',
+      'php', 'cs', 'fs', 'scala', 'clj', 'ex', 'exs', 'erl', 'hs',
       'sql', 'graphql', 'gql', 'proto', 'dart', 'm', 'mm', 'asm', 's',
-      'json', 'jsonl', 'ndjson',
-      'yml', 'yaml', 'dvc', 'toml', 'ini', 'conf', 'cfg', 'env',
-      'xml', 'plist',
-      'html', 'htm', 'xhtml',
-      'css', 'scss', 'sass', 'less',
     ],
   },
   {
