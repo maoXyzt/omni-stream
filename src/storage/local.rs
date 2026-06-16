@@ -64,7 +64,7 @@ pub struct ListingCache {
 
 impl ListingCache {
   fn get(&self, prefix: &str) -> Option<Arc<Vec<(String, bool, bool)>>> {
-    let guard = self.inner.lock().unwrap();
+    let guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
     let entry = guard.get(prefix)?;
     if entry.inserted_at.elapsed() >= CACHE_TTL {
       return None;
@@ -77,14 +77,18 @@ impl ListingCache {
   /// 10s TTL would otherwise serve a stale snapshot right after the user's
   /// own edit.
   fn invalidate(&self, prefix: &str) {
-    self.inner.lock().unwrap().remove(prefix);
+    self
+      .inner
+      .lock()
+      .unwrap_or_else(|e| e.into_inner())
+      .remove(prefix);
   }
 
   fn put(&self, prefix: &str, keys: Arc<Vec<(String, bool, bool)>>) {
     if keys.len() > CACHE_MAX_ENTRIES_PER_PREFIX {
       return;
     }
-    let mut guard = self.inner.lock().unwrap();
+    let mut guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
     // Drop anything past TTL on every write — keeps the table from growing
     // unbounded between requests, and the cost is bounded by `cap`.
     guard.retain(|_, v| v.inserted_at.elapsed() < CACHE_TTL);
@@ -1159,5 +1163,31 @@ mod tests {
     assert!(matches!(err, AppError::Forbidden(_)));
     // Target of the symlink was not modified.
     assert_eq!(std::fs::read(dir.join("real.txt")).unwrap(), b"orig");
+  }
+
+  #[test]
+  fn listing_cache_recovers_from_a_poisoned_lock() {
+    use std::sync::Arc;
+
+    let cache = Arc::new(ListingCache::default());
+
+    // Poison the mutex: panic while holding the lock on another thread. The
+    // panic message below is intentional (it surfaces on stderr during the
+    // run). With the old `lock().unwrap()` every subsequent access would
+    // propagate the PoisonError and panic the request handler; the
+    // poison-tolerant `unwrap_or_else(|e| e.into_inner())` recovers instead.
+    let poisoner = Arc::clone(&cache);
+    let _ = std::thread::spawn(move || {
+      let _guard = poisoner.inner.lock().unwrap();
+      panic!("intentionally poison the listing-cache mutex");
+    })
+    .join();
+
+    // All three lock sites must keep working on the poisoned mutex.
+    let keys: Arc<Vec<(String, bool, bool)>> = Arc::new(vec![("k".to_string(), false, false)]);
+    cache.put("p/", Arc::clone(&keys));
+    assert!(cache.get("p/").is_some(), "get recovers from poison");
+    cache.invalidate("p/");
+    assert!(cache.get("p/").is_none(), "invalidate recovers from poison");
   }
 }

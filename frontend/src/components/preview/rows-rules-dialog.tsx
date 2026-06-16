@@ -16,7 +16,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import JSON5 from 'json5'
-import EditorImport from 'react-simple-code-editor'
+import { Editor } from '@/lib/code-editor'
 import {
   AlertCircle,
   Check,
@@ -48,17 +48,6 @@ import { highlightJson5 } from '@/lib/highlight-json5'
 import { type Node, parseRules } from '@/lib/rows-schema'
 import { type ColumnInfo } from '@/lib/rows-source'
 import { cn } from '@/lib/utils'
-
-// react-simple-code-editor 0.14.x ships a CJS bundle that sets
-// `exports.default = Editor`. Vite's esbuild pre-bundler wraps the module
-// but doesn't unwrap the `__esModule` default, so the bare default import
-// arrives as `{ default: <Component> }` rather than the component itself —
-// React then rejects it with "Element type is invalid: …got: object" (the
-// minified prod form is React error #130). Unwrap once at module scope so
-// every `<Editor …>` site below renders correctly in dev and prod alike.
-const Editor =
-  (EditorImport as unknown as { default?: typeof EditorImport }).default ??
-  EditorImport
 
 // Used only when the file has no detectable columns (corrupted schema, or
 // the dialog opened before a source resolved). Real templates are derived

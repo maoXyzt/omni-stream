@@ -32,14 +32,7 @@ import { TokenPrompt } from '@/components/TokenPrompt'
 
 import { DataTable } from './DataTable'
 
-import EditorImport from 'react-simple-code-editor'
-
-// react-simple-code-editor 0.14.x ships a CJS bundle that sets module.exports
-// to the component; ESM interop gives us { default: Component }. Work around
-// both bundle shapes so the import resolves in every Vite / Jest environment.
-const Editor =
-  (EditorImport as unknown as { default?: typeof EditorImport }).default ??
-  EditorImport
+import { Editor } from '@/lib/code-editor'
 
 /// Cap DOM rendering at 1 000 rows; avoids stalling the browser on very wide
 /// results while the server already caps the row count via [sql].max_rows.
