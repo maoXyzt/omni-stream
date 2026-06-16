@@ -45,11 +45,11 @@ pub fn diagnose(target: &SqlTarget, context: Option<&str>, raw: &str) -> Option<
     return Some(Diagnosis {
       summary: "The conversion ran out of memory.".into(),
       hint: format!(
-        "Converting {path_desc} exceeded the server's DuckDB memory budget \
-         (`[sql].memory_limit`, default 512MB). Conversions stream and spill to \
-         disk where possible, but very wide rows or many columns enlarge the \
-         non-spillable Parquet write buffer. Raise `[sql].memory_limit` (e.g. \
-         '2GB') if the host has the RAM, or lower `[sql].convert_threads`."
+        "The operation on {path_desc} exceeded the server's DuckDB memory budget \
+         (`[sql].memory_limit`, default 512MB). Try raising `[sql].memory_limit` \
+         (e.g. '2GB') if the host has the RAM. For large-file conversions, \
+         lowering `[sql].convert_threads` also reduces peak memory by limiting \
+         the number of non-spillable Parquet write buffers held concurrently."
       ),
     });
   }

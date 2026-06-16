@@ -121,7 +121,8 @@ pub async fn convert_handler(
   // non-spillable Parquet row-group write buffer (~64 MiB × threads) fits
   // within memory_limit even for files of several hundred megabytes.
   let mut convert_cfg = sql_state.cfg.clone();
-  convert_cfg.threads = convert_cfg.convert_threads;
+  // Clamp to at least 1: convert_threads = 0 would be invalid for DuckDB.
+  convert_cfg.threads = convert_cfg.convert_threads.max(1);
   let setup = session::setup_statements(&convert_cfg, target, &sql_state.scratch_dir)?;
   // TSV/CSV: read_csv_auto auto-detects comma vs tab (and other delimiters).
   // JSONL/NDJSON: read_json_auto handles newline-delimited JSON.
@@ -473,6 +474,36 @@ mod tests {
   }
 
   // --- Unit tests (no DuckDB execution) ------------------------------------
+
+  #[test]
+  fn build_copy_sql_contains_row_group_size_bytes() {
+    let sql = build_copy_sql("read_json_auto", "/data/in.jsonl", "/data/out.parquet");
+    assert!(
+      sql.contains("ROW_GROUP_SIZE_BYTES '64MB'"),
+      "COPY must cap row-group size to limit non-spillable write buffer: {sql}"
+    );
+    assert!(
+      sql.contains("/data/in.jsonl"),
+      "in_uri must appear in SQL: {sql}"
+    );
+    assert!(
+      sql.contains("/data/out.parquet"),
+      "out_uri must appear in SQL: {sql}"
+    );
+  }
+
+  #[test]
+  fn build_copy_sql_escapes_single_quotes_in_uris() {
+    let sql = build_copy_sql("read_csv_auto", "/data/it's.csv", "/data/out's.parquet");
+    assert!(
+      sql.contains("/data/it''s.csv"),
+      "single quotes in in_uri must be escaped: {sql}"
+    );
+    assert!(
+      sql.contains("/data/out''s.parquet"),
+      "single quotes in out_uri must be escaped: {sql}"
+    );
+  }
 
   #[test]
   fn build_uris_local() {
