@@ -688,26 +688,41 @@ impl StorageBackend for S3Backend {
       match build_put(true).send().await {
         Ok(r) => r,
         Err(e) => {
-          let status = match &e {
-            SdkError::ServiceError(svc) => Some(svc.raw().status().as_u16()),
-            _ => None,
+          // Classify the failure while we still hold the error. 412 means the
+          // conditional create lost the race. The backend not understanding
+          // `If-None-Match` at all shows up two ways: AWS / recent MinIO answer
+          // 501, while older Ceph RGW and some gateways reject the unknown
+          // header with 400 + InvalidArgument / InvalidHeader / NotImplemented.
+          let (status, unsupported_conditional) = match &e {
+            SdkError::ServiceError(svc) => {
+              let status = svc.raw().status().as_u16();
+              let code = svc.err().code().unwrap_or_default();
+              let unsupported = status == 501
+                || (status == 400
+                  && matches!(code, "InvalidArgument" | "InvalidHeader" | "NotImplemented"));
+              (Some(status), unsupported)
+            }
+            _ => (None, false),
           };
-          match status {
+          if status == Some(412) {
             // A concurrent writer created the key between our HEAD and the
             // conditional PUT — the race we set out to close.
-            Some(412) => {
-              return Err(AppError::Conflict(format!(
-                "file already exists: '{path}'. Set overwrite=true to replace it."
-              )));
-            }
-            // The backend doesn't implement conditional writes (older
-            // S3-compatible servers answer 501). Retry without the header so we
-            // degrade to a plain PutObject rather than failing the write.
-            Some(501) => build_put(false)
+            return Err(AppError::Conflict(format!(
+              "file already exists: '{path}'. Set overwrite=true to replace it."
+            )));
+          }
+          if unsupported_conditional {
+            // Deliberately degrade to the same best-effort HEAD+PUT this code
+            // did before the guard existed. On a backend that can't do
+            // conditional writes an atomic create is physically impossible, so
+            // failing here would break create-new-file outright rather than
+            // merely leaving the original (tiny) TOCTOU window open.
+            build_put(false)
               .send()
               .await
-              .map_err(|e| map_write_err("put", e))?,
-            _ => return Err(map_write_err("put", e)),
+              .map_err(|e| map_write_err("put", e))?
+          } else {
+            return Err(map_write_err("put", e));
           }
         }
       }
