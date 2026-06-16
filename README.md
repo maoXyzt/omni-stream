@@ -215,8 +215,9 @@ enabled = true
 # enabled = true            # 默认；kill-switch 独立于构建 feature
 # memory_limit = "512MB"    # 默认；每个查询连接的 DuckDB 内存上限
 # threads = 2               # 默认；每个连接的 DuckDB 线程数
-# query_timeout_secs = 300  # 默认（5 分钟）；超时返回 408
-# max_rows = 10000          # 默认；结果超出此数时截断（truncated = true）
+# query_timeout_secs = 300    # 默认（5 分钟）；交互式 SELECT 超时返回 408
+# convert_timeout_secs = 1800 # 默认（30 分钟）；后台 JSONL/CSV→Parquet 转换超时
+# max_rows = 10000            # 默认；结果超出此数时截断（truncated = true）
 ```
 
 前置条件与具体用法（Parquet SQL tab、格式转换按钮）详见 [docs/edit_features_guide.md](docs/edit_features_guide.md)。

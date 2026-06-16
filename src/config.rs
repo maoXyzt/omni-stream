@@ -305,8 +305,16 @@ pub struct SqlConfig {
   pub memory_limit: String,
   /// DuckDB `threads` per query connection.
   pub threads: u16,
-  /// Wall-clock timeout; on expiry the query is interrupted and 408 returned.
+  /// Wall-clock timeout for interactive SQL queries; on expiry the query is
+  /// interrupted and 408 returned. Does NOT apply to conversions — use
+  /// `convert_timeout_secs` for those.
   pub query_timeout_secs: u64,
+  /// Wall-clock timeout for a JSONL/CSV→Parquet conversion. Conversions of
+  /// multi-GiB files can take many minutes; this is independent of the much
+  /// shorter `query_timeout_secs` (interactive SELECTs). On expiry the
+  /// background conversion is interrupted and the job marked failed.
+  /// Default: 1800 (30 minutes).
+  pub convert_timeout_secs: u64,
   /// Row cap on results; responses set `truncated = true` beyond it.
   pub max_rows: u32,
   /// DuckDB scratch / spill directory. Large queries and conversions write
@@ -323,6 +331,7 @@ impl Default for SqlConfig {
       memory_limit: "512MB".to_string(),
       threads: 2,
       query_timeout_secs: 300,
+      convert_timeout_secs: 1800,
       max_rows: 10_000,
       temp_directory: None,
     }
@@ -531,6 +540,9 @@ impl Config {
   }
 
   fn validate(&self) -> anyhow::Result<()> {
+    if self.sql.convert_timeout_secs == 0 {
+      bail!("sql.convert_timeout_secs must be greater than 0");
+    }
     if self.storages.is_empty() {
       bail!("no storages configured; define at least one [[storages]] entry");
     }

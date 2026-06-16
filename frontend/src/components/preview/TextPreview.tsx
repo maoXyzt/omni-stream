@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query'
+import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
   AlertCircle,
@@ -37,7 +37,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { ApiError } from '@/api/client'
-import { convertToParquet } from '@/api/convert'
+import { getConvertStatus, startConvert } from '@/api/convert'
 import { putFile } from '@/api/files'
 import { extractErrorDetail, type ErrorDetail } from '@/lib/api-error'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
@@ -140,6 +140,8 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
     return `${ext} → Parquet`
   }, [rowsFormat, fileKey])
   const [converting, setConverting] = useState(false)
+  // Non-null while a background conversion job is tracked (progress dialog open).
+  const [convertJobId, setConvertJobId] = useState<string | null>(null)
   const [showOverwriteDialog, setShowOverwriteDialog] = useState(false)
   // Non-null while a "Conversion failed" dialog is open.
   const [convertError, setConvertError] = useState<ErrorDetail | null>(null)
@@ -168,15 +170,11 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
       if (!storage) return
       setConverting(true)
       try {
-        const result = await convertToParquet(storage, fileKey, overwrite)
-        toast.success(
-          `Converted to ${result.output_key} (${result.rows_written} rows, ${result.elapsed_ms}ms)`,
-        )
-        // Invalidate the directory listing so the new .parquet file appears.
-        const dirPrefix = fileKey.includes('/')
-          ? fileKey.slice(0, fileKey.lastIndexOf('/') + 1)
-          : ''
-        queryClient.invalidateQueries({ queryKey: ['list', storage, dirPrefix] })
+        // POST returns immediately (202) with a job_id. Synchronous errors
+        // (401, 409, 400) are still thrown here so existing branches work.
+        const { job_id } = await startConvert(storage, fileKey, overwrite)
+        // Open the progress dialog; polling is handled by ConvertProgressDialog.
+        setConvertJobId(job_id)
       } catch (err) {
         if (err instanceof ApiError && err.status === 401) {
           setConvertAuthOverwrite(overwrite)
@@ -193,7 +191,7 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
         setConverting(false)
       }
     },
-    [storage, fileKey, queryClient],
+    [storage, fileKey],
   )
 
   // Gate the hint banner wrapper so dismissing it doesn't leave a phantom
@@ -592,13 +590,13 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
                   type="button"
                   size="sm"
                   onClick={() => handleConvert(false)}
-                  disabled={converting}
+                  disabled={converting || convertJobId !== null}
                   className="h-7 shadow-sm"
                 >
-                  {converting
+                  {converting || convertJobId !== null
                     ? <Loader2 className="size-3.5 animate-spin" />
                     : <FileDown className="size-3.5" />}
-                  {converting ? 'Converting…' : convertLabel}
+                  {converting || convertJobId !== null ? 'Converting…' : convertLabel}
                 </Button>
               </TooltipTrigger>
               <TooltipContent>
@@ -1043,6 +1041,133 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
           onCancel={() => setSaveAuth(false)}
         />
       )}
+      {/* Progress dialog for the background conversion job. The component is
+          only mounted while a job is in flight so its useQuery hook starts /
+          stops cleanly — avoids hooks that run unconditionally. */}
+      {convertJobId !== null && storage && (
+        <ConvertProgressDialog
+          jobId={convertJobId}
+          fileKey={fileKey}
+          onDone={(outputKey, rowsWritten, elapsedMs) => {
+            setConvertJobId(null)
+            toast.success(
+              `Converted to ${outputKey} (${rowsWritten} rows, ${elapsedMs}ms)`,
+            )
+            const dirPrefix = fileKey.includes('/')
+              ? fileKey.slice(0, fileKey.lastIndexOf('/') + 1)
+              : ''
+            queryClient.invalidateQueries({ queryKey: ['list', storage, dirPrefix] })
+          }}
+          onFailed={(detail) => {
+            setConvertJobId(null)
+            setConvertError(detail)
+          }}
+        />
+      )}
     </div>
+  )
+}
+
+// --- ConvertProgressDialog ---------------------------------------------------
+
+/** Props for the background-job progress dialog. */
+interface ConvertProgressDialogProps {
+  jobId: string
+  fileKey: string
+  onDone: (outputKey: string, rowsWritten: number, elapsedMs: number) => void
+  onFailed: (detail: ErrorDetail) => void
+}
+
+/**
+ * Polls GET /api/convert/{jobId} every 1.5 s until the conversion finishes,
+ * then delegates to `onDone` or `onFailed`. Displayed as an uncloseable modal
+ * so the user knows a job is in flight while the source tab is open.
+ *
+ * The component is intentionally separate from TextPreview so that the
+ * `useQuery` hook is only mounted when a job is actually running — avoids a
+ * polling query that sits idle between conversions.
+ */
+function ConvertProgressDialog({
+  jobId,
+  fileKey,
+  onDone,
+  onFailed,
+}: ConvertProgressDialogProps) {
+  const query = useQuery({
+    queryKey: ['convert-status', jobId],
+    queryFn: () => getConvertStatus(jobId),
+    // Treat all query errors as terminal — don't retry so a 404 (job pruned
+    // or server restarted) surfaces immediately instead of spinning forever.
+    retry: false,
+    // Stop refetching once the job reaches a terminal state or errors out.
+    refetchInterval: (q) => {
+      if (q.state.error) return false
+      const s = q.state.data?.state
+      return s === 'done' || s === 'failed' ? false : 1500
+    },
+  })
+
+  const status = query.data
+
+  // When the status transitions to a terminal state (or errors), bubble the
+  // result up to the parent. useEffect is the correct place — never call
+  // state-setters / callbacks in render.
+  useEffect(() => {
+    if (query.isError) {
+      if (query.error instanceof ApiError) {
+        onFailed(extractErrorDetail(query.error))
+      } else {
+        onFailed({ message: String(query.error) })
+      }
+      return
+    }
+    if (!status) return
+    if (status.state === 'done') {
+      onDone(
+        status.output_key ?? '',
+        status.rows_written ?? 0,
+        status.elapsed_ms,
+      )
+    } else if (status.state === 'failed') {
+      onFailed({
+        message: status.summary ?? 'The conversion failed.',
+        hint: status.hint,
+        raw: status.raw,
+      })
+    }
+    // Omit onDone/onFailed from deps: they're recreated on every parent
+    // render (inline arrows), but we only want to fire when terminal state
+    // arrives, not on unrelated TextPreview re-renders.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status, query.isError, query.error])
+
+  // Format elapsed seconds for display.
+  const elapsedSec = status ? Math.floor(status.elapsed_ms / 1000) : 0
+
+  return (
+    <Dialog open>
+      <DialogContent
+        className="sm:max-w-sm"
+        // Prevent closing via Escape or backdrop click while conversion is running.
+        onInteractOutside={(e) => e.preventDefault()}
+        onEscapeKeyDown={(e) => e.preventDefault()}
+      >
+        <DialogHeader>
+          <DialogTitle>Converting…</DialogTitle>
+          <DialogDescription className="break-all">
+            {fileKey}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="flex flex-col items-center gap-3 py-4">
+          <Loader2 className="size-8 animate-spin text-muted-foreground" />
+          <p className="text-sm text-muted-foreground">
+            Running on server — elapsed{' '}
+            <span className="font-medium tabular-nums text-foreground">
+              {elapsedSec}s
+            </span>
+          </p>
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }

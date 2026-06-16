@@ -48,8 +48,9 @@ local = { root_path = "/data/files", follow_symlinks = true }  # false 时 symli
 # enabled = true            # 默认 kill-switch；需同时满足 duckdb feature + auth.enabled
 # memory_limit = "512MB"    # 默认；每个 DuckDB 查询连接的内存上限
 # threads = 2               # 默认；每个连接的 DuckDB 线程数
-# query_timeout_secs = 300  # 默认（5 分钟）；超时返回 408
-# max_rows = 10000          # 默认；结果超出此数时截断
+# query_timeout_secs = 300    # 默认（5 分钟）；交互式 SELECT 超时返回 408
+# convert_timeout_secs = 1800 # 默认（30 分钟）；后台 JSONL/CSV→Parquet 转换超时
+# max_rows = 10000            # 默认；结果超出此数时截断
 ```
 
 `s3.bucket` 为可选字段，缺省 / 空串 / `"*"` 三种写法语义等价：均触发多 bucket

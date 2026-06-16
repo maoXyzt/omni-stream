@@ -66,18 +66,6 @@ pub enum AppError {
   #[error("duckdb: {0}")]
   DuckDbRaw(String),
 
-  /// JSONL/CSV→Parquet conversion failed with a classified diagnosis.
-  /// `summary` replaces the old misleading "read-only" prefix; `hint`
-  /// gives actionable troubleshooting guidance; `raw` preserves the
-  /// verbatim DuckDB error for power users / support.  HTTP 500.
-  #[cfg(feature = "duckdb")]
-  #[error("{summary}")]
-  ConvertFailed {
-    summary: String,
-    hint: String,
-    raw: String,
-  },
-
   /// SQL query hit a recognisable infrastructure problem (S3 fallback,
   /// permission, extension load, …).  `message` is the verbatim DuckDB
   /// text (still useful for SQL errors); `hint` gives a troubleshooting
@@ -105,8 +93,6 @@ impl AppError {
       #[cfg(feature = "duckdb")]
       AppError::DuckDbRaw(_) => StatusCode::INTERNAL_SERVER_ERROR,
       #[cfg(feature = "duckdb")]
-      AppError::ConvertFailed { .. } => StatusCode::INTERNAL_SERVER_ERROR,
-      #[cfg(feature = "duckdb")]
       AppError::QueryDiagnosed { .. } => StatusCode::BAD_REQUEST,
     }
   }
@@ -119,22 +105,6 @@ impl IntoResponse for AppError {
     // Structured variants: emit extra fields so the SPA can render a rich
     // error dialog.  All other errors keep the plain {error, message} shape
     // so existing consumers are unaffected.
-    #[cfg(feature = "duckdb")]
-    if let AppError::ConvertFailed {
-      ref summary,
-      ref hint,
-      ref raw,
-    } = self
-    {
-      let body = Json(json!({
-          "error":   status.canonical_reason().unwrap_or("error"),
-          "message": summary,
-          "hint":    hint,
-          "raw":     raw,
-      }));
-      return (status, body).into_response();
-    }
-
     #[cfg(feature = "duckdb")]
     if let AppError::QueryDiagnosed {
       ref message,

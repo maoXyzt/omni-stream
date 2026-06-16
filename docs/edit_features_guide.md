@@ -77,11 +77,14 @@ data/users.csv             →  data/users.parquet
 
 **支持的存储类型：** 本地文件系统（Local）和 S3 兼容存储（含 MinIO / Ceph 等）均支持。
 
-**超时设置：** 转换共享 `[sql].query_timeout_secs`（默认 **300 秒 / 5 分钟**）。超大文件可能超时，届时可在配置中适当调大：
+**异步任务模型：** 点击转换按钮后，`POST /api/convert` 立即返回 `202 Accepted`（含 `job_id`），服务端在后台独立运行转换；前端弹出进度弹窗，每 1.5 秒轮询 `GET /api/convert/{job_id}` 获取状态（`running` / `done` / `failed`）。转换完成后弹窗消失，文件列表自动刷新；失败则弹出可读错误提示（summary、hint、DuckDB 原始错误）。
+
+**超时设置：** 转换有专用超时 `[sql].convert_timeout_secs`（默认 **1800 秒 / 30 分钟**），与交互式 SELECT 的 `query_timeout_secs`（默认 **300 秒**）独立。可按需调整：
 
 ```toml
 [sql]
-query_timeout_secs = 600   # 按需调整（单位：秒）
+query_timeout_secs = 300    # 交互式 SQL 查询超时（按需调整）
+convert_timeout_secs = 3600 # 超大文件转换可延长至 1 小时
 ```
 
 ---
