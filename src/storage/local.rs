@@ -64,7 +64,7 @@ pub struct ListingCache {
 
 impl ListingCache {
   fn get(&self, prefix: &str) -> Option<Arc<Vec<(String, bool, bool)>>> {
-    let guard = self.inner.lock().unwrap();
+    let guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
     let entry = guard.get(prefix)?;
     if entry.inserted_at.elapsed() >= CACHE_TTL {
       return None;
@@ -77,14 +77,18 @@ impl ListingCache {
   /// 10s TTL would otherwise serve a stale snapshot right after the user's
   /// own edit.
   fn invalidate(&self, prefix: &str) {
-    self.inner.lock().unwrap().remove(prefix);
+    self
+      .inner
+      .lock()
+      .unwrap_or_else(|e| e.into_inner())
+      .remove(prefix);
   }
 
   fn put(&self, prefix: &str, keys: Arc<Vec<(String, bool, bool)>>) {
     if keys.len() > CACHE_MAX_ENTRIES_PER_PREFIX {
       return;
     }
-    let mut guard = self.inner.lock().unwrap();
+    let mut guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
     // Drop anything past TTL on every write — keeps the table from growing
     // unbounded between requests, and the cost is bounded by `cap`.
     guard.retain(|_, v| v.inserted_at.elapsed() < CACHE_TTL);
