@@ -1056,4 +1056,150 @@ mod tests {
       AppError::Conflict(_)
     ));
   }
+
+  // --- put_file conditional write / fallback (HTTP replay) --------------
+
+  use aws_sdk_s3::primitives::SdkBody;
+  use aws_smithy_http_client::test_util::{ReplayEvent, StaticReplayClient};
+
+  /// Minimal S3 `<Error>` XML so the SDK parses a status + error code.
+  fn s3_error_xml(code: &str) -> String {
+    format!(
+      "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\
+       <Error><Code>{code}</Code><Message>{code}</Message></Error>"
+    )
+  }
+
+  fn resp(status: u16, body: SdkBody) -> http::Response<SdkBody> {
+    http::Response::builder().status(status).body(body).unwrap()
+  }
+
+  /// A canned HTTP response paired with a throwaway request — `StaticReplayClient`
+  /// replays responses strictly in order regardless of the request.
+  fn event(response: http::Response<SdkBody>) -> ReplayEvent {
+    ReplayEvent::new(
+      http::Request::builder().body(SdkBody::empty()).unwrap(),
+      response,
+    )
+  }
+
+  /// Build an `S3Backend` (single-bucket mode) whose HTTP layer replays the
+  /// given responses, so put_file's conditional-write logic runs end to end
+  /// without a live backend.
+  fn replay_backend(responses: Vec<http::Response<SdkBody>>) -> (S3Backend, StaticReplayClient) {
+    let http_client = StaticReplayClient::new(responses.into_iter().map(event).collect());
+    let conf = aws_sdk_s3::Config::builder()
+      .behavior_version(BehaviorVersion::latest())
+      .region(Region::new("us-east-1"))
+      .credentials_provider(Credentials::new("ak", "sk", None, None, "test"))
+      .http_client(http_client.clone())
+      .force_path_style(true)
+      .build();
+    let backend = S3Backend {
+      client: Client::from_conf(conf),
+      bucket: Some("bucket".to_string()),
+    };
+    (backend, http_client)
+  }
+
+  async fn put_new(backend: &S3Backend) -> Result<FileMeta, AppError> {
+    backend
+      .put_file(
+        "new.txt",
+        Bytes::from_static(b"hello"),
+        PutOptions {
+          overwrite: false,
+          ..Default::default()
+        },
+      )
+      .await
+  }
+
+  #[tokio::test]
+  async fn put_conditional_create_succeeds_atomically() {
+    // HEAD says the key is free; the conditional PUT writes in one shot.
+    let (backend, http) = replay_backend(vec![
+      resp(404, SdkBody::empty()),
+      http::Response::builder()
+        .status(200)
+        .header("ETag", "\"deadbeef\"")
+        .body(SdkBody::empty())
+        .unwrap(),
+    ]);
+    let meta = put_new(&backend)
+      .await
+      .expect("conditional create succeeds");
+    assert_eq!(meta.size, 5);
+    let reqs: Vec<_> = http.actual_requests().collect();
+    assert_eq!(reqs.len(), 2, "HEAD then a single conditional PUT");
+    // The PUT must carry the atomic-create guard.
+    assert_eq!(reqs[1].headers().get("if-none-match"), Some("*"));
+  }
+
+  #[tokio::test]
+  async fn put_conditional_412_is_conflict() {
+    // Key was free at HEAD time but a concurrent writer won the race: the
+    // conditional PUT returns 412 and must surface as Conflict, not overwrite.
+    let (backend, _http) = replay_backend(vec![
+      resp(404, SdkBody::empty()),
+      resp(412, SdkBody::from(s3_error_xml("PreconditionFailed"))),
+    ]);
+    assert!(matches!(
+      put_new(&backend).await,
+      Err(AppError::Conflict(_))
+    ));
+  }
+
+  #[tokio::test]
+  async fn put_falls_back_when_conditional_unsupported_501() {
+    // A backend answering 501 to the conditional header is retried with a
+    // plain PutObject so the create still lands.
+    let (backend, http) = replay_backend(vec![
+      resp(404, SdkBody::empty()),
+      resp(501, SdkBody::from(s3_error_xml("NotImplemented"))),
+      resp(200, SdkBody::empty()),
+    ]);
+    put_new(&backend)
+      .await
+      .expect("falls back to plain PutObject");
+    let reqs: Vec<_> = http.actual_requests().collect();
+    assert_eq!(reqs.len(), 3, "HEAD, conditional PUT, fallback PUT");
+    assert_eq!(reqs[1].headers().get("if-none-match"), Some("*"));
+    // The fallback PUT must drop the conditional header.
+    assert_eq!(reqs[2].headers().get("if-none-match"), None);
+  }
+
+  #[tokio::test]
+  async fn put_falls_back_when_conditional_rejected_400() {
+    // Older Ceph RGW / gateways reject the unknown header with 400 +
+    // InvalidArgument rather than 501 — same fallback must apply.
+    let (backend, http) = replay_backend(vec![
+      resp(404, SdkBody::empty()),
+      resp(400, SdkBody::from(s3_error_xml("InvalidArgument"))),
+      resp(200, SdkBody::empty()),
+    ]);
+    put_new(&backend)
+      .await
+      .expect("falls back on 400 InvalidArgument");
+    assert_eq!(http.actual_requests().count(), 3);
+  }
+
+  #[tokio::test]
+  async fn put_propagates_unrelated_conditional_error() {
+    // A 403 on the conditional PUT is a real failure, not a missing-feature
+    // signal: it must propagate, never silently retry as an overwrite.
+    let (backend, http) = replay_backend(vec![
+      resp(404, SdkBody::empty()),
+      resp(403, SdkBody::from(s3_error_xml("AccessDenied"))),
+    ]);
+    assert!(matches!(
+      put_new(&backend).await,
+      Err(AppError::Forbidden(_))
+    ));
+    assert_eq!(
+      http.actual_requests().count(),
+      2,
+      "no fallback PUT on an unrelated error"
+    );
+  }
 }

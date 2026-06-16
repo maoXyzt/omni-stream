@@ -78,6 +78,13 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png",
 webp = "0.3"
 sha2 = "0.10"
 
+[dev-dependencies]
+# S3 HTTP mocking for backend tests: StaticReplayClient scripts canned
+# responses so put_file's conditional-write / fallback branches can be tested
+# without a live S3. `http` builds the canned request/response pairs.
+aws-smithy-http-client = { version = "1", features = ["test-util"] }
+http = "1"
+
 # Drives `cargo release <patch|minor|major|x.y.z> --execute`: bumps the
 # version in Cargo.toml + Cargo.lock, commits, tags `v<version>`, and pushes.
 # CI takes over after the tag lands and runs `cargo publish`, so the local
