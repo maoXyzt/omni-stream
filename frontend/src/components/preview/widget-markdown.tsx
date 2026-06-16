@@ -3,24 +3,11 @@
 // widget is actually rendered.
 
 import { useMemo } from 'react'
-import DOMPurify, { type Config as DOMPurifyConfig } from 'dompurify'
-import { marked } from 'marked'
 
 import { cn } from '@/lib/utils'
+import { renderMarkdown } from '@/lib/markdown'
 
 import { EmptyHint } from './widget-shared'
-
-// Marked is configured once at module load. We turn off GFM so tables /
-// strikethrough / task-lists stay out (spec §2). DOMPurify sanitizes the
-// produced HTML before injection — that's the actual security boundary;
-// marked's deprecated `sanitize` option is not used.
-marked.use({ gfm: false, breaks: false, async: false })
-
-const PURIFY_OPTS: DOMPurifyConfig = {
-  USE_PROFILES: { html: true },
-  FORBID_TAGS: ['style', 'script', 'iframe', 'object', 'embed', 'form'],
-  FORBID_ATTR: ['style', 'onerror', 'onload', 'onclick'],
-}
 
 interface MarkdownProps {
   value: unknown
@@ -31,8 +18,8 @@ export function WidgetMarkdown({ value, maxHeight = '24rem' }: MarkdownProps) {
   const text = typeof value === 'string' ? value : ''
   const html = useMemo(() => {
     if (text === '') return ''
-    const raw = marked.parse(text, { async: false }) as string
-    return DOMPurify.sanitize(raw, PURIFY_OPTS)
+    // GFM off: spec-strict CommonMark for arbitrary data-field values.
+    return renderMarkdown(text, { gfm: false })
   }, [text])
   if (text === '') return <EmptyHint />
   return (

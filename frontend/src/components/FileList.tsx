@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
   Navigate,
@@ -30,6 +30,7 @@ import {
 
 import { ApiError, getStoredToken, setStoredToken } from '@/api/client'
 import { listFiles, proxyUrl, statFile } from '@/api/storage'
+import { basenameOf } from '@/lib/path'
 import { isMultiBucketS3 } from '@/lib/storage-display'
 import { resolveStorageUri } from '@/lib/resolve-uri'
 import { encodePathSegments } from '@/lib/route-path'
@@ -92,6 +93,9 @@ const PREVIEW_PARAM = 'preview'
 const PAGE_PARAM = 'page'
 const VIEW_PARAM = 'view'
 const REPO_URL = 'https://github.com/maoXyzt/omni-stream'
+
+// Lazy-loaded so `marked` + `dompurify` stay out of the main bundle.
+const ReadmePanel = lazy(() => import('./preview/ReadmePanel'))
 
 function isValidViewMode(v: string | null): v is ViewMode {
   return v === 'list' || v === 'grid'
@@ -702,6 +706,57 @@ export function FileList() {
     setTypeFilter('')
   }
 
+  // ── README auto-detection ──────────────────────────────────────────────────
+  // Fast path: scan the current page's entries (zero extra requests).
+  const readmeFromPage = useMemo(() => {
+    if (!listQuery.data) return null
+    return (
+      listQuery.data.entries.find(
+        (e) => !e.is_dir && /^readme\.(md|markdown)$/i.test(basenameOf(e.key)),
+      ) ?? null
+    )
+  }, [listQuery.data])
+
+  // Slow path: when the directory spans multiple pages and README isn't on
+  // the current page, probe via a single stat call so we still show it.
+  // `isMultiPage` is true when more pages exist or we're already past page 1.
+  const isMultiPage =
+    Boolean(listQuery.data?.next_token) || currentPage > 1
+
+  const readmeProbe = useQuery({
+    queryKey: ['readme-probe', storageName, prefix],
+    enabled: previewState === null && !readmeFromPage && isMultiPage && !showListSkeleton,
+    retry: false,
+    staleTime: 5 * 60 * 1000,
+    queryFn: async (): Promise<FileEntry | null> => {
+      // Try the two most common README naming conventions in order. Using two
+      // stat calls avoids enumerating all case variants while still covering
+      // case-sensitive filesystems and S3 where `readme.md` is common.
+      for (const name of ['README.md', 'readme.md']) {
+        try {
+          const meta = await statFile(prefix + name, storageName || undefined)
+          if (meta.is_dir) continue
+          return {
+            key: meta.path,
+            last_modified: meta.last_modified,
+            is_dir: false,
+            size: meta.size,
+            is_symlink: false,
+          }
+        } catch (err) {
+          if (err instanceof ApiError && err.status === 404) continue
+          // Any non-404 error (transient 5xx, auth, network) → give up silently.
+          // A missing panel is better than a broken one.
+          return null
+        }
+      }
+      return null
+    },
+  })
+
+  // The entry we'll pass to ReadmePanel — page hit wins over probe result.
+  const readmeTarget = readmeFromPage ?? readmeProbe.data ?? null
+
   // Keyboard navigation only steps through the previewable subset of the
   // current page — pagination boundaries are deliberate stops since the next
   // page hasn't been fetched yet. Filters apply here too so arrow keys
@@ -1284,6 +1339,19 @@ export function FileList() {
                   ))}
                 </TableBody>
               </Table>
+            )}
+
+            {/* README panel — shown when no file is open and the directory
+                contains a README.md (current page or detected via stat). */}
+            {previewState === null && readmeTarget && (
+              <Suspense fallback={null}>
+                <ReadmePanel
+                  fileKey={readmeTarget.key}
+                  storage={storageName || undefined}
+                  version={readmeTarget.last_modified}
+                  onViewSource={() => openPreview(readmeTarget)}
+                />
+              </Suspense>
             )}
           </>
         )

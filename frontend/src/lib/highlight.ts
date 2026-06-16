@@ -110,7 +110,7 @@ const EXT_TO_LANG: Record<string, string> = {
   json: 'json', jsonl: 'json', ndjson: 'json',
   json5: 'json5',
   py: 'python', pyw: 'python',
-  yml: 'yaml', yaml: 'yaml',
+  yml: 'yaml', yaml: 'yaml', dvc: 'yaml',
   toml: 'ini', ini: 'ini', conf: 'ini', cfg: 'ini', env: 'ini',
   // Dynamic
   sh: 'bash', bash: 'bash', zsh: 'bash', fish: 'bash',

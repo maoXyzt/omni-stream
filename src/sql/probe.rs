@@ -29,19 +29,25 @@ pub type ProbeCache = tokio::sync::Mutex<Option<(bool, Instant)>>;
 /// Like [`probe_httpfs`], but caches the result for [`CACHE_TTL_SECS`]
 /// seconds. On a cache hit only a mutex lock + timestamp check is paid; no
 /// DuckDB connection is opened.
+///
+/// The mutex is held for the duration of the probe on a cache miss. This
+/// serialises concurrent callers so only one probe runs at a time — the
+/// others queue behind the lock and read the freshly-written cache result
+/// rather than each spawning their own DuckDB connection.
 pub async fn probe_httpfs_cached(cache: &ProbeCache) -> bool {
-  // Fast path: return cached result if still fresh.
+  let mut guard = cache.lock().await;
+  // Re-check after acquiring the lock: a concurrent caller may have already
+  // run the probe and written a fresh result while we were waiting.
+  if let Some((result, ts)) = *guard
+    && ts.elapsed().as_secs() < CACHE_TTL_SECS
   {
-    let guard = cache.lock().await;
-    if let Some((result, ts)) = *guard
-      && ts.elapsed().as_secs() < CACHE_TTL_SECS
-    {
-      return result;
-    }
+    return result;
   }
-  // Cache miss or expired — run the real probe then update the cache.
+  // Cache miss or expired — run probe while holding the lock so concurrent
+  // callers queue here rather than each spawning their own probe.
+  // `tokio::sync::Mutex` is hold-across-await safe, unlike std::sync::Mutex.
   let result = probe_httpfs().await;
-  *cache.lock().await = Some((result, Instant::now()));
+  *guard = Some((result, Instant::now()));
   result
 }
 
