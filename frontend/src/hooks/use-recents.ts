@@ -14,7 +14,7 @@
 //     left in the list (pruning requires knowing the roster, handled at the
 //     call site by filtering with useStorages before rendering).
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 
 const STORAGE_KEY = 'omni-stream:recents:v1'
 const MAX_RECENTS = 30
@@ -38,11 +38,6 @@ export interface RecentsState {
 
 export function useRecents(): RecentsState {
   const [recents, setRecents] = useState<RecentEntry[]>(() => readStorage())
-
-  const recentsRef = useRef(recents)
-  useEffect(() => {
-    recentsRef.current = recents
-  }, [recents])
 
   // Cross-tab sync — the `storage` event fires in OTHER tabs.
   useEffect(() => {

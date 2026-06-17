@@ -13,7 +13,7 @@
 //
 // Stored shape:  { version: <VERSION>, value: T }
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 
 export interface LocalStorageState<T> {
   value: T
@@ -47,12 +47,6 @@ export function useLocalStorage<T>({
     readStorage(key, version, defaultValue, validate),
   )
   const [error, setError] = useState<string | null>(null)
-
-  // Ref so `set` doesn't need `value` in its dep array.
-  const valueRef = useRef(value)
-  useEffect(() => {
-    valueRef.current = value
-  }, [value])
 
   // Cross-tab sync: the `storage` event fires in OTHER tabs when this key
   // changes or when `clear()` is called (e.key === null).

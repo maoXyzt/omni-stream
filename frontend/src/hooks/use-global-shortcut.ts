@@ -55,6 +55,9 @@ function dispatch(e: KeyboardEvent) {
   // fire on top of the primitive's own behaviour.
   if (e.defaultPrevented) return
   for (const h of handlers) {
+    // A prior handler may have called e.preventDefault() to signal it handled
+    // the event — stop dispatching to avoid double-handling.
+    if (e.defaultPrevented) break
     if (isEditableTarget(e, h.includeMedia)) continue
     if (!matchesCombo(e, h.combo)) continue
     h.fn(e)
