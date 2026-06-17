@@ -12,6 +12,8 @@ interface FileGridProps {
   inBucketRoot: boolean
   fit: GridFit
   onSelect: (entry: FileEntry) => void
+  selectedKeys?: ReadonlySet<string>
+  onSelectionToggle?: (entry: FileEntry, shiftKey: boolean) => void
 }
 
 export function FileGrid({
@@ -21,6 +23,8 @@ export function FileGrid({
   inBucketRoot,
   fit,
   onSelect,
+  selectedKeys,
+  onSelectionToggle,
 }: FileGridProps) {
   if (entries.length === 0) {
     return (
@@ -50,6 +54,10 @@ export function FileGrid({
           inBucketRoot={inBucketRoot}
           fit={fit}
           onSelect={onSelect}
+          selectionChecked={
+            selectedKeys !== undefined ? selectedKeys.has(entry.key) : undefined
+          }
+          onSelectionToggle={onSelectionToggle}
         />
       ))}
     </div>

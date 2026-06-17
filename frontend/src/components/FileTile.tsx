@@ -3,6 +3,7 @@ import { ImageOff, Link2 } from 'lucide-react'
 
 import { proxyUrl, thumbUrl } from '@/api/storage'
 import { EntryContextMenu } from '@/components/EntryContextMenu'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
   colorForKey,
   dirVisual,
@@ -24,6 +25,9 @@ interface FileTileProps {
   inBucketRoot: boolean
   fit: GridFit
   onSelect: (entry: FileEntry) => void
+  /// When provided, the tile shows a checkbox in the top-left corner.
+  selectionChecked?: boolean
+  onSelectionToggle?: (entry: FileEntry, shiftKey: boolean) => void
 }
 
 // Memoized: a directory with 10k+ entries renders a tile per row, and the
@@ -39,10 +43,13 @@ export const FileTile = memo(function FileTile({
   inBucketRoot,
   fit,
   onSelect,
+  selectionChecked,
+  onSelectionToggle,
 }: FileTileProps) {
   const name = displayName(entry.key, prefix)
   const isImage = !entry.is_dir && previewableKind(entry.key) === 'image'
   const dir = dirVisual(entry.is_dir && inBucketRoot)
+  const selectable = !entry.is_dir && onSelectionToggle !== undefined
 
   return (
     <EntryContextMenu entry={entry} storageName={storageName}>
@@ -65,7 +72,10 @@ export const FileTile = memo(function FileTile({
               - inner image / icon scales 1.05-1.10 inside `overflow-hidden`
             Keyboard focus mirrors hover via `group-focus-visible:` so tabbing
             through the grid is just as clear. */}
-        <div className="relative aspect-square overflow-hidden rounded-md border bg-muted/40 transition duration-200 group-hover:border-primary/40 group-hover:bg-muted group-hover:shadow-md group-focus-visible:border-primary group-focus-visible:ring-2 group-focus-visible:ring-primary/30">
+        <div className={cn(
+          'relative aspect-square overflow-hidden rounded-md border bg-muted/40 transition duration-200 group-hover:border-primary/40 group-hover:bg-muted group-hover:shadow-md group-focus-visible:border-primary group-focus-visible:ring-2 group-focus-visible:ring-primary/30',
+          selectionChecked && 'border-primary/60 ring-2 ring-primary/20',
+        )}>
           {entry.is_dir ? (
             <IconFill icon={dir.Icon} color={dir.color} />
           ) : isImage ? (
@@ -86,6 +96,29 @@ export const FileTile = memo(function FileTile({
               aria-label="symlink"
               className="absolute bottom-1 right-1 size-3.5 rounded-full bg-background stroke-[2.5] text-muted-foreground"
             />
+          )}
+          {/* Selection checkbox — top-left overlay. Visible on hover or when
+              checked. stopPropagation prevents the tile click from also
+              opening the file preview. Only shown for file entries (not dirs). */}
+          {selectable && (
+            <div
+              className={cn(
+                'absolute left-1.5 top-1.5 transition-opacity duration-150',
+                selectionChecked
+                  ? 'opacity-100'
+                  : 'opacity-0 group-hover:opacity-100',
+              )}
+              onClick={(e) => {
+                e.stopPropagation()
+                onSelectionToggle(entry, e.shiftKey)
+              }}
+            >
+              <Checkbox
+                checked={selectionChecked ?? false}
+                aria-label={`Select ${name}`}
+                className="bg-background/90 shadow-sm"
+              />
+            </div>
           )}
         </div>
         <div className="truncate px-1 text-xs text-muted-foreground transition-colors group-hover:text-foreground group-focus-visible:text-foreground">

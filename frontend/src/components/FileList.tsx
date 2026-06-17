@@ -25,6 +25,7 @@ import {
   RotateCw,
   Search,
   Share2,
+  Upload,
   X,
 } from 'lucide-react'
 
@@ -49,9 +50,11 @@ import { useViewMode, type ViewMode } from '@/hooks/use-view-mode'
 import { cn } from '@/lib/utils'
 import { formatBytes, formatTime } from '@/lib/format'
 import { sortEntries } from '@/lib/sort'
+import { BatchActionBar } from '@/components/BatchActionBar'
 import { EntryContextMenu } from '@/components/EntryContextMenu'
 import { EntryIcon } from '@/components/EntryIcon'
 import { NewFileDialog } from '@/components/NewFileDialog'
+import { UploadDialog } from '@/components/UploadDialog'
 import { FileGrid } from '@/components/FileGrid'
 import { PathBreadcrumb } from '@/components/PathBreadcrumb'
 import { PathNavigator } from '@/components/PathNavigator'
@@ -79,6 +82,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
   Table,
   TableBody,
@@ -87,6 +91,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { useSelection } from '@/hooks/use-selection'
 import type { FileEntry } from '@/types/storage'
 
 const PREVIEW_PARAM = 'preview'
@@ -135,6 +140,8 @@ export function FileList() {
   const [showTokenPrompt, setShowTokenPrompt] = useState(false)
   // Toggles the "New file" creation dialog (only shown for writeable storages).
   const [showNewFile, setShowNewFile] = useState(false)
+  // Toggles the upload dialog (only shown for writeable storages).
+  const [showUpload, setShowUpload] = useState(false)
   const activeStorage = useMemo(
     () => storagesQuery.data?.storages.find((s) => s.name === storageName),
     [storagesQuery.data, storageName],
@@ -149,6 +156,7 @@ export function FileList() {
   // icons at the bucket level read as buckets, not folders.
   const multiBucket = isMultiBucketS3(activeStorage)
   const inBucketRoot = multiBucket && prefix === ''
+
   // For S3 storages configured in multi-bucket mode (`s3.bucket` omitted in
   // the server config → backend reports `bucket: null`), the URL's first
   // path segment IS the bucket name. Surface it to the navbar switcher so it
@@ -690,6 +698,47 @@ export function FileList() {
     })
   }, [sortedEntries, nameFilter, typeFilter, prefix, inBucketRoot])
 
+  // ── Multi-select ──────────────────────────────────────────────────────────
+  const selection = useSelection()
+
+  // Clear the selection whenever the user navigates to a different directory,
+  // switches storage, or flips to another page — selected keys from the old
+  // page are meaningless in the new context.
+  useEffect(() => {
+    selection.clear()
+    // `selection` itself is stable (referentially equal across renders), so
+    // listing `selection.clear` avoids the exhaustive-deps warning without
+    // pulling in the whole object.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefix, storageName, currentPage])
+
+  // Stable callback forwarded to FileRow/GalleryRow/FileGrid so memoized
+  // tiles don't invalidate when the selection set changes.
+  const handleSelectionToggle = useCallback(
+    (entry: FileEntry, shiftKey: boolean) => {
+      if (entry.is_dir) return
+      if (shiftKey) {
+        const orderedKeys = filteredEntries
+          .filter((e) => !e.is_dir)
+          .map((e) => e.key)
+        selection.toggleRange(entry.key, orderedKeys)
+      } else {
+        selection.toggle(entry.key)
+      }
+    },
+    // filteredEntries changes when filter/sort changes, which is intentional:
+    // the shift-click range is always computed against the current visible set.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [filteredEntries, selection.toggle, selection.toggleRange],
+  )
+
+  const handleSelectAll = useCallback(() => {
+    selection.selectAll(
+      filteredEntries.filter((e) => !e.is_dir).map((e) => e.key),
+    )
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filteredEntries, selection.selectAll])
+
   // Types that actually appear in the current page — populated before
   // filtering so the dropdown stays stable as the user narrows down.
   const availableTypes = useMemo(() => {
@@ -1070,19 +1119,34 @@ export function FileList() {
                 <TooltipContent>Refresh listing</TooltipContent>
               </Tooltip>
               {canWrite && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      aria-label="New file"
-                      onClick={() => setShowNewFile(true)}
-                    >
-                      <FilePlus className="size-4" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>Create a new file here</TooltipContent>
-                </Tooltip>
+                <>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        aria-label="New file"
+                        onClick={() => setShowNewFile(true)}
+                      >
+                        <FilePlus className="size-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Create a new file here</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        aria-label="Upload files"
+                        onClick={() => setShowUpload(true)}
+                      >
+                        <Upload className="size-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Upload files here</TooltipContent>
+                  </Tooltip>
+                </>
               )}
               <ViewToggle mode={viewMode} onChange={setViewMode} />
               {viewMode === 'grid' && (
@@ -1147,6 +1211,14 @@ export function FileList() {
             />
           )}
 
+          {showUpload && storageName && (
+            <UploadDialog
+              storage={storageName}
+              prefix={prefix}
+              onClose={() => setShowUpload(false)}
+            />
+          )}
+
           {listQuery.isError && (
             <ErrorState
               error={listQuery.error}
@@ -1170,6 +1242,19 @@ export function FileList() {
               style={{ width: splitResize.width }}
               className="flex shrink-0 flex-col gap-2 overflow-hidden pr-3"
             >
+              {/* Batch action bar — appears above the filter/pager row when
+                  one or more entries are selected. */}
+              {selection.size > 0 && storageName && (
+                <BatchActionBar
+                  selectedKeys={selection.selectedKeys}
+                  filteredEntries={filteredEntries}
+                  storage={storageName}
+                  prefix={prefix}
+                  canWrite={canWrite}
+                  onSelectAll={handleSelectAll}
+                  onClear={selection.clear}
+                />
+              )}
               {/* Filter + pager share a row when they fit, then wrap to two
                   lines when the column is too narrow. `ml-auto` on the pager
                   keeps it right-aligned both when alone on a line and when
@@ -1228,6 +1313,8 @@ export function FileList() {
                       inBucketRoot={inBucketRoot}
                       selected={previewState?.key === entry.key}
                       onSelect={handleEntry}
+                      selectionChecked={selection.isSelected(entry.key)}
+                      onSelectionToggle={handleSelectionToggle}
                     />
                   ))
                 )}
@@ -1266,6 +1353,18 @@ export function FileList() {
           </div>
         ) : (
           <>
+            {/* Batch action bar — appears above the filter/pager row. */}
+            {selection.size > 0 && storageName && (
+              <BatchActionBar
+                selectedKeys={selection.selectedKeys}
+                filteredEntries={filteredEntries}
+                storage={storageName}
+                prefix={prefix}
+                canWrite={canWrite}
+                onSelectAll={handleSelectAll}
+                onClear={selection.clear}
+              />
+            )}
             <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
               {sortedEntries.length > 0 && (
                 <FilterBar
@@ -1303,42 +1402,73 @@ export function FileList() {
                 inBucketRoot={inBucketRoot}
                 fit={gridFit}
                 onSelect={handleEntry}
+                selectedKeys={selection.selectedKeys}
+                onSelectionToggle={handleSelectionToggle}
               />
             ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-1/2">Name</TableHead>
-                    <TableHead className="w-28">Type</TableHead>
-                    <TableHead className="w-32 text-right">Size</TableHead>
-                    <TableHead>Modified</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredEntries.length === 0 && (
-                    <TableRow>
-                      <TableCell
-                        colSpan={4}
-                        className="text-center text-muted-foreground py-10"
-                      >
-                        {sortedEntries.length === 0
-                          ? 'Empty directory.'
-                          : 'No items match the current filter.'}
-                      </TableCell>
-                    </TableRow>
-                  )}
-                  {filteredEntries.map((entry) => (
-                    <FileRow
-                      key={entry.key}
-                      entry={entry}
-                      prefix={prefix}
-                      storageName={storageName}
-                      inBucketRoot={inBucketRoot}
-                      onSelect={handleEntry}
-                    />
-                  ))}
-                </TableBody>
-              </Table>
+              (() => {
+                const fileEntries = filteredEntries.filter((e) => !e.is_dir)
+                const allChecked =
+                  fileEntries.length > 0 &&
+                  fileEntries.every((e) => selection.isSelected(e.key))
+                const someChecked =
+                  !allChecked && fileEntries.some((e) => selection.isSelected(e.key))
+                const headerChecked = allChecked
+                  ? true
+                  : someChecked
+                    ? 'indeterminate'
+                    : false
+                return (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-8">
+                          <Checkbox
+                            checked={headerChecked}
+                            aria-label="Select all files on this page"
+                            disabled={fileEntries.length === 0}
+                            onClick={(e) => e.stopPropagation()}
+                            onCheckedChange={(checked) => {
+                              if (checked) handleSelectAll()
+                              else selection.clear()
+                            }}
+                          />
+                        </TableHead>
+                        <TableHead className="w-1/2">Name</TableHead>
+                        <TableHead className="w-28">Type</TableHead>
+                        <TableHead className="w-32 text-right">Size</TableHead>
+                        <TableHead>Modified</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {filteredEntries.length === 0 && (
+                        <TableRow>
+                          <TableCell
+                            colSpan={5}
+                            className="text-center text-muted-foreground py-10"
+                          >
+                            {sortedEntries.length === 0
+                              ? 'Empty directory.'
+                              : 'No items match the current filter.'}
+                          </TableCell>
+                        </TableRow>
+                      )}
+                      {filteredEntries.map((entry) => (
+                        <FileRow
+                          key={entry.key}
+                          entry={entry}
+                          prefix={prefix}
+                          storageName={storageName}
+                          inBucketRoot={inBucketRoot}
+                          onSelect={handleEntry}
+                          selectionChecked={selection.isSelected(entry.key)}
+                          onSelectionToggle={handleSelectionToggle}
+                        />
+                      ))}
+                    </TableBody>
+                  </Table>
+                )
+              })()
             )}
 
             {/* README panel — shown when no file is open and the directory
@@ -1453,6 +1583,8 @@ interface FileRowProps {
   /// the bucket visual instead of the folder one.
   inBucketRoot: boolean
   onSelect: (entry: FileEntry) => void
+  selectionChecked?: boolean
+  onSelectionToggle?: (entry: FileEntry, shiftKey: boolean) => void
 }
 
 function FileRow({
@@ -1461,6 +1593,8 @@ function FileRow({
   storageName,
   inBucketRoot,
   onSelect,
+  selectionChecked,
+  onSelectionToggle,
 }: FileRowProps) {
   const isBucket = entry.is_dir && inBucketRoot
   const dir = dirVisual(isBucket)
@@ -1468,6 +1602,7 @@ function FileRow({
   const color = entry.is_dir ? dir.color : colorForKey(entry.key)
   const name = displayName(entry.key, prefix)
   const typeLabel = typeLabelForEntry(entry.key, entry.is_dir, isBucket)
+  const selectable = !entry.is_dir && onSelectionToggle !== undefined
 
   return (
     <EntryContextMenu entry={entry} storageName={storageName}>
@@ -1475,6 +1610,25 @@ function FileRow({
         className="cursor-pointer hover:bg-muted/50"
         onClick={() => onSelect(entry)}
       >
+        <TableCell onClick={(e) => e.stopPropagation()}>
+          {selectable ? (
+            <Checkbox
+              checked={selectionChecked ?? false}
+              aria-label={`Select ${name}`}
+              onClick={(e) => e.stopPropagation()}
+              onCheckedChange={(_) =>
+                onSelectionToggle(entry, false)
+              }
+              onClickCapture={(e) => {
+                // Detect shift-click via the native event for range selection.
+                if ((e as React.MouseEvent).shiftKey) {
+                  e.preventDefault()
+                  onSelectionToggle(entry, true)
+                }
+              }}
+            />
+          ) : null}
+        </TableCell>
         <TableCell className="flex items-center gap-2 truncate">
           <EntryIcon
             Icon={Icon}
@@ -1538,6 +1692,8 @@ interface GalleryRowProps {
   inBucketRoot: boolean
   selected: boolean
   onSelect: (entry: FileEntry) => void
+  selectionChecked?: boolean
+  onSelectionToggle?: (entry: FileEntry, shiftKey: boolean) => void
 }
 
 function GalleryRow({
@@ -1547,6 +1703,8 @@ function GalleryRow({
   inBucketRoot,
   selected,
   onSelect,
+  selectionChecked,
+  onSelectionToggle,
 }: GalleryRowProps) {
   const isBucket = entry.is_dir && inBucketRoot
   const dir = dirVisual(isBucket)
@@ -1554,6 +1712,7 @@ function GalleryRow({
   const color = entry.is_dir ? dir.color : colorForKey(entry.key)
   const name = displayName(entry.key, prefix)
   const ref = useRef<HTMLButtonElement>(null)
+  const selectable = !entry.is_dir && onSelectionToggle !== undefined
 
   // Keep DOM focus aligned with the visual "selected" highlight. Arrow-key
   // nav changes `previewState` but does not touch the focused element, so
@@ -1572,24 +1731,43 @@ function GalleryRow({
 
   return (
     <EntryContextMenu entry={entry} storageName={storageName}>
-      <button
-        ref={ref}
-        type="button"
-        onClick={() => onSelect(entry)}
-        title={name}
-        className={cn(
-          'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm',
-          selected ? 'bg-accent text-accent-foreground' : 'hover:bg-muted/50',
+      <div className="flex items-center gap-1">
+        {selectable && (
+          <div
+            className={cn(
+              'shrink-0 pl-1 transition-opacity duration-150',
+              selectionChecked ? 'opacity-100' : 'opacity-0 hover:opacity-100',
+            )}
+            onClick={(e) => {
+              e.stopPropagation()
+              onSelectionToggle(entry, e.shiftKey)
+            }}
+          >
+            <Checkbox
+              checked={selectionChecked ?? false}
+              aria-label={`Select ${name}`}
+            />
+          </div>
         )}
-      >
-        <EntryIcon
-          Icon={Icon}
-          color={color}
-          isSymlink={entry.is_symlink}
-          className="size-4 shrink-0"
-        />
-        <span className="truncate">{name}</span>
-      </button>
+        <button
+          ref={ref}
+          type="button"
+          onClick={() => onSelect(entry)}
+          title={name}
+          className={cn(
+            'flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm',
+            selected ? 'bg-accent text-accent-foreground' : 'hover:bg-muted/50',
+          )}
+        >
+          <EntryIcon
+            Icon={Icon}
+            color={color}
+            isSymlink={entry.is_symlink}
+            className="size-4 shrink-0"
+          />
+          <span className="truncate">{name}</span>
+        </button>
+      </div>
     </EntryContextMenu>
   )
 }
