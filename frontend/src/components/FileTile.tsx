@@ -193,7 +193,7 @@ function ImageContent({ entry, storageName, alt, fit }: ImageContentProps) {
         loaded ? 'opacity-100' : 'opacity-0',
         // `overflow-hidden` on the parent clips the overflow, so the image
         // zooms within the tile box without changing layout.
-        'group-hover:scale-105 group-focus-visible:scale-105',
+        'group-hover:scale-105 group-has-[:focus-visible]:scale-105',
       )}
       onLoad={() => setLoaded(true)}
       onError={handleError}
@@ -212,7 +212,7 @@ function IconFill({
     <div className={cn('flex size-full items-center justify-center', color)}>
       {/* Icons are smaller than thumbnails so a slightly bigger zoom (1.10
           vs 1.05) reads more clearly on directories / non-image files. */}
-      <Icon className="size-10 transition-transform duration-200 group-hover:scale-110 group-focus-visible:scale-110" />
+      <Icon className="size-10 transition-transform duration-200 group-hover:scale-110 group-has-[:focus-visible]:scale-110" />
     </div>
   )
 }
