@@ -1,5 +1,7 @@
 # OmniStream
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/maoXyzt/omni-stream)
+
 [中文](README.md) · **English**
 
 **A single-binary, streaming file browser and previewer** — point it at any local directory or S3-compatible object storage (MinIO / OSS / Ceph / R2 / …) and it instantly exposes them as a browsable, previewable HTTP service. The backend is built on `axum + tokio + aws-sdk-s3`, with one `StorageBackend` trait abstracting over every supported backend; a React SPA is bundled in, so opening `http://<host>:<port>/` lets you walk directories, lazy-load thumbnails, and preview files in place. Preview supports:

@@ -1,5 +1,7 @@
 # OmniStream
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/maoXyzt/omni-stream)
+
 **中文** · [English](README-en.md)
 
 **单二进制的流式文件浏览与预览服务**——把任意本地目录或 S3 兼容对象存储
