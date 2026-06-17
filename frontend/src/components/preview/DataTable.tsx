@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { Check, Copy } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { ArrowDown, ArrowUp, ArrowUpDown, Check, Copy } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import {
@@ -46,16 +46,111 @@ export interface DataTableProps {
   pageSize: number
 }
 
+interface SortState {
+  column: string
+  dir: 'asc' | 'desc'
+}
+
 interface ExpandedCell {
   rowIndex: number
   column: string
   text: string
 }
 
+// ---------------------------------------------------------------------------
+// Type-aware row comparator (current page only)
+// ---------------------------------------------------------------------------
+//
+// Columns have a runtime type tracked by `cellTone`. We sort using the same
+// signal so numeric columns sort numerically, dates chronologically, booleans
+// by truthiness, and everything else lexicographically. Null/undefined values
+// always sink to the bottom regardless of direction.
+
+function compareValues(a: unknown, b: unknown): number {
+  // Nullish → always last
+  if (a == null && b == null) return 0
+  if (a == null) return 1
+  if (b == null) return -1
+
+  // Numbers and BigInts — compare without converting to avoid precision loss.
+  if (typeof a === 'number' && typeof b === 'number') return a - b
+  if (typeof a === 'bigint' && typeof b === 'bigint')
+    return a < b ? -1 : a > b ? 1 : 0
+  // Cross number/bigint — promote number to bigint if possible
+  if (
+    (typeof a === 'number' || typeof a === 'bigint') &&
+    (typeof b === 'number' || typeof b === 'bigint')
+  ) {
+    const ba = BigInt(Math.trunc(typeof a === 'number' ? a : Number(a)))
+    const bb = BigInt(Math.trunc(typeof b === 'number' ? b : Number(b)))
+    return ba < bb ? -1 : ba > bb ? 1 : 0
+  }
+
+  // Dates — compare epoch ms.
+  if (a instanceof Date && b instanceof Date) return a.getTime() - b.getTime()
+
+  // Booleans — true before false (asc order)
+  if (typeof a === 'boolean' && typeof b === 'boolean')
+    return a === b ? 0 : a ? -1 : 1
+
+  // Uint8Array and objects — not meaningfully orderable; fall through to string.
+  return collator.compare(
+    typeof a === 'object' ? formatCellForSort(a) : String(a),
+    typeof b === 'object' ? formatCellForSort(b) : String(b),
+  )
+}
+
+const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
+
+/// Lightweight serialisation for sort purposes (not display). Uses the same
+/// `formatCell` helper the cells use for display to stay consistent.
+function formatCellForSort(v: unknown): string {
+  if (v instanceof Uint8Array) return `<binary ${v.byteLength}B>`
+  try {
+    return JSON.stringify(v) ?? ''
+  } catch {
+    return String(v)
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
+
 export function DataTable({ columns, rows, loading, pageIndex, pageSize }: DataTableProps) {
   // Single dialog instance for the whole table — beats wiring up Dialog +
   // state inside every cell (which would be hundreds of unmounted dialogs).
   const [expanded, setExpanded] = useState<ExpandedCell | null>(null)
+
+  // Column sort state — null means "no sort" (insertion order).
+  const [sortState, setSortState] = useState<SortState | null>(null)
+
+  // Reset sort when the page changes. Use the "adjust state during render"
+  // pattern (like ImagePreview tracks `src`) to avoid a flash: track the last
+  // pageIndex we saw, and if it changed, clear sort synchronously.
+  const [trackedPage, setTrackedPage] = useState(pageIndex)
+  if (pageIndex !== trackedPage) {
+    setTrackedPage(pageIndex)
+    setSortState(null)
+  }
+
+  // Derive display rows from `rows` + `sortState`. Memoized so we only
+  // re-sort when either input actually changes, not on every render.
+  const displayRows = useMemo(() => {
+    if (!sortState) return rows
+    const { column, dir } = sortState
+    const factor = dir === 'asc' ? 1 : -1
+    return [...rows].sort((a, b) => factor * compareValues(a[column], b[column]))
+  }, [rows, sortState])
+
+  function handleHeaderClick(column: string) {
+    setSortState((prev) => {
+      if (!prev || prev.column !== column) return { column, dir: 'asc' }
+      if (prev.dir === 'asc') return { column, dir: 'desc' }
+      // Third click clears the sort
+      return null
+    })
+  }
 
   if (loading) {
     return (
@@ -78,32 +173,75 @@ export function DataTable({ columns, rows, loading, pageIndex, pageSize }: DataT
               <TableHead className="w-12 text-right align-bottom text-muted-foreground">
                 #
               </TableHead>
-              {columns.map((c) => (
-                <TableHead
-                  key={c.name}
-                  // `h-auto` lifts the 40px row-height cap that the base
-                  // TableHead style sets — needed so the two-line
-                  // (name + type) header doesn't crunch its second line.
-                  className="h-auto max-w-xs py-2 align-bottom text-foreground"
-                >
-                  <div className="flex flex-col gap-0.5 leading-tight">
-                    <span>{c.name}</span>
-                    {/* `title` surfaces the full type when the column is
-                        narrow and the signature gets truncated; the Schema
-                        tab has the canonical view either way. */}
-                    <span
-                      className="truncate text-[10px] font-normal text-rose-700/90 dark:text-rose-300/90"
-                      title={c.type}
-                    >
-                      {c.type}
-                    </span>
-                  </div>
-                </TableHead>
-              ))}
+              {columns.map((c) => {
+                const isSorted = sortState?.column === c.name
+                const dir = isSorted ? sortState!.dir : null
+                return (
+                  <TableHead
+                    key={c.name}
+                    // `h-auto` lifts the 40px row-height cap that the base
+                    // TableHead style sets — needed so the two-line
+                    // (name + type) header doesn't crunch its second line.
+                    className="h-auto max-w-xs py-2 align-bottom text-foreground"
+                  >
+                    {/* Clickable sort button. Cycles: unsorted → asc → desc → unsorted.
+                        A tooltip surfaces the "sorts this page only" caveat so
+                        users are never misled about cross-page behaviour. */}
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          onClick={() => handleHeaderClick(c.name)}
+                          className={cn(
+                            'flex w-full flex-col gap-0.5 leading-tight text-left hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded-sm transition-colors',
+                            isSorted ? 'text-foreground' : 'text-muted-foreground',
+                          )}
+                          aria-label={
+                            dir === 'asc'
+                              ? `Sorted ascending by ${c.name} — click to sort descending`
+                              : dir === 'desc'
+                                ? `Sorted descending by ${c.name} — click to clear`
+                                : `Sort by ${c.name}`
+                          }
+                        >
+                          <span className="flex items-center gap-1">
+                            <span>{c.name}</span>
+                            <span className="shrink-0 text-muted-foreground">
+                              {dir === 'asc' ? (
+                                <ArrowDown className="size-3" />
+                              ) : dir === 'desc' ? (
+                                <ArrowUp className="size-3" />
+                              ) : (
+                                <ArrowUpDown className="size-3 opacity-40" />
+                              )}
+                            </span>
+                          </span>
+                          {/* `title` surfaces the full type when the column is
+                              narrow and the signature gets truncated; the Schema
+                              tab has the canonical view either way. */}
+                          <span
+                            className="truncate text-[10px] font-normal text-rose-700/90 dark:text-rose-300/90"
+                            title={c.type}
+                          >
+                            {c.type}
+                          </span>
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom" className="text-xs">
+                        {dir === 'asc'
+                          ? `Sorted ascending (click for descending) · this page only`
+                          : dir === 'desc'
+                            ? `Sorted descending (click to clear) · this page only`
+                            : `Sort by ${c.name} · this page only`}
+                      </TooltipContent>
+                    </Tooltip>
+                  </TableHead>
+                )
+              })}
             </TableRow>
           </TableHeader>
           <TableBody>
-            {rows.map((row, i) => {
+            {displayRows.map((row, i) => {
               // Absolute index keeps row numbering ("row 101" on page 2,
               // not restarting at 1), gives stable React keys across
               // paginations, and lets the cell-expansion dialog report
