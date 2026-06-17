@@ -1,11 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
   AlertCircle,
   ArrowDown,
+  BookText,
   Check,
+  Code,
   Copy,
   Download,
   FileDown,
@@ -52,6 +54,7 @@ import {
   highlight,
   isLanguageBundled,
 } from '@/lib/highlight'
+import { extensionOf } from '@/lib/path'
 import { detectFormat } from '@/lib/rows-source'
 import {
   CHUNK_BYTES,
@@ -67,6 +70,9 @@ import { cn } from '@/lib/utils'
 
 import { RowsViewHint } from './RowsViewHint'
 import type { PreviewerProps } from './types'
+
+// Lazy-loaded so Vite keeps `marked` + `dompurify` out of the main bundle.
+const MarkdownProse = lazy(() => import('./MarkdownProse'))
 
 // Query param key that the Rows view writes its rule config into. Forwarded
 // when the user jumps from text preview to the Rows page so a shared link
@@ -100,6 +106,28 @@ function loadAllSeverityFor(remainingBytes: number | null): LoadAllSeverity {
 export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
+
+  // True for .md / .markdown — these get a Raw/Rendered toggle defaulting to
+  // the rendered view. .rst is excluded: marked doesn't parse reStructuredText
+  // so rendering would just emit the source verbatim with no benefit.
+  const isMarkdown = useMemo(() => {
+    const ext = extensionOf(fileKey)
+    return ext === 'md' || ext === 'markdown'
+  }, [fileKey])
+
+  // Per-file view preference — no localStorage persistence since the component
+  // remounts per file anyway and the default (Rendered for .md) is the right
+  // starting point each time.
+  const [view, setView] = useState<'rendered' | 'raw'>(() =>
+    isMarkdown ? 'rendered' : 'raw',
+  )
+
+  // If `fileKey` changes (same component reused across files), re-derive the
+  // default view rather than carrying over the previous file's preference.
+  useEffect(() => {
+    setView(isMarkdown ? 'rendered' : 'raw')
+  }, [fileKey, isMarkdown])
+
   // .jsonl / .ndjson get a "Browse as cards" button that jumps to the Rows
   // page — same UX as parquet's ParquetPreview but lazy: text-preview-able
   // formats default to the text view, this is the opt-in.
@@ -619,6 +647,44 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
                   </TooltipContent>
                 </Tooltip>
               )}
+              {/* Raw/Rendered toggle — only shown for Markdown files (.md /
+                  .markdown). Mirrors the line-numbers toggle style: `default`
+                  variant when the mode is active, `outline` otherwise, so the
+                  current state is immediately readable without hover. */}
+              {isMarkdown && (
+                <>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        size="icon-sm"
+                        variant={view === 'raw' ? 'default' : 'outline'}
+                        aria-pressed={view === 'raw'}
+                        aria-label="View raw source"
+                        onClick={() => setView('raw')}
+                      >
+                        <Code />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>View raw source</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        size="icon-sm"
+                        variant={view === 'rendered' ? 'default' : 'outline'}
+                        aria-pressed={view === 'rendered'}
+                        aria-label="View rendered Markdown"
+                        onClick={() => setView('rendered')}
+                      >
+                        <BookText />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>View rendered Markdown</TooltipContent>
+                  </Tooltip>
+                </>
+              )}
             </>
           )}
           <select
@@ -725,7 +791,27 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
             File is empty.
           </div>
         )}
-        {lines.length > 0 && (
+        {/* Rendered Markdown view — only for .md / .markdown files when the
+            user has selected the Rendered tab. Renders the accumulated text
+            (`state.text`) through marked + DOMPurify. When the file hasn't
+            been fully loaded yet, the Partial badge + Load more button above
+            remain visible so the user can fetch more before re-reading. */}
+        {isMarkdown && view === 'rendered' && state.text.length > 0 && (
+          <div className="h-full w-full overflow-auto px-6 py-5">
+            <Suspense
+              fallback={
+                <div className="flex w-full flex-col gap-2">
+                  {Array.from({ length: 12 }).map((_, i) => (
+                    <Skeleton key={i} className="h-4 w-full" />
+                  ))}
+                </div>
+              }
+            >
+              <MarkdownProse body={state.text} />
+            </Suspense>
+          </div>
+        )}
+        {(!isMarkdown || view === 'raw') && lines.length > 0 && (
           // Per-row flex: gutter (fixed `ch`-width, right-aligned, top-anchored
           // so a wrapped content row keeps the number at its first visual line)
           // + content (`whitespace-pre-wrap break-words` so long lines wrap

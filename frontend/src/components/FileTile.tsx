@@ -3,6 +3,7 @@ import { ImageOff, Link2 } from 'lucide-react'
 
 import { proxyUrl, thumbUrl } from '@/api/storage'
 import { EntryContextMenu } from '@/components/EntryContextMenu'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
   colorForKey,
   dirVisual,
@@ -24,6 +25,9 @@ interface FileTileProps {
   inBucketRoot: boolean
   fit: GridFit
   onSelect: (entry: FileEntry) => void
+  /// When provided, the tile shows a checkbox in the top-left corner.
+  selectionChecked?: boolean
+  onSelectionToggle?: (entry: FileEntry, shiftKey: boolean) => void
 }
 
 // Memoized: a directory with 10k+ entries renders a tile per row, and the
@@ -39,59 +43,98 @@ export const FileTile = memo(function FileTile({
   inBucketRoot,
   fit,
   onSelect,
+  selectionChecked,
+  onSelectionToggle,
 }: FileTileProps) {
   const name = displayName(entry.key, prefix)
   const isImage = !entry.is_dir && previewableKind(entry.key) === 'image'
   const dir = dirVisual(entry.is_dir && inBucketRoot)
+  const selectable = !entry.is_dir && onSelectionToggle !== undefined
 
   return (
     <EntryContextMenu entry={entry} storageName={storageName}>
-      <button
-        type="button"
-        onClick={() => onSelect(entry)}
-        // `title` gives us hover-tooltips for the (often) truncated caption
-        // without per-tile Radix Tooltip mounts or a ResizeObserver-based
-        // overflow check. Browsers only render the tooltip on hover delay, so
-        // tiles the user never hovers cost nothing extra. UX trade-off: short
-        // names that aren't actually truncated also get a redundant tooltip
-        // on long hovers, which is acceptable.
-        title={name}
-        className="group flex flex-col gap-1.5 text-left focus-visible:outline-none"
-      >
-        {/* Hover state stacks four cues, each cheap on its own:
-              - border tints to primary so the focused tile reads from a glance
-              - shadow lifts the tile slightly off the grid background
-              - background nudges from muted/40 -> muted (already present)
-              - inner image / icon scales 1.05-1.10 inside `overflow-hidden`
-            Keyboard focus mirrors hover via `group-focus-visible:` so tabbing
-            through the grid is just as clear. */}
-        <div className="relative aspect-square overflow-hidden rounded-md border bg-muted/40 transition duration-200 group-hover:border-primary/40 group-hover:bg-muted group-hover:shadow-md group-focus-visible:border-primary group-focus-visible:ring-2 group-focus-visible:ring-primary/30">
-          {entry.is_dir ? (
-            <IconFill icon={dir.Icon} color={dir.color} />
-          ) : isImage ? (
-            <ImageContent
-              entry={entry}
-              storageName={storageName}
-              alt={name}
-              fit={fit}
+      {/* Outer div carries `group` so hover/focus effects reach all children.
+          `group-has-[:focus-visible]:` (Tailwind v4) fires when any focusable
+          descendant — tile button or checkbox — receives keyboard focus, giving
+          consistent ring/highlight without requiring the div itself to be
+          natively focusable. The checkbox lives here as a sibling to the tile
+          button so we avoid nesting two interactive elements. */}
+      <div className="group relative flex flex-col gap-1.5 text-left">
+        <button
+          type="button"
+          onClick={() => onSelect(entry)}
+          // `title` gives us hover-tooltips for the (often) truncated caption
+          // without per-tile Radix Tooltip mounts or a ResizeObserver-based
+          // overflow check. Browsers only render the tooltip on hover delay, so
+          // tiles the user never hovers cost nothing extra. UX trade-off: short
+          // names that aren't actually truncated also get a redundant tooltip
+          // on long hovers, which is acceptable.
+          title={name}
+          className="flex flex-col gap-1.5 text-left focus-visible:outline-none"
+        >
+          {/* Hover state stacks four cues, each cheap on its own:
+                - border tints to primary so the focused tile reads from a glance
+                - shadow lifts the tile slightly off the grid background
+                - background nudges from muted/40 -> muted (already present)
+                - inner image / icon scales 1.05-1.10 inside `overflow-hidden`
+              Keyboard focus mirrors hover via `group-has-[:focus-visible]:` so
+              tabbing through the grid is just as clear. */}
+          <div className={cn(
+            'relative aspect-square overflow-hidden rounded-md border bg-muted/40 transition duration-200',
+            'group-hover:border-primary/40 group-hover:bg-muted group-hover:shadow-md',
+            'group-has-[:focus-visible]:border-primary group-has-[:focus-visible]:ring-2 group-has-[:focus-visible]:ring-primary/30',
+            selectionChecked && 'border-primary/60 ring-2 ring-primary/20',
+          )}>
+            {entry.is_dir ? (
+              <IconFill icon={dir.Icon} color={dir.color} />
+            ) : isImage ? (
+              <ImageContent
+                entry={entry}
+                storageName={storageName}
+                alt={name}
+                fit={fit}
+              />
+            ) : (
+              <IconFill
+                icon={iconForKey(entry.key)}
+                color={colorForKey(entry.key)}
+              />
+            )}
+            {entry.is_symlink && (
+              <Link2
+                aria-label="symlink"
+                className="absolute bottom-1 right-1 size-3.5 rounded-full bg-background stroke-[2.5] text-muted-foreground"
+              />
+            )}
+          </div>
+          <div className="truncate px-1 text-xs text-muted-foreground transition-colors group-hover:text-foreground group-has-[:focus-visible]:text-foreground">
+            {name}
+          </div>
+        </button>
+        {/* Selection checkbox — top-left overlay, sibling to the tile button so
+            no interactive element is nested inside another. Visible on hover,
+            focus, or when checked. */}
+        {selectable && (
+          <div
+            className={cn(
+              'absolute left-1.5 top-1.5 z-10 transition-opacity duration-150',
+              selectionChecked
+                ? 'opacity-100'
+                : 'opacity-0 group-hover:opacity-100 group-has-[:focus-visible]:opacity-100',
+            )}
+            onClick={(e) => {
+              e.stopPropagation()
+              onSelectionToggle(entry, e.shiftKey)
+            }}
+          >
+            <Checkbox
+              checked={selectionChecked ?? false}
+              aria-label={`Select ${name}`}
+              className="bg-background/90 shadow-sm"
             />
-          ) : (
-            <IconFill
-              icon={iconForKey(entry.key)}
-              color={colorForKey(entry.key)}
-            />
-          )}
-          {entry.is_symlink && (
-            <Link2
-              aria-label="symlink"
-              className="absolute bottom-1 right-1 size-3.5 rounded-full bg-background stroke-[2.5] text-muted-foreground"
-            />
-          )}
-        </div>
-        <div className="truncate px-1 text-xs text-muted-foreground transition-colors group-hover:text-foreground group-focus-visible:text-foreground">
-          {name}
-        </div>
-      </button>
+          </div>
+        )}
+      </div>
     </EntryContextMenu>
   )
 })
@@ -150,7 +193,7 @@ function ImageContent({ entry, storageName, alt, fit }: ImageContentProps) {
         loaded ? 'opacity-100' : 'opacity-0',
         // `overflow-hidden` on the parent clips the overflow, so the image
         // zooms within the tile box without changing layout.
-        'group-hover:scale-105 group-focus-visible:scale-105',
+        'group-hover:scale-105 group-has-[:focus-visible]:scale-105',
       )}
       onLoad={() => setLoaded(true)}
       onError={handleError}
@@ -169,7 +212,7 @@ function IconFill({
     <div className={cn('flex size-full items-center justify-center', color)}>
       {/* Icons are smaller than thumbnails so a slightly bigger zoom (1.10
           vs 1.05) reads more clearly on directories / non-image files. */}
-      <Icon className="size-10 transition-transform duration-200 group-hover:scale-110 group-focus-visible:scale-110" />
+      <Icon className="size-10 transition-transform duration-200 group-hover:scale-110 group-has-[:focus-visible]:scale-110" />
     </div>
   )
 }

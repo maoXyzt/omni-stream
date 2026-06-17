@@ -2,19 +2,22 @@ import { apiClient } from '@/api/client'
 import { encodeKey } from '@/lib/path'
 import type { FileMeta } from '@/types/storage'
 
-/// Create or overwrite a text/code file. `overwrite = false` (new file) makes
-/// the server return 409 if the key already exists; `true` (saving an edit)
-/// replaces it. The body is sent as raw text — `transformRequest` overrides
-/// axios's default JSON serialization so the string isn't quoted/escaped, and
-/// no `Content-Type` is sent so the server infers it from the file extension
-/// (correct `application/json` / `text/html` / … on S3, where the type is
-/// stored). Bearer auth is injected by the shared client interceptor; a 401
+/// Create or overwrite a file. `content` may be a plain string (text/code
+/// editor) or a `Blob` (binary upload). `overwrite = false` makes the server
+/// return 409 if the key already exists. The body is sent raw —
+/// `transformRequest` overrides axios's default JSON serialization, and no
+/// explicit `Content-Type` is set so the server infers it from the file
+/// extension. Bearer auth is injected by the shared client interceptor; a 401
 /// clears the stored token so the caller can prompt for re-entry and retry.
+/// `onProgress` is called with 0–100 as bytes are sent (upload streams only;
+/// not invoked for string content where the entire payload is known upfront
+/// and small).
 export async function putFile(
   storage: string,
   key: string,
-  content: string,
+  content: string | Blob,
   overwrite: boolean,
+  onProgress?: (pct: number) => void,
 ): Promise<FileMeta> {
   const { data } = await apiClient.put<FileMeta>(
     `/api/files/${encodeKey(key)}`,
@@ -22,6 +25,15 @@ export async function putFile(
     {
       params: { storage, overwrite },
       transformRequest: [(v) => v],
+      onUploadProgress: onProgress
+        ? (e) => {
+            const pct =
+              e.total && e.total > 0
+                ? Math.round((e.loaded / e.total) * 100)
+                : 0
+            onProgress(pct)
+          }
+        : undefined,
     },
   )
   return data
