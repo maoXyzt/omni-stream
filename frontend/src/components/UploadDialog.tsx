@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { CheckCircle2, FileUp, Loader2, Upload, XCircle } from 'lucide-react'
@@ -49,7 +49,6 @@ function formatBytes(bytes: number): string {
 export function UploadDialog({ storage, prefix, onClose }: UploadDialogProps) {
   const queryClient = useQueryClient()
   const inputRef = useRef<HTMLInputElement>(null)
-  const dropRef = useRef<HTMLDivElement>(null)
 
   const [items, setItems] = useState<UploadItem[]>([])
   const [dragOver, setDragOver] = useState(false)
@@ -186,49 +185,36 @@ export function UploadDialog({ storage, prefix, onClose }: UploadDialogProps) {
 
   // --- Drag-and-drop ---
 
-  useEffect(() => {
-    const el = dropRef.current
-    if (!el) return
+  function handleDragOver(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault()
+    setDragOver(true)
+  }
 
-    function onDragOver(e: DragEvent) {
-      e.preventDefault()
-      setDragOver(true)
-    }
-    function onDragLeave() {
-      setDragOver(false)
-    }
-    function onDrop(e: DragEvent) {
-      e.preventDefault()
-      setDragOver(false)
-      if (!e.dataTransfer) return
-      const files: File[] = []
-      let hadFolder = false
-      for (const item of Array.from(e.dataTransfer.items)) {
-        if (item.kind !== 'file') continue
-        const entry = item.webkitGetAsEntry?.()
-        if (entry?.isDirectory) {
-          hadFolder = true
-          continue
-        }
-        const f = item.getAsFile()
-        if (f) files.push(f)
-      }
-      if (hadFolder) {
-        toast.warning('Folder upload is not supported — only files were added.')
-      }
-      if (files.length > 0) addFiles(files)
-    }
+  function handleDragLeave() {
+    setDragOver(false)
+  }
 
-    el.addEventListener('dragover', onDragOver)
-    el.addEventListener('dragleave', onDragLeave)
-    el.addEventListener('drop', onDrop)
-    return () => {
-      el.removeEventListener('dragover', onDragOver)
-      el.removeEventListener('dragleave', onDragLeave)
-      el.removeEventListener('drop', onDrop)
+  function handleDrop(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault()
+    setDragOver(false)
+    if (!e.dataTransfer) return
+    const files: File[] = []
+    let hadFolder = false
+    for (const item of Array.from(e.dataTransfer.items)) {
+      if (item.kind !== 'file') continue
+      const entry = item.webkitGetAsEntry?.()
+      if (entry?.isDirectory) {
+        hadFolder = true
+        continue
+      }
+      const f = item.getAsFile()
+      if (f) files.push(f)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+    if (hadFolder) {
+      toast.warning('Folder upload is not supported — only files were added.')
+    }
+    if (files.length > 0) addFiles(files)
+  }
 
   const pendingCount = items.filter(
     (i) => i.status === 'pending' || i.status === 'error',
@@ -257,7 +243,6 @@ export function UploadDialog({ storage, prefix, onClose }: UploadDialogProps) {
 
           {/* Drop zone */}
           <div
-            ref={dropRef}
             role="button"
             tabIndex={0}
             aria-label="Add files to upload"
@@ -267,6 +252,9 @@ export function UploadDialog({ storage, prefix, onClose }: UploadDialogProps) {
                 ? 'border-primary bg-primary/5 text-primary'
                 : 'border-border hover:border-primary/50 hover:bg-muted/30',
             )}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
             onClick={() => inputRef.current?.click()}
             onKeyDown={(e) => {
               if (e.key === 'Enter' || e.key === ' ') {

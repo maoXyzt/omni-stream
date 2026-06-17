@@ -701,6 +701,18 @@ export function FileList() {
   // ── Multi-select ──────────────────────────────────────────────────────────
   const selection = useSelection()
 
+  const fileEntries = filteredEntries.filter((e) => !e.is_dir)
+  const allChecked =
+    fileEntries.length > 0 &&
+    fileEntries.every((e) => selection.isSelected(e.key))
+  const someChecked =
+    !allChecked && fileEntries.some((e) => selection.isSelected(e.key))
+  const headerChecked = allChecked
+    ? true
+    : someChecked
+      ? 'indeterminate'
+      : false
+
   // Clear the selection whenever the user navigates to a different directory,
   // switches storage, or flips to another page — selected keys from the old
   // page are meaningless in the new context.
@@ -1406,69 +1418,54 @@ export function FileList() {
                 onSelectionToggle={handleSelectionToggle}
               />
             ) : (
-              (() => {
-                const fileEntries = filteredEntries.filter((e) => !e.is_dir)
-                const allChecked =
-                  fileEntries.length > 0 &&
-                  fileEntries.every((e) => selection.isSelected(e.key))
-                const someChecked =
-                  !allChecked && fileEntries.some((e) => selection.isSelected(e.key))
-                const headerChecked = allChecked
-                  ? true
-                  : someChecked
-                    ? 'indeterminate'
-                    : false
-                return (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="w-8">
-                          <Checkbox
-                            checked={headerChecked}
-                            aria-label="Select all files on this page"
-                            disabled={fileEntries.length === 0}
-                            onClick={(e) => e.stopPropagation()}
-                            onCheckedChange={(checked) => {
-                              if (checked) handleSelectAll()
-                              else selection.clear()
-                            }}
-                          />
-                        </TableHead>
-                        <TableHead className="w-1/2">Name</TableHead>
-                        <TableHead className="w-28">Type</TableHead>
-                        <TableHead className="w-32 text-right">Size</TableHead>
-                        <TableHead>Modified</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {filteredEntries.length === 0 && (
-                        <TableRow>
-                          <TableCell
-                            colSpan={5}
-                            className="text-center text-muted-foreground py-10"
-                          >
-                            {sortedEntries.length === 0
-                              ? 'Empty directory.'
-                              : 'No items match the current filter.'}
-                          </TableCell>
-                        </TableRow>
-                      )}
-                      {filteredEntries.map((entry) => (
-                        <FileRow
-                          key={entry.key}
-                          entry={entry}
-                          prefix={prefix}
-                          storageName={storageName}
-                          inBucketRoot={inBucketRoot}
-                          onSelect={handleEntry}
-                          selectionChecked={selection.isSelected(entry.key)}
-                          onSelectionToggle={handleSelectionToggle}
-                        />
-                      ))}
-                    </TableBody>
-                  </Table>
-                )
-              })()
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-8">
+                      <Checkbox
+                        checked={headerChecked}
+                        aria-label="Select all files on this page"
+                        disabled={fileEntries.length === 0}
+                        onClick={(e) => e.stopPropagation()}
+                        onCheckedChange={(checked) => {
+                          if (checked) handleSelectAll()
+                          else selection.clear()
+                        }}
+                      />
+                    </TableHead>
+                    <TableHead className="w-1/2">Name</TableHead>
+                    <TableHead className="w-28">Type</TableHead>
+                    <TableHead className="w-32 text-right">Size</TableHead>
+                    <TableHead>Modified</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filteredEntries.length === 0 && (
+                    <TableRow>
+                      <TableCell
+                        colSpan={5}
+                        className="text-center text-muted-foreground py-10"
+                      >
+                        {sortedEntries.length === 0
+                          ? 'Empty directory.'
+                          : 'No items match the current filter.'}
+                      </TableCell>
+                    </TableRow>
+                  )}
+                  {filteredEntries.map((entry) => (
+                    <FileRow
+                      key={entry.key}
+                      entry={entry}
+                      prefix={prefix}
+                      storageName={storageName}
+                      inBucketRoot={inBucketRoot}
+                      onSelect={handleEntry}
+                      selectionChecked={selection.isSelected(entry.key)}
+                      onSelectionToggle={handleSelectionToggle}
+                    />
+                  ))}
+                </TableBody>
+              </Table>
             )}
 
             {/* README panel — shown when no file is open and the directory
@@ -1610,22 +1607,17 @@ function FileRow({
         className="cursor-pointer hover:bg-muted/50"
         onClick={() => onSelect(entry)}
       >
-        <TableCell onClick={(e) => e.stopPropagation()}>
+        <TableCell
+          onClick={(e) => {
+            if (!selectable) return
+            e.stopPropagation()
+            onSelectionToggle(entry, e.shiftKey)
+          }}
+        >
           {selectable ? (
             <Checkbox
               checked={selectionChecked ?? false}
               aria-label={`Select ${name}`}
-              onClick={(e) => e.stopPropagation()}
-              onCheckedChange={(_) =>
-                onSelectionToggle(entry, false)
-              }
-              onClickCapture={(e) => {
-                // Detect shift-click via the native event for range selection.
-                if ((e as React.MouseEvent).shiftKey) {
-                  e.preventDefault()
-                  onSelectionToggle(entry, true)
-                }
-              }}
             />
           ) : null}
         </TableCell>
