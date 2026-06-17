@@ -126,7 +126,7 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
   // default view rather than carrying over the previous file's preference.
   useEffect(() => {
     setView(isMarkdown ? 'rendered' : 'raw')
-  }, [isMarkdown])
+  }, [fileKey, isMarkdown])
 
   // .jsonl / .ndjson get a "Browse as cards" button that jumps to the Rows
   // page — same UX as parquet's ParquetPreview but lazy: text-preview-able

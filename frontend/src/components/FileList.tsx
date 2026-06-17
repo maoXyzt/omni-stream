@@ -1736,7 +1736,7 @@ function GalleryRow({
           <div
             className={cn(
               'shrink-0 pl-1 transition-opacity duration-150',
-              selectionChecked ? 'opacity-100' : 'opacity-0 hover:opacity-100',
+              selectionChecked ? 'opacity-100' : 'opacity-0 hover:opacity-100 focus-within:opacity-100',
             )}
             onClick={(e) => {
               e.stopPropagation()

@@ -89,25 +89,32 @@ export function UploadDialog({ storage, prefix, onClose }: UploadDialogProps) {
 
   // --- Upload logic ---
 
+  // `overwriteKey` limits overwrite=true to exactly that one file; all others
+  // in the queue still go through 409 detection so they get per-file prompts.
   const runUploads = useCallback(
-    async (queue: UploadItem[], overwrite = false) => {
+    async (queue: UploadItem[], overwriteKey?: string) => {
       if (queue.length === 0) return
       setUploading(true)
+      let succeeded = 0
 
       for (let i = 0; i < queue.length; i++) {
         const item = queue[i]
+        const overwrite = item.key === overwriteKey
         updateItem(item.key, { status: 'uploading', progress: 0 })
         try {
           await putFile(storage, item.key, item.file, overwrite, (pct) => {
             updateItem(item.key, { progress: pct })
           })
           updateItem(item.key, { status: 'done', progress: 100 })
+          succeeded++
         } catch (err) {
           if (err instanceof ApiError && err.status === 401) {
             updateItem(item.key, { status: 'pending', progress: 0 })
             pendingQueueRef.current = queue.slice(i)
             setAuthPending(true)
             setUploading(false)
+            if (succeeded > 0)
+              toast.info(`Uploaded ${succeeded} file${succeeded !== 1 ? 's' : ''} before auth expired`)
             return
           }
           if (err instanceof ApiError && err.status === 409) {
@@ -115,6 +122,8 @@ export function UploadDialog({ storage, prefix, onClose }: UploadDialogProps) {
             afterOverwriteRef.current = queue.slice(i + 1)
             setOverwriteItem(item)
             setUploading(false)
+            if (succeeded > 0)
+              toast.info(`Uploaded ${succeeded} file${succeeded !== 1 ? 's' : ''} so far`)
             return
           }
           updateItem(item.key, {
@@ -128,14 +137,9 @@ export function UploadDialog({ storage, prefix, onClose }: UploadDialogProps) {
       void queryClient.invalidateQueries({
         queryKey: ['list', storage, prefix],
       })
-
-      const done = queue.filter((_, j) => {
-        const updated = items.find((x) => x.key === queue[j].key)
-        return updated?.status === 'done'
-      })
-      if (done.length > 0) {
+      if (succeeded > 0) {
         toast.success(
-          `Uploaded ${done.length} file${done.length !== 1 ? 's' : ''}`,
+          `Uploaded ${succeeded} file${succeeded !== 1 ? 's' : ''}`,
         )
       }
     },
@@ -147,14 +151,14 @@ export function UploadDialog({ storage, prefix, onClose }: UploadDialogProps) {
     const queue = items.filter(
       (i) => i.status === 'pending' || i.status === 'error',
     )
-    void runUploads(queue, false)
+    void runUploads(queue)
   }, [items, runUploads])
 
   const handleAuthSubmit = useCallback(() => {
     setAuthPending(false)
     const q = pendingQueueRef.current
     pendingQueueRef.current = []
-    void runUploads(q, false)
+    void runUploads(q)
   }, [runUploads])
 
   const handleAuthCancel = useCallback(() => {
@@ -168,14 +172,16 @@ export function UploadDialog({ storage, prefix, onClose }: UploadDialogProps) {
     setOverwriteItem(null)
     afterOverwriteRef.current = []
     if (!item) return
-    void runUploads([item, ...rest], true)
+    // Only the user-confirmed item gets overwrite=true; `rest` still goes
+    // through 409 detection so subsequent conflicts each prompt individually.
+    void runUploads([item, ...rest], item.key)
   }, [overwriteItem, runUploads])
 
   const handleOverwriteSkip = useCallback(() => {
     const rest = afterOverwriteRef.current
     setOverwriteItem(null)
     afterOverwriteRef.current = []
-    void runUploads(rest, false)
+    void runUploads(rest)
   }, [runUploads])
 
   // --- Drag-and-drop ---
@@ -252,13 +258,22 @@ export function UploadDialog({ storage, prefix, onClose }: UploadDialogProps) {
           {/* Drop zone */}
           <div
             ref={dropRef}
+            role="button"
+            tabIndex={0}
+            aria-label="Add files to upload"
             className={cn(
-              'flex cursor-pointer flex-col items-center justify-center gap-2 rounded-md border-2 border-dashed p-6 text-sm text-muted-foreground transition-colors',
+              'flex cursor-pointer flex-col items-center justify-center gap-2 rounded-md border-2 border-dashed p-6 text-sm text-muted-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
               dragOver
                 ? 'border-primary bg-primary/5 text-primary'
                 : 'border-border hover:border-primary/50 hover:bg-muted/30',
             )}
             onClick={() => inputRef.current?.click()}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                inputRef.current?.click()
+              }
+            }}
           >
             <FileUp className="size-8 opacity-60" />
             <span>Drag files here or click to browse</span>

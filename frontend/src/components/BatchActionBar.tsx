@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Download, FolderInput, Trash2, X } from 'lucide-react'
+import { Download, FolderInput, Loader2, Trash2, X } from 'lucide-react'
 
 import { ApiError } from '@/api/client'
 import { deleteFile, moveFile } from '@/api/files'
@@ -315,8 +315,12 @@ export function BatchActionBar({
                 disabled={busy || fileCount === 0}
                 onClick={() => setMoveDialogOpen(true)}
               >
-                <FolderInput className="size-3.5" />
-                Move
+                {moving ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <FolderInput className="size-3.5" />
+                )}
+                {moving ? 'Moving…' : 'Move'}
               </Button>
               <Button
                 variant="destructive"
@@ -325,8 +329,12 @@ export function BatchActionBar({
                 disabled={busy || fileCount === 0}
                 onClick={() => setDeleteConfirmOpen(true)}
               >
-                <Trash2 className="size-3.5" />
-                Delete
+                {deleting ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <Trash2 className="size-3.5" />
+                )}
+                {deleting ? 'Deleting…' : 'Delete'}
               </Button>
             </>
           )}

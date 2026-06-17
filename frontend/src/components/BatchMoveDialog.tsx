@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { FolderInput } from 'lucide-react'
+import { FolderInput, Loader2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import {
@@ -80,8 +80,12 @@ export function BatchMoveDialog({
             Cancel
           </Button>
           <Button disabled={busy} onClick={handleConfirm}>
-            <FolderInput className="size-3.5" />
-            Move
+            {busy ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <FolderInput className="size-3.5" />
+            )}
+            {busy ? 'Moving…' : 'Move'}
           </Button>
         </DialogFooter>
       </DialogContent>
