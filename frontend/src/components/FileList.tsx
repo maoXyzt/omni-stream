@@ -10,12 +10,12 @@ import {
 } from 'react-router-dom'
 import {
   AlertCircle,
-  ArrowDownAZ,
-  ArrowDownZA,
+  ArrowDown,
   ArrowUp,
   Check,
   ChevronLeft,
   ChevronRight,
+  ChevronsUpDown,
   FilePlus,
   KeyRound,
   Loader2,
@@ -44,12 +44,12 @@ import {
 import { useMediaQuery } from '@/hooks/use-media-query'
 import { useResizableWidth } from '@/hooks/use-resizable-width'
 import { useSidebarCollapsed } from '@/hooks/use-sidebar-collapsed'
-import { useSortDir } from '@/hooks/use-sort-dir'
+import { useSortDir, useSortField } from '@/hooks/use-sort-dir'
 import { useGridFit } from '@/hooks/use-grid-fit'
 import { useViewMode, type ViewMode } from '@/hooks/use-view-mode'
 import { cn } from '@/lib/utils'
 import { formatBytes, formatTime } from '@/lib/format'
-import { sortEntries } from '@/lib/sort'
+import { sortEntriesBy } from '@/lib/sort'
 import { BatchActionBar } from '@/components/BatchActionBar'
 import { EntryContextMenu } from '@/components/EntryContextMenu'
 import { EntryIcon } from '@/components/EntryIcon'
@@ -75,6 +75,16 @@ import { GridFitToggle } from '@/components/GridFitToggle'
 import { ViewToggle } from '@/components/ViewToggle'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
@@ -201,6 +211,7 @@ export function FileList() {
   // room. Below `md` we keep the full-width list and fall back to the modal.
   const isDesktop = useMediaQuery('(min-width: 768px)')
   const [sortDir, setSortDir] = useSortDir()
+  const [sortField, setSortField] = useSortField()
   const [sidebarCollapsed, setSidebarCollapsed] = useSidebarCollapsed()
   // Left-column width for the split layout — draggable, persisted per-user.
   // Bounds tuned so the filter+pager row sits comfortably:
@@ -675,8 +686,11 @@ export function FileList() {
   }, [setSearchParams])
 
   const sortedEntries = useMemo(
-    () => (listQuery.data ? sortEntries(listQuery.data.entries, sortDir) : []),
-    [listQuery.data, sortDir],
+    () =>
+      listQuery.data
+        ? sortEntriesBy(listQuery.data.entries, sortField, sortDir)
+        : [],
+    [listQuery.data, sortField, sortDir],
   )
 
   const filteredEntries = useMemo(() => {
@@ -984,8 +998,6 @@ export function FileList() {
     gotoPage(currentPage - 1)
   }
 
-  const toggleMainSort = () => setSortDir(sortDir === 'asc' ? 'desc' : 'asc')
-
   return (
     <div className="flex h-screen w-full flex-col">
       <header className="flex shrink-0 flex-wrap items-center gap-3 border-b border-border bg-background px-6 py-3">
@@ -1080,28 +1092,56 @@ export function FileList() {
               <PathNavigator prefix={prefix} activeStorage={activeStorage} onNavigate={goToPathOrFile} />
             </div>
             <div className="flex shrink-0 items-center gap-2">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    aria-label={sortDir === 'asc' ? 'Sort descending' : 'Sort ascending'}
-                    aria-pressed={sortDir === 'desc'}
-                    onClick={toggleMainSort}
+              {/* Sort dropdown — field selector (name/size/mtime/type) and
+                  direction toggle. The dropdown is compact so it doesn't
+                  crowd the toolbar on narrow viewports. */}
+              <DropdownMenu>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        aria-label={`Sort by ${sortField}, ${sortDir === 'asc' ? 'ascending' : 'descending'}`}
+                        className="gap-1"
+                      >
+                        <ChevronsUpDown className="size-3.5 text-muted-foreground" />
+                        <span className="hidden sm:inline text-xs capitalize">{sortField}</span>
+                        {sortDir === 'asc' ? (
+                          <ArrowDown className="size-3 text-muted-foreground" aria-hidden />
+                        ) : (
+                          <ArrowUp className="size-3 text-muted-foreground" aria-hidden />
+                        )}
+                      </Button>
+                    </DropdownMenuTrigger>
+                  </TooltipTrigger>
+                  <TooltipContent>Sort listing</TooltipContent>
+                </Tooltip>
+                <DropdownMenuContent align="end" className="w-40">
+                  <DropdownMenuLabel className="text-xs">Sort by</DropdownMenuLabel>
+                  <DropdownMenuRadioGroup
+                    value={sortField}
+                    onValueChange={(v) => setSortField(v as typeof sortField)}
+                  >
+                    <DropdownMenuRadioItem value="name">Name</DropdownMenuRadioItem>
+                    <DropdownMenuRadioItem value="size">Size</DropdownMenuRadioItem>
+                    <DropdownMenuRadioItem value="mtime">Modified</DropdownMenuRadioItem>
+                    <DropdownMenuRadioItem value="type">Type</DropdownMenuRadioItem>
+                  </DropdownMenuRadioGroup>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onClick={() => setSortDir(sortDir === 'asc' ? 'desc' : 'asc')}
+                    className="gap-2"
                   >
                     {sortDir === 'asc' ? (
-                      <ArrowDownAZ className="size-4" />
+                      <ArrowDown className="size-3.5" />
                     ) : (
-                      <ArrowDownZA className="size-4" />
+                      <ArrowUp className="size-3.5" />
                     )}
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  {sortDir === 'asc'
-                    ? 'Sort A→Z (click to flip to Z→A)'
-                    : 'Sort Z→A (click to flip to A→Z)'}
-                </TooltipContent>
-              </Tooltip>
+                    {sortDir === 'asc' ? 'Ascending' : 'Descending'}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
