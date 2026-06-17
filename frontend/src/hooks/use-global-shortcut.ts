@@ -50,6 +50,10 @@ function ensureListener() {
 }
 
 function dispatch(e: KeyboardEvent) {
+  // Radix primitives (Dialog, DropdownMenu, …) call e.preventDefault() when
+  // they handle a key (e.g. Esc to close). Bail out so our shortcuts don't
+  // fire on top of the primitive's own behaviour.
+  if (e.defaultPrevented) return
   for (const h of handlers) {
     if (isEditableTarget(e, h.includeMedia)) continue
     if (!matchesCombo(e, h.combo)) continue

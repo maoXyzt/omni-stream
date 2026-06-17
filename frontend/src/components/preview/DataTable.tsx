@@ -72,18 +72,16 @@ function compareValues(a: unknown, b: unknown): number {
   if (a == null) return 1
   if (b == null) return -1
 
-  // Numbers and BigInts — compare without converting to avoid precision loss.
-  if (typeof a === 'number' && typeof b === 'number') return a - b
-  if (typeof a === 'bigint' && typeof b === 'bigint')
-    return a < b ? -1 : a > b ? 1 : 0
-  // Cross number/bigint — promote number to bigint if possible
+  // Numbers and BigInts — JS relational operators work across number↔bigint at
+  // runtime, so we cast through `unknown` to satisfy TypeScript without any
+  // conversion that could lose precision (Number(bigint)) or throw (BigInt(NaN)).
   if (
     (typeof a === 'number' || typeof a === 'bigint') &&
     (typeof b === 'number' || typeof b === 'bigint')
   ) {
-    const ba = BigInt(Math.trunc(typeof a === 'number' ? a : Number(a)))
-    const bb = BigInt(Math.trunc(typeof b === 'number' ? b : Number(b)))
-    return ba < bb ? -1 : ba > bb ? 1 : 0
+    const av = a as unknown as number
+    const bv = b as unknown as number
+    return av < bv ? -1 : av > bv ? 1 : 0
   }
 
   // Dates — compare epoch ms.
@@ -140,7 +138,16 @@ export function DataTable({ columns, rows, loading, pageIndex, pageSize }: DataT
     if (!sortState) return rows
     const { column, dir } = sortState
     const factor = dir === 'asc' ? 1 : -1
-    return [...rows].sort((a, b) => factor * compareValues(a[column], b[column]))
+    return [...rows].sort((a, b) => {
+      const av = a[column]
+      const bv = b[column]
+      // Nullish values always sink to the bottom regardless of sort direction.
+      // Applying `factor` to the null guard would flip them to the top in desc.
+      if (av == null && bv == null) return 0
+      if (av == null) return 1
+      if (bv == null) return -1
+      return factor * compareValues(av, bv)
+    })
   }, [rows, sortState])
 
   function handleHeaderClick(column: string) {

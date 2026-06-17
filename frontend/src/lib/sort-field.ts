@@ -35,11 +35,11 @@ export function compareEntries(
   switch (field) {
     case 'size': {
       // Directories have no meaningful size; sort within the dir group by
-      // name so the ordering is stable.
-      if (a.is_dir) return collator.compare(a.key, b.key)
+      // name so the ordering is stable (direction-aware for consistency).
+      if (a.is_dir) return factor * collator.compare(a.key, b.key)
       const diff = a.size - b.size
       // Ties in size fall back to name so the sort is deterministic.
-      return diff !== 0 ? factor * diff : collator.compare(a.key, b.key)
+      return diff !== 0 ? factor * diff : factor * collator.compare(a.key, b.key)
     }
 
     case 'mtime': {
@@ -47,11 +47,11 @@ export function compareEntries(
       const tb = parseMtime(b.last_modified)
       // Null last_modified always sorts last regardless of direction so it
       // doesn't jump to the front when flipping to desc.
-      if (ta === null && tb === null) return collator.compare(a.key, b.key)
+      if (ta === null && tb === null) return factor * collator.compare(a.key, b.key)
       if (ta === null) return 1   // a is "no date" → sinks to bottom
       if (tb === null) return -1  // b is "no date" → b sinks
       const diff = ta - tb
-      return diff !== 0 ? factor * diff : collator.compare(a.key, b.key)
+      return diff !== 0 ? factor * diff : factor * collator.compare(a.key, b.key)
     }
 
     case 'type': {
@@ -59,7 +59,7 @@ export function compareEntries(
       const lb = typeLabelForEntry(b.key, b.is_dir)
       const cmp = factor * collator.compare(la, lb)
       // Within the same type, secondary sort by name keeps the list stable.
-      return cmp !== 0 ? cmp : collator.compare(a.key, b.key)
+      return cmp !== 0 ? cmp : factor * collator.compare(a.key, b.key)
     }
 
     case 'name':

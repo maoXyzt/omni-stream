@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { FolderPlus } from 'lucide-react'
+import { FolderPlus, Loader2 } from 'lucide-react'
 
 import { ApiError } from '@/api/client'
 import { putFile } from '@/api/files'
@@ -127,8 +127,17 @@ export function NewFolderDialog({ storage, prefix, onClose }: Props) {
               Cancel
             </Button>
             <Button disabled={!canSubmit} onClick={() => void create(false)}>
-              <FolderPlus className="size-3.5" />
-              Create
+              {saving ? (
+                <>
+                  <Loader2 className="size-3.5 animate-spin" />
+                  Creating…
+                </>
+              ) : (
+                <>
+                  <FolderPlus className="size-3.5" />
+                  Create
+                </>
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>

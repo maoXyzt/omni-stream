@@ -56,8 +56,11 @@ export function useRecents(): RecentsState {
   }, [])
 
   const record = useCallback((storage: string, key: string, type: RecentType) => {
+    // Re-read storage on every mutation to avoid losing concurrent writes from
+    // other tabs that arrived between the last storage event and now.
+    const current = readStorage()
     const next: RecentEntry = { storage, key, type, visitedAt: Date.now() }
-    const filtered = recentsRef.current.filter(
+    const filtered = current.filter(
       (r) => !(r.storage === storage && r.key === key),
     )
     const updated = [next, ...filtered].slice(0, MAX_RECENTS)
@@ -66,7 +69,8 @@ export function useRecents(): RecentsState {
   }, [])
 
   const remove = useCallback((storage: string, key: string) => {
-    const updated = recentsRef.current.filter(
+    const current = readStorage()
+    const updated = current.filter(
       (r) => !(r.storage === storage && r.key === key),
     )
     const err = writeStorage(updated)

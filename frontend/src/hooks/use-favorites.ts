@@ -55,18 +55,18 @@ export function useFavorites(): FavoritesState {
   }, [])
 
   const add = useCallback((storage: string, key: string, type: FavoriteType) => {
-    if (favoritesRef.current.some((f) => f.storage === storage && f.key === key))
-      return
-    const updated = [
-      ...favoritesRef.current,
-      { storage, key, type, pinnedAt: Date.now() },
-    ]
+    // Re-read storage on every mutation to avoid overwriting concurrent writes
+    // from other tabs that arrived between the last storage event and now.
+    const current = readStorage()
+    if (current.some((f) => f.storage === storage && f.key === key)) return
+    const updated = [...current, { storage, key, type, pinnedAt: Date.now() }]
     const err = writeStorage(updated)
     if (!err) setFavorites(updated)
   }, [])
 
   const remove = useCallback((storage: string, key: string) => {
-    const updated = favoritesRef.current.filter(
+    const current = readStorage()
+    const updated = current.filter(
       (f) => !(f.storage === storage && f.key === key),
     )
     const err = writeStorage(updated)

@@ -5,7 +5,7 @@
 /// and DataTable). The `absolutePathOf` helper comes from `lib/path` so it's
 /// shared with other callers.
 
-import { Check, Copy, Loader2 } from 'lucide-react'
+import { Check, Copy, Loader2, RotateCw } from 'lucide-react'
 import { useState } from 'react'
 
 import { useFileStat, useStorages } from '@/hooks/use-storage'
@@ -33,7 +33,7 @@ export function FileDetailsDialog({
   isDir,
   onClose,
 }: Props) {
-  const { data: meta, isPending, isError } = useFileStat(fileKey, storageName)
+  const { data: meta, isPending, isError, refetch } = useFileStat(fileKey, storageName)
   const { data: storagesData } = useStorages()
   const storage = storagesData?.storages.find((s) => s.name === storageName)
   const absPath = storage ? absolutePathOf(storage, fileKey) : null
@@ -53,9 +53,13 @@ export function FileDetailsDialog({
             <Loader2 className="size-5 animate-spin text-muted-foreground" />
           </div>
         ) : isError ? (
-          <p className="py-4 text-center text-sm text-destructive">
-            Failed to load file metadata.
-          </p>
+          <div className="flex flex-col items-center gap-3 py-6">
+            <p className="text-sm text-destructive">Failed to load file metadata.</p>
+            <Button variant="outline" size="sm" onClick={() => void refetch()}>
+              <RotateCw className="size-3.5" />
+              Retry
+            </Button>
+          </div>
         ) : (
           <div className="space-y-0.5">
             {absPath && (
@@ -107,10 +111,14 @@ function DetailRow({ label, value, copyable, copyValue }: DetailRowProps) {
   const [copied, setCopied] = useState(false)
 
   function handleCopy() {
-    void navigator.clipboard.writeText(copyValue ?? value).then(() => {
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1500)
-    })
+    if (!navigator.clipboard) return
+    void navigator.clipboard
+      .writeText(copyValue ?? value)
+      .then(() => {
+        setCopied(true)
+        setTimeout(() => setCopied(false), 1500)
+      })
+      .catch(() => {})
   }
 
   return (

@@ -74,8 +74,12 @@ export function EntryContextMenu({
   // check is needed; the token itself is verified lazily (401 → prompt).
   const canWrite = !entry.is_dir && Boolean(storage?.writeable) && !!storageName
 
-  const { isFavorite, add: addFavorite, remove: removeFavorite } = useFavorites()
-  const favorited = isFavorite(storageName, entry.key)
+  const { favorites, add: addFavorite, remove: removeFavorite } = useFavorites()
+  // Derive directly from the `favorites` array so the toggle reflects the
+  // latest state immediately (avoids the one-render lag of a ref-backed read).
+  const favorited = favorites.some(
+    (f) => f.storage === storageName && f.key === entry.key,
+  )
 
   const queryClient = useQueryClient()
   // Directory prefix of this entry, in the trailing-slash form the listing

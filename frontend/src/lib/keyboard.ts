@@ -57,9 +57,14 @@ const isMac =
 ///   parseCombo('escape')       → { key:'escape', … }
 ///   parseCombo('arrowdown')    → { key:'arrowdown', … }
 export function parseCombo(combo: string): KeyCombo {
-  const parts = combo.toLowerCase().split('+')
-  const key = parts.at(-1) ?? ''
-  const mods = new Set(parts.slice(0, -1))
+  const lower = combo.toLowerCase()
+  // '+' can be both a separator AND the key name. When the last segment after
+  // splitting on '+' is empty, the combo ends with '+', meaning the key IS '+'.
+  // e.g. '+' → ['','']  and  'shift++' → ['shift','','']
+  const raw = lower.split('+')
+  const key = raw.at(-1) === '' ? '+' : (raw.at(-1) ?? '')
+  const modParts = raw.at(-1) === '' ? raw.slice(0, -2) : raw.slice(0, -1)
+  const mods = new Set(modParts.filter(Boolean))
   const mod = mods.has('mod') || mods.has('cmd') || mods.has('meta')
   return {
     key,
