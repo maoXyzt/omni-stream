@@ -701,6 +701,18 @@ export function FileList() {
   // ── Multi-select ──────────────────────────────────────────────────────────
   const selection = useSelection()
 
+  const fileEntries = filteredEntries.filter((e) => !e.is_dir)
+  const allChecked =
+    fileEntries.length > 0 &&
+    fileEntries.every((e) => selection.isSelected(e.key))
+  const someChecked =
+    !allChecked && fileEntries.some((e) => selection.isSelected(e.key))
+  const headerChecked = allChecked
+    ? true
+    : someChecked
+      ? 'indeterminate'
+      : false
+
   // Clear the selection whenever the user navigates to a different directory,
   // switches storage, or flips to another page — selected keys from the old
   // page are meaningless in the new context.
@@ -1406,69 +1418,54 @@ export function FileList() {
                 onSelectionToggle={handleSelectionToggle}
               />
             ) : (
-              (() => {
-                const fileEntries = filteredEntries.filter((e) => !e.is_dir)
-                const allChecked =
-                  fileEntries.length > 0 &&
-                  fileEntries.every((e) => selection.isSelected(e.key))
-                const someChecked =
-                  !allChecked && fileEntries.some((e) => selection.isSelected(e.key))
-                const headerChecked = allChecked
-                  ? true
-                  : someChecked
-                    ? 'indeterminate'
-                    : false
-                return (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="w-8">
-                          <Checkbox
-                            checked={headerChecked}
-                            aria-label="Select all files on this page"
-                            disabled={fileEntries.length === 0}
-                            onClick={(e) => e.stopPropagation()}
-                            onCheckedChange={(checked) => {
-                              if (checked) handleSelectAll()
-                              else selection.clear()
-                            }}
-                          />
-                        </TableHead>
-                        <TableHead className="w-1/2">Name</TableHead>
-                        <TableHead className="w-28">Type</TableHead>
-                        <TableHead className="w-32 text-right">Size</TableHead>
-                        <TableHead>Modified</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {filteredEntries.length === 0 && (
-                        <TableRow>
-                          <TableCell
-                            colSpan={5}
-                            className="text-center text-muted-foreground py-10"
-                          >
-                            {sortedEntries.length === 0
-                              ? 'Empty directory.'
-                              : 'No items match the current filter.'}
-                          </TableCell>
-                        </TableRow>
-                      )}
-                      {filteredEntries.map((entry) => (
-                        <FileRow
-                          key={entry.key}
-                          entry={entry}
-                          prefix={prefix}
-                          storageName={storageName}
-                          inBucketRoot={inBucketRoot}
-                          onSelect={handleEntry}
-                          selectionChecked={selection.isSelected(entry.key)}
-                          onSelectionToggle={handleSelectionToggle}
-                        />
-                      ))}
-                    </TableBody>
-                  </Table>
-                )
-              })()
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-8">
+                      <Checkbox
+                        checked={headerChecked}
+                        aria-label="Select all files on this page"
+                        disabled={fileEntries.length === 0}
+                        onClick={(e) => e.stopPropagation()}
+                        onCheckedChange={(checked) => {
+                          if (checked) handleSelectAll()
+                          else selection.clear()
+                        }}
+                      />
+                    </TableHead>
+                    <TableHead className="w-1/2">Name</TableHead>
+                    <TableHead className="w-28">Type</TableHead>
+                    <TableHead className="w-32 text-right">Size</TableHead>
+                    <TableHead>Modified</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filteredEntries.length === 0 && (
+                    <TableRow>
+                      <TableCell
+                        colSpan={5}
+                        className="text-center text-muted-foreground py-10"
+                      >
+                        {sortedEntries.length === 0
+                          ? 'Empty directory.'
+                          : 'No items match the current filter.'}
+                      </TableCell>
+                    </TableRow>
+                  )}
+                  {filteredEntries.map((entry) => (
+                    <FileRow
+                      key={entry.key}
+                      entry={entry}
+                      prefix={prefix}
+                      storageName={storageName}
+                      inBucketRoot={inBucketRoot}
+                      onSelect={handleEntry}
+                      selectionChecked={selection.isSelected(entry.key)}
+                      onSelectionToggle={handleSelectionToggle}
+                    />
+                  ))}
+                </TableBody>
+              </Table>
             )}
 
             {/* README panel — shown when no file is open and the directory
@@ -1610,22 +1607,17 @@ function FileRow({
         className="cursor-pointer hover:bg-muted/50"
         onClick={() => onSelect(entry)}
       >
-        <TableCell onClick={(e) => e.stopPropagation()}>
+        <TableCell
+          onClick={(e) => {
+            if (!selectable) return
+            e.stopPropagation()
+            onSelectionToggle(entry, e.shiftKey)
+          }}
+        >
           {selectable ? (
             <Checkbox
               checked={selectionChecked ?? false}
               aria-label={`Select ${name}`}
-              onClick={(e) => e.stopPropagation()}
-              onCheckedChange={(_) =>
-                onSelectionToggle(entry, false)
-              }
-              onClickCapture={(e) => {
-                // Detect shift-click via the native event for range selection.
-                if ((e as React.MouseEvent).shiftKey) {
-                  e.preventDefault()
-                  onSelectionToggle(entry, true)
-                }
-              }}
             />
           ) : null}
         </TableCell>
@@ -1731,33 +1723,47 @@ function GalleryRow({
 
   return (
     <EntryContextMenu entry={entry} storageName={storageName}>
-      <div className="flex items-center gap-1">
-        {selectable && (
-          <div
-            className={cn(
-              'shrink-0 pl-1 transition-opacity duration-150',
-              selectionChecked ? 'opacity-100' : 'opacity-0 hover:opacity-100 focus-within:opacity-100',
-            )}
-            onClick={(e) => {
-              e.stopPropagation()
-              onSelectionToggle(entry, e.shiftKey)
-            }}
-          >
+      {/* Outer row: highlight covers the full row width (including checkbox slot)
+          with a square edge, matching the FileRow/TableRow hover style. The
+          `group` class lets child elements react to hover/focus-visible on the
+          row via `group-hover:` and `group-has-[:focus-visible]:`. */}
+      <div
+        className={cn(
+          'group flex items-center text-sm transition-colors',
+          selected ? 'bg-accent text-accent-foreground' : 'hover:bg-muted/50',
+        )}
+      >
+        {/* Fixed-width checkbox slot — always rendered (even for dirs) so that
+            the icon column starts at the same left offset as in the full-width
+            TableRow (w-8 slot + px-2 button padding = 40 px, matching
+            TableHead w-8 + TableCell p-2). */}
+        <div
+          className="flex w-8 shrink-0 items-center pl-2"
+          onClick={(e) => {
+            if (!selectable) return
+            e.stopPropagation()
+            onSelectionToggle(entry, e.shiftKey)
+          }}
+        >
+          {selectable && (
             <Checkbox
               checked={selectionChecked ?? false}
               aria-label={`Select ${name}`}
+              className={cn(
+                'transition-opacity duration-150',
+                selectionChecked
+                  ? 'opacity-100'
+                  : 'opacity-0 group-hover:opacity-100 group-has-[:focus-visible]:opacity-100',
+              )}
             />
-          </div>
-        )}
+          )}
+        </div>
         <button
           ref={ref}
           type="button"
           onClick={() => onSelect(entry)}
           title={name}
-          className={cn(
-            'flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm',
-            selected ? 'bg-accent text-accent-foreground' : 'hover:bg-muted/50',
-          )}
+          className="flex min-w-0 flex-1 items-center gap-2 px-2 py-2 text-left"
         >
           <EntryIcon
             Icon={Icon}
