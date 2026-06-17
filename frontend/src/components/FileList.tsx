@@ -16,7 +16,10 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronsUpDown,
+  Download,
+  ExternalLink,
   FilePlus,
+  FolderPlus,
   KeyRound,
   Loader2,
   LogOut,
@@ -55,6 +58,7 @@ import { ShortcutHelpDialog } from '@/components/ShortcutHelpDialog'
 import { EntryContextMenu } from '@/components/EntryContextMenu'
 import { EntryIcon } from '@/components/EntryIcon'
 import { NewFileDialog } from '@/components/NewFileDialog'
+import { NewFolderDialog } from '@/components/NewFolderDialog'
 import { UploadDialog } from '@/components/UploadDialog'
 import { FileGrid } from '@/components/FileGrid'
 import { PathBreadcrumb } from '@/components/PathBreadcrumb'
@@ -103,6 +107,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { useGlobalShortcut } from '@/hooks/use-global-shortcut'
+import { useRecents } from '@/hooks/use-recents'
 import { useSelection } from '@/hooks/use-selection'
 import type { FileEntry } from '@/types/storage'
 
@@ -152,6 +157,8 @@ export function FileList() {
   const [showTokenPrompt, setShowTokenPrompt] = useState(false)
   // Toggles the "New file" creation dialog (only shown for writeable storages).
   const [showNewFile, setShowNewFile] = useState(false)
+  // Toggles the "New folder" creation dialog (only shown for writeable storages).
+  const [showNewFolder, setShowNewFolder] = useState(false)
   // Toggles the upload dialog (only shown for writeable storages).
   const [showUpload, setShowUpload] = useState(false)
   const activeStorage = useMemo(
@@ -214,6 +221,7 @@ export function FileList() {
   const isDesktop = useMediaQuery('(min-width: 768px)')
   const [sortDir, setSortDir] = useSortDir()
   const [sortField, setSortField] = useSortField()
+  const { record: recordRecent } = useRecents()
   const [sidebarCollapsed, setSidebarCollapsed] = useSidebarCollapsed()
   // Left-column width for the split layout — draggable, persisted per-user.
   // Bounds tuned so the filter+pager row sits comfortably:
@@ -579,8 +587,12 @@ export function FileList() {
           ? `?${VIEW_PARAM}=${urlViewParamRef.current}`
           : '',
       })
+      // Record folder visit in recents — only settled navigations (not every
+      // keystroke in PathNavigator). Root (empty prefix) is intentionally
+      // included as a valid recent so users can jump back to a storage root.
+      if (storageName) recordRecent(storageName, clean, 'folder')
     },
-    [navigate, storageName],
+    [navigate, storageName, recordRecent],
   )
 
   // "Go to path" target may be a file rather than a directory. `goToPath`
@@ -657,8 +669,10 @@ export function FileList() {
         pathname: `/s/${encodeURIComponent(name)}/`,
         search: isValidViewMode(vp) ? `?${VIEW_PARAM}=${vp}` : '',
       })
+      // Record the storage root as a folder visit.
+      recordRecent(name, '', 'folder')
     },
-    [navigate, storageName],
+    [navigate, storageName, recordRecent],
   )
 
   const openPreview = useCallback(
@@ -672,8 +686,12 @@ export function FileList() {
         },
         { replace: false },
       )
+      // Record file visit in recents so the sidebar Recent section can surface it.
+      if (storageName && !entry.is_dir) {
+        recordRecent(storageName, entry.key, 'file')
+      }
     },
-    [prefix, setSearchParams],
+    [prefix, setSearchParams, storageName, recordRecent],
   )
 
   const closePreview = useCallback(() => {
@@ -1174,6 +1192,19 @@ export function FileList() {
                       <Button
                         variant="outline"
                         size="sm"
+                        aria-label="New folder"
+                        onClick={() => setShowNewFolder(true)}
+                      >
+                        <FolderPlus className="size-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Create a new folder here</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="sm"
                         aria-label="New file"
                         onClick={() => setShowNewFile(true)}
                       >
@@ -1249,6 +1280,14 @@ export function FileList() {
                 queryClient.invalidateQueries()
               }}
               onCancel={() => setShowTokenPrompt(false)}
+            />
+          )}
+
+          {showNewFolder && storageName && (
+            <NewFolderDialog
+              storage={storageName}
+              prefix={prefix}
+              onClose={() => setShowNewFolder(false)}
             />
           )}
 
@@ -1391,11 +1430,45 @@ export function FileList() {
                   <TooltipContent>Close preview (Esc)</TooltipContent>
                 </Tooltip>
                 <span
-                  className="truncate text-sm text-muted-foreground"
+                  className="min-w-0 flex-1 truncate text-sm text-muted-foreground"
                   title={previewState!.key}
                 >
                   {previewState!.key}
                 </span>
+                <div className="flex shrink-0 items-center gap-1">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label="Open in new tab"
+                        onClick={() => {
+                          window.open(
+                            proxyUrl(previewState!.key, storageName || undefined),
+                            '_blank',
+                            'noreferrer',
+                          )
+                        }}
+                      >
+                        <ExternalLink className="size-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Open in new tab</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <a
+                        href={proxyUrl(previewState!.key, storageName || undefined)}
+                        download={basenameOf(previewState!.key)}
+                        className="inline-flex size-7 items-center justify-center rounded-[min(var(--radius-md),12px)] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        aria-label="Download"
+                      >
+                        <Download className="size-4" />
+                      </a>
+                    </TooltipTrigger>
+                    <TooltipContent>Download</TooltipContent>
+                  </Tooltip>
+                </div>
               </div>
               <InlinePreview
                 fileKey={previewState!.key}

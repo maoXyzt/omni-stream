@@ -7,8 +7,11 @@ import {
   ExternalLink,
   FolderTree,
   Globe,
+  Info,
   Link as LinkIcon,
   Pencil,
+  Star,
+  StarOff,
   Trash2,
 } from 'lucide-react'
 
@@ -34,9 +37,11 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { FileDetailsDialog } from '@/components/FileDetailsDialog'
+import { useFavorites } from '@/hooks/use-favorites'
 import { useStorages } from '@/hooks/use-storage'
-import { basenameOf } from '@/lib/path'
-import type { FileEntry, StorageDescriptor } from '@/types/storage'
+import { absolutePathOf, basenameOf } from '@/lib/path'
+import type { FileEntry } from '@/types/storage'
 
 interface EntryContextMenuProps {
   entry: FileEntry
@@ -69,6 +74,9 @@ export function EntryContextMenu({
   // check is needed; the token itself is verified lazily (401 → prompt).
   const canWrite = !entry.is_dir && Boolean(storage?.writeable) && !!storageName
 
+  const { isFavorite, add: addFavorite, remove: removeFavorite } = useFavorites()
+  const favorited = isFavorite(storageName, entry.key)
+
   const queryClient = useQueryClient()
   // Directory prefix of this entry, in the trailing-slash form the listing
   // cache is keyed by. Used to build the rename target and to invalidate the
@@ -77,6 +85,7 @@ export function EntryContextMenu({
     ? entry.key.slice(0, entry.key.lastIndexOf('/') + 1)
     : ''
 
+  const [showDetails, setShowDetails] = useState(false)
   const [busy, setBusy] = useState(false)
   const [renameOpen, setRenameOpen] = useState(false)
   const [renameValue, setRenameValue] = useState(name)
@@ -211,6 +220,19 @@ export function EntryContextMenu({
             <LinkIcon />
             Copy URL
           </ContextMenuItem>
+          <ContextMenuSeparator />
+          <ContextMenuItem
+            onClick={() => {
+              if (favorited) {
+                removeFavorite(storageName, entry.key)
+              } else {
+                addFavorite(storageName, entry.key, entry.is_dir ? 'folder' : 'file')
+              }
+            }}
+          >
+            {favorited ? <StarOff /> : <Star />}
+            {favorited ? 'Remove from Favorites' : 'Add to Favorites'}
+          </ContextMenuItem>
           {!entry.is_dir && (
             <>
               {isHtml && (
@@ -250,8 +272,22 @@ export function EntryContextMenu({
               </ContextMenuItem>
             </>
           )}
+          <ContextMenuSeparator />
+          <ContextMenuItem onClick={() => setShowDetails(true)}>
+            <Info />
+            Properties
+          </ContextMenuItem>
         </ContextMenuContent>
       </ContextMenu>
+
+      {showDetails && (
+        <FileDetailsDialog
+          fileKey={entry.key}
+          storageName={storageName}
+          isDir={entry.is_dir}
+          onClose={() => setShowDetails(false)}
+        />
+      )}
 
       {/* Rename — the dialog (old → new) is itself the deliberate confirmation;
           a 409 escalates to an explicit overwrite confirm. */}
@@ -355,25 +391,3 @@ export function EntryContextMenu({
   )
 }
 
-/// Absolute, human-pasteable location of an entry on its backing storage.
-///   S3 (single bucket):    `s3://<bucket>/<key>`
-///   S3 (multi-bucket):     `s3://<key>`  — first key segment IS the bucket
-///   Local FS:              `<root_path>/<key>`
-/// Trailing `/` on directory keys is preserved so it's obvious the path is
-/// a folder. Returns `null` when the storage lacks the identifying fields
-/// (invalid storages, or descriptor not yet loaded).
-function absolutePathOf(storage: StorageDescriptor, key: string): string | null {
-  if (storage.type === 's3' && storage.s3) {
-    if (storage.s3.bucket !== null) {
-      return `s3://${storage.s3.bucket}/${key}`
-    }
-    // Multi-bucket: the entry key already starts with `<bucket>/…`, so the
-    // bucket segment doesn't need to be re-attached.
-    return `s3://${key}`
-  }
-  if (storage.type === 'local' && storage.local?.root_path) {
-    const root = storage.local.root_path.replace(/\/+$/, '')
-    return `${root}/${key}`
-  }
-  return null
-}

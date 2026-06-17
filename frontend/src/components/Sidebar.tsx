@@ -5,12 +5,18 @@ import {
   ArrowDownZA,
   ChevronDown,
   ChevronRight,
+  Clock,
+  File,
+  Folder,
   RotateCw,
+  Star,
 } from 'lucide-react'
 
-import { useListFiles } from '@/hooks/use-storage'
+import { useListFiles, useStorages } from '@/hooks/use-storage'
 import { SIDEBAR_SORT_KEY, useSortDir, type SortDir } from '@/hooks/use-sort-dir'
 import { useTreeExpanded, type TreeExpandedApi } from '@/hooks/use-tree-expanded'
+import { useFavorites } from '@/hooks/use-favorites'
+import { useRecents } from '@/hooks/use-recents'
 import { EntryContextMenu } from '@/components/EntryContextMenu'
 import { EntryIcon } from '@/components/EntryIcon'
 import { dirVisual } from '@/components/preview/registry'
@@ -53,8 +59,127 @@ export function Sidebar({
     expandPath(prefix)
   }, [prefix, expandPath])
 
+  const { favorites, remove: removeFavorite } = useFavorites()
+  const { recents } = useRecents()
+  const { data: storagesData } = useStorages()
+  const knownStorages = useMemo(
+    () => new Set(storagesData?.storages.map((s) => s.name) ?? []),
+    [storagesData],
+  )
+
+  // Filter to entries whose storage still exists (prune orphans).
+  const validFavorites = useMemo(
+    () => favorites.filter((f) => knownStorages.has(f.storage)),
+    [favorites, knownStorages],
+  )
+  const validRecents = useMemo(
+    () => recents.filter((r) => knownStorages.has(r.storage)).slice(0, 8),
+    [recents, knownStorages],
+  )
+
   return (
     <div className="flex h-full flex-col gap-1 py-2">
+      {/* Favorites section */}
+      {validFavorites.length > 0 && (
+        <section className="shrink-0">
+          <div className="mx-2 flex items-center gap-1 px-2 py-1.5">
+            <Star className="size-3.5 text-muted-foreground" />
+            <span className="flex-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Favorites
+            </span>
+          </div>
+          <ul className="px-2 pb-1">
+            {validFavorites.map((f) => {
+              const label = basenameOf(f.key) || f.storage
+              const isActive = f.storage === storageName && (
+                f.type === 'folder' ? prefix === f.key || prefix.startsWith(f.key) : false
+              )
+              return (
+                <li key={`${f.storage}::${f.key}`}>
+                  <div className="group flex items-center gap-1 rounded-sm px-2 py-1 text-xs hover:bg-accent">
+                    <button
+                      type="button"
+                      className={cn(
+                        'flex flex-1 items-center gap-1.5 truncate text-left',
+                        isActive ? 'text-foreground font-medium' : 'text-muted-foreground hover:text-foreground',
+                      )}
+                      onClick={() => {
+                        if (f.type === 'folder') {
+                          onNavigate(f.key)
+                        } else {
+                          // Navigate to the file's parent directory
+                          const parentKey = f.key.replace(/[^/]*$/, '')
+                          onNavigate(parentKey)
+                        }
+                      }}
+                    >
+                      {f.type === 'folder' ? (
+                        <Folder className="size-3.5 shrink-0" />
+                      ) : (
+                        <File className="size-3.5 shrink-0" />
+                      )}
+                      <span className="truncate">{label}</span>
+                    </button>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      className="size-5 shrink-0 opacity-0 group-hover:opacity-100"
+                      aria-label={`Remove ${label} from favorites`}
+                      onClick={() => removeFavorite(f.storage, f.key)}
+                    >
+                      <Star className="size-3 fill-current" />
+                    </Button>
+                  </div>
+                </li>
+              )
+            })}
+          </ul>
+          <div className="mx-4 mb-1 h-px bg-border" />
+        </section>
+      )}
+
+      {/* Recent section */}
+      {validRecents.length > 0 && (
+        <section className="shrink-0">
+          <div className="mx-2 flex items-center gap-1 px-2 py-1.5">
+            <Clock className="size-3.5 text-muted-foreground" />
+            <span className="flex-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Recent
+            </span>
+          </div>
+          <ul className="px-2 pb-1">
+            {validRecents.map((r) => {
+              const label = basenameOf(r.key) || r.storage
+              return (
+                <li key={`${r.storage}::${r.key}::${r.visitedAt}`}>
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-1.5 truncate rounded-sm px-2 py-1 text-left text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+                    onClick={() => {
+                      if (r.type === 'folder') {
+                        onNavigate(r.key)
+                      } else {
+                        const parentKey = r.key.replace(/[^/]*$/, '')
+                        onNavigate(parentKey)
+                      }
+                    }}
+                  >
+                    {r.type === 'folder' ? (
+                      <Folder className="size-3.5 shrink-0" />
+                    ) : (
+                      <File className="size-3.5 shrink-0" />
+                    )}
+                    <span className="truncate">{label}</span>
+                  </button>
+                </li>
+              )
+            })}
+          </ul>
+          <div className="mx-4 mb-1 h-px bg-border" />
+        </section>
+      )}
+
+      {/* Folders tree */}
       <div className="mx-2 flex items-center gap-1 px-2 py-1.5">
         <span className="flex-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
           Folders

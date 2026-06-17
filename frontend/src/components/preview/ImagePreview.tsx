@@ -1,5 +1,5 @@
-import { useRef, useState } from 'react'
-import { Maximize, ZoomIn, ZoomOut } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { Expand, Maximize, RotateCw, Shrink, ZoomIn, ZoomOut } from 'lucide-react'
 
 import { thumbUrl } from '@/api/storage'
 import { Button } from '@/components/ui/button'
@@ -20,6 +20,7 @@ import { PreviewSpinner } from './PreviewSpinner'
 import type { PreviewerProps } from './types'
 
 type Zoom = 'fit' | number
+type Rotation = 0 | 90 | 180 | 270
 
 const ZOOM_STEP = 1.25
 const ZOOM_MIN = 0.05
@@ -33,7 +34,10 @@ export function ImagePreview({ fileKey, src, storage }: PreviewerProps) {
   // pixel count until the bytes have actually been rendered.
   const { data: meta } = useFileStat(fileKey, storage)
 
+  const containerRef = useRef<HTMLDivElement>(null)
   const [zoom, setZoom] = useState<Zoom>('fit')
+  const [rotation, setRotation] = useState<Rotation>(0)
+  const [isFullscreen, setIsFullscreen] = useState(false)
   const [natural, setNatural] = useState<{ w: number; h: number } | null>(null)
   const [loaded, setLoaded] = useState(false)
   // Progressive-loading placeholder state. `thumbLoaded` flips when the
@@ -54,6 +58,29 @@ export function ImagePreview({ fileKey, src, storage }: PreviewerProps) {
     setNatural(null)
     setThumbLoaded(false)
     setThumbErrored(false)
+    setRotation(0)
+  }
+
+  // Track fullscreen state via the browser's fullscreenchange event so the
+  // toolbar button icon stays in sync when the user exits via Esc.
+  useEffect(() => {
+    const onChange = () => {
+      setIsFullscreen(!!document.fullscreenElement)
+    }
+    document.addEventListener('fullscreenchange', onChange)
+    return () => document.removeEventListener('fullscreenchange', onChange)
+  }, [])
+
+  function rotateRight() {
+    setRotation((r) => (((r + 90) % 360) as Rotation))
+  }
+
+  function toggleFullscreen() {
+    if (!document.fullscreenElement) {
+      containerRef.current?.requestFullscreen().catch(() => {})
+    } else {
+      document.exitFullscreen().catch(() => {})
+    }
   }
 
   function zoomIn() {
@@ -93,9 +120,20 @@ export function ImagePreview({ fileKey, src, storage }: PreviewerProps) {
     e.preventDefault()
     setZoom((z) => clamp(typeof z === 'number' ? z / ZOOM_STEP : 1 / ZOOM_STEP))
   })
+  // r — rotate 90° clockwise
+  useGlobalShortcut('r', (e) => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return
+    e.preventDefault()
+    rotateRight()
+  })
+  // f — toggle fullscreen
+  useGlobalShortcut('f', (e) => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return
+    e.preventDefault()
+    toggleFullscreen()
+  })
 
   const isFit = zoom === 'fit'
-  const scale = typeof zoom === 'number' ? zoom : null
 
   // Decide whether to show a thumbnail placeholder while the full image loads.
   // Only worthwhile when:
@@ -173,8 +211,15 @@ export function ImagePreview({ fileKey, src, storage }: PreviewerProps) {
     }
   }
 
+  // Whether the image's logical width/height are swapped after rotation.
+  const isRotated90 = rotation === 90 || rotation === 270
+  const scale = typeof zoom === 'number' ? zoom : null
+
   return (
-    <div className="relative h-full w-full overflow-hidden rounded-md bg-muted/30">
+    <div
+      ref={containerRef}
+      className="relative h-full w-full overflow-hidden rounded-md bg-muted/30"
+    >
       {/* Spinner hides as soon as either the thumbnail or the full image is
           ready. When thumbnails are disabled/unsupported, `thumbLoaded` stays
           false and the condition degrades to the original `!loaded` behaviour. */}
@@ -221,6 +266,7 @@ export function ImagePreview({ fileKey, src, storage }: PreviewerProps) {
               'relative h-full w-full min-h-0 min-w-0 rounded-md object-contain transition-opacity duration-200',
               loaded ? 'opacity-100' : 'opacity-0',
             )}
+            style={rotation !== 0 ? { transform: `rotate(${rotation}deg)` } : undefined}
             draggable={false}
           />
         </div>
@@ -245,8 +291,14 @@ export function ImagePreview({ fileKey, src, storage }: PreviewerProps) {
               className="max-w-none rounded-md"
               style={
                 scale !== null && natural
-                  ? { width: natural.w * scale, height: natural.h * scale }
-                  : undefined
+                  ? {
+                      // Swap width/height at 90/270° so the allocated CSS box matches
+                      // the rotated image's visual orientation, then rotate in-place.
+                      width: (isRotated90 ? natural.h : natural.w) * scale,
+                      height: (isRotated90 ? natural.w : natural.h) * scale,
+                      transform: rotation !== 0 ? `rotate(${rotation}deg)` : undefined,
+                    }
+                  : rotation !== 0 ? { transform: `rotate(${rotation}deg)` } : undefined
               }
               draggable={false}
             />
@@ -311,6 +363,41 @@ export function ImagePreview({ fileKey, src, storage }: PreviewerProps) {
             {Math.round((scale ?? 1) * 100)}%
           </span>
         )}
+        <div className="mx-0.5 h-4 w-px bg-border" />
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant={rotation !== 0 ? 'secondary' : 'ghost'}
+              size="icon-sm"
+              onClick={rotateRight}
+              aria-label="Rotate 90° clockwise"
+            >
+              <RotateCw className="size-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            Rotate <Kbd>R</Kbd>
+          </TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant={isFullscreen ? 'secondary' : 'ghost'}
+              size="icon-sm"
+              onClick={toggleFullscreen}
+              aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+            >
+              {isFullscreen ? (
+                <Shrink className="size-4" />
+              ) : (
+                <Expand className="size-4" />
+              )}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            {isFullscreen ? 'Exit fullscreen' : 'Fullscreen'} <Kbd>F</Kbd>
+          </TooltipContent>
+        </Tooltip>
       </div>
 
       {/* Bottom-left metadata overlay — same chrome as the toolbar so the
