@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { Maximize, ZoomIn, ZoomOut } from 'lucide-react'
 
 import { thumbUrl } from '@/api/storage'
@@ -13,6 +13,8 @@ import { formatBytes } from '@/lib/format'
 import { extensionOf } from '@/lib/path'
 import { canThumbnail, PREVIEW_THUMB_MIN_BYTES } from '@/lib/thumbnail'
 import { cn } from '@/lib/utils'
+import { Kbd } from '@/components/ui/kbd'
+import { useGlobalShortcut } from '@/hooks/use-global-shortcut'
 
 import { PreviewSpinner } from './PreviewSpinner'
 import type { PreviewerProps } from './types'
@@ -65,34 +67,32 @@ export function ImagePreview({ fileKey, src, storage }: PreviewerProps) {
     )
   }
 
-  // Global keydown shortcuts: `+`/`=` to zoom in, `-`/`_` to zoom out. The
-  // listener lives only for this component's lifetime, so it's scoped to
-  // "while the image preview is open". `=` is the unshifted form of `+` on
-  // US/CN keyboards — typing `+` literally requires Shift, so accepting
-  // either keeps the shortcut single-stroke. Same trick for `-`/`_`.
-  // We skip when modifier keys are held (so the browser's own Ctrl/Cmd-+
-  // page zoom still works) and when focus is in an editable element.
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.metaKey || e.ctrlKey || e.altKey) return
-      const t = e.target as HTMLElement | null
-      if (
-        t &&
-        (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)
-      ) {
-        return
-      }
-      if (e.key === '+' || e.key === '=') {
-        e.preventDefault()
-        setZoom((z) => clamp(typeof z === 'number' ? z * ZOOM_STEP : ZOOM_STEP))
-      } else if (e.key === '-' || e.key === '_') {
-        e.preventDefault()
-        setZoom((z) => clamp(typeof z === 'number' ? z / ZOOM_STEP : 1 / ZOOM_STEP))
-      }
-    }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
-  }, [])
+  // `+`/`=` to zoom in, `-`/`_` to zoom out — active while this component is
+  // mounted (i.e. while an image preview is open). `=` is the unshifted `+`
+  // on US/CN keyboards; accepting either keeps the shortcut single-stroke.
+  // We intentionally skip when modifier keys are held so the browser's own
+  // Ctrl/Cmd-+ page zoom still works — the global registry's input-guard
+  // already excludes editable elements.
+  useGlobalShortcut('+', (e) => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return
+    e.preventDefault()
+    setZoom((z) => clamp(typeof z === 'number' ? z * ZOOM_STEP : ZOOM_STEP))
+  })
+  useGlobalShortcut('=', (e) => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return
+    e.preventDefault()
+    setZoom((z) => clamp(typeof z === 'number' ? z * ZOOM_STEP : ZOOM_STEP))
+  })
+  useGlobalShortcut('-', (e) => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return
+    e.preventDefault()
+    setZoom((z) => clamp(typeof z === 'number' ? z / ZOOM_STEP : 1 / ZOOM_STEP))
+  })
+  useGlobalShortcut('_', (e) => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return
+    e.preventDefault()
+    setZoom((z) => clamp(typeof z === 'number' ? z / ZOOM_STEP : 1 / ZOOM_STEP))
+  })
 
   const isFit = zoom === 'fit'
   const scale = typeof zoom === 'number' ? zoom : null
@@ -328,17 +328,6 @@ export function ImagePreview({ fileKey, src, storage }: PreviewerProps) {
         </span>
       </div>
     </div>
-  )
-}
-
-// Small keycap badge for shortcut hints inside Tooltip content. Inverse of
-// the tooltip surface (`bg-primary-foreground/20` on a `bg-primary` tooltip),
-// monospaced for visual alignment with the symbol it wraps.
-function Kbd({ children }: { children: React.ReactNode }) {
-  return (
-    <kbd className="ml-1 inline-flex h-4 min-w-4 items-center justify-center rounded border border-primary-foreground/30 bg-primary-foreground/15 px-1 font-mono text-[10px] leading-none">
-      {children}
-    </kbd>
   )
 }
 

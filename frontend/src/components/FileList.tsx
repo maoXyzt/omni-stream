@@ -51,6 +51,7 @@ import { cn } from '@/lib/utils'
 import { formatBytes, formatTime } from '@/lib/format'
 import { sortEntriesBy } from '@/lib/sort'
 import { BatchActionBar } from '@/components/BatchActionBar'
+import { ShortcutHelpDialog } from '@/components/ShortcutHelpDialog'
 import { EntryContextMenu } from '@/components/EntryContextMenu'
 import { EntryIcon } from '@/components/EntryIcon'
 import { NewFileDialog } from '@/components/NewFileDialog'
@@ -101,6 +102,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { useGlobalShortcut } from '@/hooks/use-global-shortcut'
 import { useSelection } from '@/hooks/use-selection'
 import type { FileEntry } from '@/types/storage'
 
@@ -878,68 +880,63 @@ export function FileList() {
   const splitView =
     viewMode === 'list' && isDesktop && previewState !== null
 
-  // Arrow-key nav + Esc-to-close for the split layout. The modal handles its
-  // own keys via Radix Dialog; this only fires when the inline preview is
-  // active. Skip when focus is in a control where keys are meaningful.
-  useEffect(() => {
-    if (!splitView) return
-    const handler = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement | null
-      if (target) {
-        const tag = target.tagName
-        if (
-          tag === 'INPUT' ||
-          tag === 'TEXTAREA' ||
-          tag === 'SELECT' ||
-          tag === 'VIDEO' ||
-          tag === 'AUDIO' ||
-          target.isContentEditable
-        ) {
-          return
-        }
-      }
-      if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
-        e.preventDefault()
-        navigatePreview('next')
-      } else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
-        e.preventDefault()
-        navigatePreview('prev')
-      } else if (e.key === 'Escape') {
-        e.preventDefault()
-        closePreview()
-      }
-    }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
-  }, [splitView, navigatePreview, closePreview])
+  // `?` help dialog state — mounted here so the shortcut is always active
+  // while FileList is rendered.
+  const [showHelp, setShowHelp] = useState(false)
 
-  // Backspace = up one directory. No-op at storage root. Skipped while a
-  // preview is open so Esc-to-close keeps priority, and skipped when focus is
-  // in an editable control where Backspace deletes characters.
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key !== 'Backspace') return
+  // ---------------------------------------------------------------------------
+  // Global keyboard shortcuts (via the shared single-listener registry).
+  // Previously four separate `window.addEventListener('keydown', …)` calls —
+  // now consolidated to eliminate duplicated input-guard code and ensure there
+  // is exactly one window listener for the whole app.
+  // ---------------------------------------------------------------------------
+
+  // `?` — open shortcut help (not '/' to avoid conflict with future search)
+  useGlobalShortcut('?', () => setShowHelp((v) => !v))
+
+  // Split-view arrow keys — navigate prev/next file. Active only while the
+  // inline split preview is open (modal handles its own nav).
+  useGlobalShortcut(
+    'arrowdown',
+    (e) => { e.preventDefault(); navigatePreview('next') },
+    { active: splitView, includeMedia: true },
+  )
+  useGlobalShortcut(
+    'arrowright',
+    (e) => { e.preventDefault(); navigatePreview('next') },
+    { active: splitView, includeMedia: true },
+  )
+  useGlobalShortcut(
+    'arrowup',
+    (e) => { e.preventDefault(); navigatePreview('prev') },
+    { active: splitView, includeMedia: true },
+  )
+  useGlobalShortcut(
+    'arrowleft',
+    (e) => { e.preventDefault(); navigatePreview('prev') },
+    { active: splitView, includeMedia: true },
+  )
+
+  // Esc — close split preview.
+  useGlobalShortcut(
+    'escape',
+    (e) => { e.preventDefault(); closePreview() },
+    { active: splitView },
+  )
+
+  // Backspace — go up one directory. No-op at storage root. Skipped when a
+  // preview is open (Esc-to-close takes priority) or when modifier keys are
+  // held (browser Back / Forward should work normally).
+  useGlobalShortcut(
+    'backspace',
+    (e) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return
-      const target = e.target as HTMLElement | null
-      if (target) {
-        const tag = target.tagName
-        if (
-          tag === 'INPUT' ||
-          tag === 'TEXTAREA' ||
-          tag === 'SELECT' ||
-          target.isContentEditable
-        ) {
-          return
-        }
-      }
       if (previewState) return
       if (!parentInfo) return
       e.preventDefault()
       goToPath(parentInfo.parent)
-    }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
-  }, [previewState, parentInfo, goToPath])
+    },
+  )
 
   // Scroll-to-top: the shell's main element is the scroll container (sidebar
   // and main scroll independently), so we listen on the ref rather than on
@@ -1270,6 +1267,11 @@ export function FileList() {
               onClose={() => setShowUpload(false)}
             />
           )}
+
+          <ShortcutHelpDialog
+            open={showHelp}
+            onClose={() => setShowHelp(false)}
+          />
 
           {listQuery.isError && (
             <ErrorState
