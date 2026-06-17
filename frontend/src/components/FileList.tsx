@@ -1731,33 +1731,47 @@ function GalleryRow({
 
   return (
     <EntryContextMenu entry={entry} storageName={storageName}>
-      <div className="flex items-center gap-1">
-        {selectable && (
-          <div
-            className={cn(
-              'shrink-0 pl-1 transition-opacity duration-150',
-              selectionChecked ? 'opacity-100' : 'opacity-0 hover:opacity-100 focus-within:opacity-100',
-            )}
-            onClick={(e) => {
-              e.stopPropagation()
-              onSelectionToggle(entry, e.shiftKey)
-            }}
-          >
+      {/* Outer row: highlight covers the full row width (including checkbox slot)
+          with a square edge, matching the FileRow/TableRow hover style. The
+          `group` class lets child elements react to hover/focus-visible on the
+          row via `group-hover:` and `group-has-[:focus-visible]:`. */}
+      <div
+        className={cn(
+          'group flex items-center text-sm transition-colors',
+          selected ? 'bg-accent text-accent-foreground' : 'hover:bg-muted/50',
+        )}
+      >
+        {/* Fixed-width checkbox slot — always rendered (even for dirs) so that
+            the icon column starts at the same left offset as in the full-width
+            TableRow (w-8 slot + px-2 button padding = 40 px, matching
+            TableHead w-8 + TableCell p-2). */}
+        <div
+          className="flex w-8 shrink-0 items-center pl-2"
+          onClick={(e) => {
+            if (!selectable) return
+            e.stopPropagation()
+            onSelectionToggle(entry, e.shiftKey)
+          }}
+        >
+          {selectable && (
             <Checkbox
               checked={selectionChecked ?? false}
               aria-label={`Select ${name}`}
+              className={cn(
+                'transition-opacity duration-150',
+                selectionChecked
+                  ? 'opacity-100'
+                  : 'opacity-0 group-hover:opacity-100 group-has-[:focus-visible]:opacity-100',
+              )}
             />
-          </div>
-        )}
+          )}
+        </div>
         <button
           ref={ref}
           type="button"
           onClick={() => onSelect(entry)}
           title={name}
-          className={cn(
-            'flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm',
-            selected ? 'bg-accent text-accent-foreground' : 'hover:bg-muted/50',
-          )}
+          className="flex min-w-0 flex-1 items-center gap-2 px-2 py-2 text-left"
         >
           <EntryIcon
             Icon={Icon}
