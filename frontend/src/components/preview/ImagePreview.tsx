@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Maximize, ZoomIn, ZoomOut } from 'lucide-react'
+import { Expand, Maximize, RotateCw, Shrink, ZoomIn, ZoomOut } from 'lucide-react'
 
 import { thumbUrl } from '@/api/storage'
 import { Button } from '@/components/ui/button'
@@ -13,11 +13,14 @@ import { formatBytes } from '@/lib/format'
 import { extensionOf } from '@/lib/path'
 import { canThumbnail, PREVIEW_THUMB_MIN_BYTES } from '@/lib/thumbnail'
 import { cn } from '@/lib/utils'
+import { Kbd } from '@/components/ui/kbd'
+import { useGlobalShortcut } from '@/hooks/use-global-shortcut'
 
 import { PreviewSpinner } from './PreviewSpinner'
 import type { PreviewerProps } from './types'
 
 type Zoom = 'fit' | number
+type Rotation = 0 | 90 | 180 | 270
 
 const ZOOM_STEP = 1.25
 const ZOOM_MIN = 0.05
@@ -31,7 +34,10 @@ export function ImagePreview({ fileKey, src, storage }: PreviewerProps) {
   // pixel count until the bytes have actually been rendered.
   const { data: meta } = useFileStat(fileKey, storage)
 
+  const containerRef = useRef<HTMLDivElement>(null)
   const [zoom, setZoom] = useState<Zoom>('fit')
+  const [rotation, setRotation] = useState<Rotation>(0)
+  const [isFullscreen, setIsFullscreen] = useState(false)
   const [natural, setNatural] = useState<{ w: number; h: number } | null>(null)
   const [loaded, setLoaded] = useState(false)
   // Progressive-loading placeholder state. `thumbLoaded` flips when the
@@ -52,6 +58,29 @@ export function ImagePreview({ fileKey, src, storage }: PreviewerProps) {
     setNatural(null)
     setThumbLoaded(false)
     setThumbErrored(false)
+    setRotation(0)
+  }
+
+  // Track fullscreen state via the browser's fullscreenchange event so the
+  // toolbar button icon stays in sync when the user exits via Esc.
+  useEffect(() => {
+    const onChange = () => {
+      setIsFullscreen(!!document.fullscreenElement)
+    }
+    document.addEventListener('fullscreenchange', onChange)
+    return () => document.removeEventListener('fullscreenchange', onChange)
+  }, [])
+
+  function rotateRight() {
+    setRotation((r) => (((r + 90) % 360) as Rotation))
+  }
+
+  function toggleFullscreen() {
+    if (!document.fullscreenElement) {
+      containerRef.current?.requestFullscreen().catch(() => {})
+    } else {
+      document.exitFullscreen().catch(() => {})
+    }
   }
 
   function zoomIn() {
@@ -65,37 +94,46 @@ export function ImagePreview({ fileKey, src, storage }: PreviewerProps) {
     )
   }
 
-  // Global keydown shortcuts: `+`/`=` to zoom in, `-`/`_` to zoom out. The
-  // listener lives only for this component's lifetime, so it's scoped to
-  // "while the image preview is open". `=` is the unshifted form of `+` on
-  // US/CN keyboards — typing `+` literally requires Shift, so accepting
-  // either keeps the shortcut single-stroke. Same trick for `-`/`_`.
-  // We skip when modifier keys are held (so the browser's own Ctrl/Cmd-+
-  // page zoom still works) and when focus is in an editable element.
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.metaKey || e.ctrlKey || e.altKey) return
-      const t = e.target as HTMLElement | null
-      if (
-        t &&
-        (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)
-      ) {
-        return
-      }
-      if (e.key === '+' || e.key === '=') {
-        e.preventDefault()
-        setZoom((z) => clamp(typeof z === 'number' ? z * ZOOM_STEP : ZOOM_STEP))
-      } else if (e.key === '-' || e.key === '_') {
-        e.preventDefault()
-        setZoom((z) => clamp(typeof z === 'number' ? z / ZOOM_STEP : 1 / ZOOM_STEP))
-      }
-    }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
-  }, [])
+  // `+`/`=` to zoom in, `-`/`_` to zoom out — active while this component is
+  // mounted (i.e. while an image preview is open). `=` is the unshifted `+`
+  // on US/CN keyboards; accepting either keeps the shortcut single-stroke.
+  // We intentionally skip when modifier keys are held so the browser's own
+  // Ctrl/Cmd-+ page zoom still works — the global registry's input-guard
+  // already excludes editable elements.
+  useGlobalShortcut('+', (e) => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return
+    e.preventDefault()
+    setZoom((z) => clamp(typeof z === 'number' ? z * ZOOM_STEP : ZOOM_STEP))
+  })
+  useGlobalShortcut('=', (e) => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return
+    e.preventDefault()
+    setZoom((z) => clamp(typeof z === 'number' ? z * ZOOM_STEP : ZOOM_STEP))
+  })
+  useGlobalShortcut('-', (e) => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return
+    e.preventDefault()
+    setZoom((z) => clamp(typeof z === 'number' ? z / ZOOM_STEP : 1 / ZOOM_STEP))
+  })
+  useGlobalShortcut('_', (e) => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return
+    e.preventDefault()
+    setZoom((z) => clamp(typeof z === 'number' ? z / ZOOM_STEP : 1 / ZOOM_STEP))
+  })
+  // r — rotate 90° clockwise
+  useGlobalShortcut('r', (e) => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return
+    e.preventDefault()
+    rotateRight()
+  })
+  // f — toggle fullscreen
+  useGlobalShortcut('f', (e) => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return
+    e.preventDefault()
+    toggleFullscreen()
+  })
 
   const isFit = zoom === 'fit'
-  const scale = typeof zoom === 'number' ? zoom : null
 
   // Decide whether to show a thumbnail placeholder while the full image loads.
   // Only worthwhile when:
@@ -173,8 +211,15 @@ export function ImagePreview({ fileKey, src, storage }: PreviewerProps) {
     }
   }
 
+  // Whether the image's logical width/height are swapped after rotation.
+  const isRotated90 = rotation === 90 || rotation === 270
+  const scale = typeof zoom === 'number' ? zoom : null
+
   return (
-    <div className="relative h-full w-full overflow-hidden rounded-md bg-muted/30">
+    <div
+      ref={containerRef}
+      className="relative h-full w-full overflow-hidden rounded-md bg-muted/30"
+    >
       {/* Spinner hides as soon as either the thumbnail or the full image is
           ready. When thumbnails are disabled/unsupported, `thumbLoaded` stays
           false and the condition degrades to the original `!loaded` behaviour. */}
@@ -221,6 +266,7 @@ export function ImagePreview({ fileKey, src, storage }: PreviewerProps) {
               'relative h-full w-full min-h-0 min-w-0 rounded-md object-contain transition-opacity duration-200',
               loaded ? 'opacity-100' : 'opacity-0',
             )}
+            style={rotation !== 0 ? { transform: `rotate(${rotation}deg)` } : undefined}
             draggable={false}
           />
         </div>
@@ -245,8 +291,14 @@ export function ImagePreview({ fileKey, src, storage }: PreviewerProps) {
               className="max-w-none rounded-md"
               style={
                 scale !== null && natural
-                  ? { width: natural.w * scale, height: natural.h * scale }
-                  : undefined
+                  ? {
+                      // Swap width/height at 90/270° so the allocated CSS box matches
+                      // the rotated image's visual orientation, then rotate in-place.
+                      width: (isRotated90 ? natural.h : natural.w) * scale,
+                      height: (isRotated90 ? natural.w : natural.h) * scale,
+                      transform: rotation !== 0 ? `rotate(${rotation}deg)` : undefined,
+                    }
+                  : rotation !== 0 ? { transform: `rotate(${rotation}deg)` } : undefined
               }
               draggable={false}
             />
@@ -311,6 +363,41 @@ export function ImagePreview({ fileKey, src, storage }: PreviewerProps) {
             {Math.round((scale ?? 1) * 100)}%
           </span>
         )}
+        <div className="mx-0.5 h-4 w-px bg-border" />
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant={rotation !== 0 ? 'secondary' : 'ghost'}
+              size="icon-sm"
+              onClick={rotateRight}
+              aria-label="Rotate 90° clockwise"
+            >
+              <RotateCw className="size-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            Rotate <Kbd>R</Kbd>
+          </TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant={isFullscreen ? 'secondary' : 'ghost'}
+              size="icon-sm"
+              onClick={toggleFullscreen}
+              aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+            >
+              {isFullscreen ? (
+                <Shrink className="size-4" />
+              ) : (
+                <Expand className="size-4" />
+              )}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            {isFullscreen ? 'Exit fullscreen' : 'Fullscreen'} <Kbd>F</Kbd>
+          </TooltipContent>
+        </Tooltip>
       </div>
 
       {/* Bottom-left metadata overlay — same chrome as the toolbar so the
@@ -328,17 +415,6 @@ export function ImagePreview({ fileKey, src, storage }: PreviewerProps) {
         </span>
       </div>
     </div>
-  )
-}
-
-// Small keycap badge for shortcut hints inside Tooltip content. Inverse of
-// the tooltip surface (`bg-primary-foreground/20` on a `bg-primary` tooltip),
-// monospaced for visual alignment with the symbol it wraps.
-function Kbd({ children }: { children: React.ReactNode }) {
-  return (
-    <kbd className="ml-1 inline-flex h-4 min-w-4 items-center justify-center rounded border border-primary-foreground/30 bg-primary-foreground/15 px-1 font-mono text-[10px] leading-none">
-      {children}
-    </kbd>
   )
 }
 

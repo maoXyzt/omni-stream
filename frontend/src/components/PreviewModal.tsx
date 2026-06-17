@@ -1,7 +1,7 @@
-import { useEffect } from 'react'
 import { Download, ExternalLink } from 'lucide-react'
 
 import { proxyUrl } from '@/api/storage'
+import { useGlobalShortcut } from '@/hooks/use-global-shortcut'
 import { getPreviewType } from '@/components/preview/registry'
 import type { PreviewKind } from '@/components/preview/types'
 import { Button } from '@/components/ui/button'
@@ -41,40 +41,31 @@ export function PreviewModal({
   const type = getPreviewType(kind)
   const Previewer = type?.Component
 
-  useEffect(() => {
-    if (!onNavigate) return
-    const handler = (e: KeyboardEvent) => {
-      // Don't hijack arrow keys when the user is typing or interacting with a
-      // form field; video/audio controls also handle arrows for volume and
-      // scrubbing so skip when a media element is focused.
-      const target = e.target as HTMLElement | null
-      if (target) {
-        const tag = target.tagName
-        if (
-          tag === 'INPUT' ||
-          tag === 'TEXTAREA' ||
-          tag === 'SELECT' ||
-          tag === 'VIDEO' ||
-          tag === 'AUDIO' ||
-          target.isContentEditable
-        ) {
-          return
-        }
-      }
-      // Both axes navigate: up/down match the list view's vertical flow, and
-      // left/right match the grid view's horizontal tile layout. Mapping all
-      // four lets muscle memory carry over either way.
-      if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
-        e.preventDefault()
-        onNavigate('next')
-      } else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
-        e.preventDefault()
-        onNavigate('prev')
-      }
-    }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
-  }, [onNavigate])
+  // Arrow-key navigation between files — active only when an `onNavigate`
+  // callback is wired. Both axes work: up/down match the list view's vertical
+  // flow; left/right match the grid's horizontal tile layout. Video/audio
+  // elements use arrow keys for scrubbing/volume, so we skip when they're
+  // focused (includeMedia guard).
+  useGlobalShortcut(
+    'arrowdown',
+    (e) => { e.preventDefault(); onNavigate?.('next') },
+    { active: !!onNavigate, includeMedia: true },
+  )
+  useGlobalShortcut(
+    'arrowright',
+    (e) => { e.preventDefault(); onNavigate?.('next') },
+    { active: !!onNavigate, includeMedia: true },
+  )
+  useGlobalShortcut(
+    'arrowup',
+    (e) => { e.preventDefault(); onNavigate?.('prev') },
+    { active: !!onNavigate, includeMedia: true },
+  )
+  useGlobalShortcut(
+    'arrowleft',
+    (e) => { e.preventDefault(); onNavigate?.('prev') },
+    { active: !!onNavigate, includeMedia: true },
+  )
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>

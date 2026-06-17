@@ -10,13 +10,16 @@ import {
 } from 'react-router-dom'
 import {
   AlertCircle,
-  ArrowDownAZ,
-  ArrowDownZA,
+  ArrowDown,
   ArrowUp,
   Check,
   ChevronLeft,
   ChevronRight,
+  ChevronsUpDown,
+  Download,
+  ExternalLink,
   FilePlus,
+  FolderPlus,
   KeyRound,
   Loader2,
   LogOut,
@@ -44,16 +47,18 @@ import {
 import { useMediaQuery } from '@/hooks/use-media-query'
 import { useResizableWidth } from '@/hooks/use-resizable-width'
 import { useSidebarCollapsed } from '@/hooks/use-sidebar-collapsed'
-import { useSortDir } from '@/hooks/use-sort-dir'
+import { useSortDir, useSortField } from '@/hooks/use-sort-dir'
 import { useGridFit } from '@/hooks/use-grid-fit'
 import { useViewMode, type ViewMode } from '@/hooks/use-view-mode'
 import { cn } from '@/lib/utils'
 import { formatBytes, formatTime } from '@/lib/format'
-import { sortEntries } from '@/lib/sort'
+import { sortEntriesBy } from '@/lib/sort'
 import { BatchActionBar } from '@/components/BatchActionBar'
+import { ShortcutHelpDialog } from '@/components/ShortcutHelpDialog'
 import { EntryContextMenu } from '@/components/EntryContextMenu'
 import { EntryIcon } from '@/components/EntryIcon'
 import { NewFileDialog } from '@/components/NewFileDialog'
+import { NewFolderDialog } from '@/components/NewFolderDialog'
 import { UploadDialog } from '@/components/UploadDialog'
 import { FileGrid } from '@/components/FileGrid'
 import { PathBreadcrumb } from '@/components/PathBreadcrumb'
@@ -75,6 +80,16 @@ import { GridFitToggle } from '@/components/GridFitToggle'
 import { ViewToggle } from '@/components/ViewToggle'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
@@ -91,6 +106,8 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { useGlobalShortcut } from '@/hooks/use-global-shortcut'
+import { useRecents } from '@/hooks/use-recents'
 import { useSelection } from '@/hooks/use-selection'
 import type { FileEntry } from '@/types/storage'
 
@@ -140,6 +157,8 @@ export function FileList() {
   const [showTokenPrompt, setShowTokenPrompt] = useState(false)
   // Toggles the "New file" creation dialog (only shown for writeable storages).
   const [showNewFile, setShowNewFile] = useState(false)
+  // Toggles the "New folder" creation dialog (only shown for writeable storages).
+  const [showNewFolder, setShowNewFolder] = useState(false)
   // Toggles the upload dialog (only shown for writeable storages).
   const [showUpload, setShowUpload] = useState(false)
   const activeStorage = useMemo(
@@ -201,6 +220,8 @@ export function FileList() {
   // room. Below `md` we keep the full-width list and fall back to the modal.
   const isDesktop = useMediaQuery('(min-width: 768px)')
   const [sortDir, setSortDir] = useSortDir()
+  const [sortField, setSortField] = useSortField()
+  const { record: recordRecent } = useRecents()
   const [sidebarCollapsed, setSidebarCollapsed] = useSidebarCollapsed()
   // Left-column width for the split layout — draggable, persisted per-user.
   // Bounds tuned so the filter+pager row sits comfortably:
@@ -566,8 +587,12 @@ export function FileList() {
           ? `?${VIEW_PARAM}=${urlViewParamRef.current}`
           : '',
       })
+      // Record folder visit in recents — only settled navigations (not every
+      // keystroke in PathNavigator). Root (empty prefix) is intentionally
+      // included as a valid recent so users can jump back to a storage root.
+      if (storageName) recordRecent(storageName, clean, 'folder')
     },
-    [navigate, storageName],
+    [navigate, storageName, recordRecent],
   )
 
   // "Go to path" target may be a file rather than a directory. `goToPath`
@@ -644,8 +669,10 @@ export function FileList() {
         pathname: `/s/${encodeURIComponent(name)}/`,
         search: isValidViewMode(vp) ? `?${VIEW_PARAM}=${vp}` : '',
       })
+      // Record the storage root as a folder visit.
+      recordRecent(name, '', 'folder')
     },
-    [navigate, storageName],
+    [navigate, storageName, recordRecent],
   )
 
   const openPreview = useCallback(
@@ -659,8 +686,12 @@ export function FileList() {
         },
         { replace: false },
       )
+      // Record file visit in recents so the sidebar Recent section can surface it.
+      if (storageName && !entry.is_dir) {
+        recordRecent(storageName, entry.key, 'file')
+      }
     },
-    [prefix, setSearchParams],
+    [prefix, setSearchParams, storageName, recordRecent],
   )
 
   const closePreview = useCallback(() => {
@@ -675,8 +706,11 @@ export function FileList() {
   }, [setSearchParams])
 
   const sortedEntries = useMemo(
-    () => (listQuery.data ? sortEntries(listQuery.data.entries, sortDir) : []),
-    [listQuery.data, sortDir],
+    () =>
+      listQuery.data
+        ? sortEntriesBy(listQuery.data.entries, sortField, sortDir)
+        : [],
+    [listQuery.data, sortField, sortDir],
   )
 
   const filteredEntries = useMemo(() => {
@@ -864,68 +898,63 @@ export function FileList() {
   const splitView =
     viewMode === 'list' && isDesktop && previewState !== null
 
-  // Arrow-key nav + Esc-to-close for the split layout. The modal handles its
-  // own keys via Radix Dialog; this only fires when the inline preview is
-  // active. Skip when focus is in a control where keys are meaningful.
-  useEffect(() => {
-    if (!splitView) return
-    const handler = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement | null
-      if (target) {
-        const tag = target.tagName
-        if (
-          tag === 'INPUT' ||
-          tag === 'TEXTAREA' ||
-          tag === 'SELECT' ||
-          tag === 'VIDEO' ||
-          tag === 'AUDIO' ||
-          target.isContentEditable
-        ) {
-          return
-        }
-      }
-      if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
-        e.preventDefault()
-        navigatePreview('next')
-      } else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
-        e.preventDefault()
-        navigatePreview('prev')
-      } else if (e.key === 'Escape') {
-        e.preventDefault()
-        closePreview()
-      }
-    }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
-  }, [splitView, navigatePreview, closePreview])
+  // `?` help dialog state — mounted here so the shortcut is always active
+  // while FileList is rendered.
+  const [showHelp, setShowHelp] = useState(false)
 
-  // Backspace = up one directory. No-op at storage root. Skipped while a
-  // preview is open so Esc-to-close keeps priority, and skipped when focus is
-  // in an editable control where Backspace deletes characters.
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key !== 'Backspace') return
+  // ---------------------------------------------------------------------------
+  // Global keyboard shortcuts (via the shared single-listener registry).
+  // Previously four separate `window.addEventListener('keydown', …)` calls —
+  // now consolidated to eliminate duplicated input-guard code and ensure there
+  // is exactly one window listener for the whole app.
+  // ---------------------------------------------------------------------------
+
+  // `?` — open shortcut help (not '/' to avoid conflict with future search)
+  useGlobalShortcut('?', () => setShowHelp((v) => !v))
+
+  // Split-view arrow keys — navigate prev/next file. Active only while the
+  // inline split preview is open (modal handles its own nav).
+  useGlobalShortcut(
+    'arrowdown',
+    (e) => { e.preventDefault(); navigatePreview('next') },
+    { active: splitView, includeMedia: true },
+  )
+  useGlobalShortcut(
+    'arrowright',
+    (e) => { e.preventDefault(); navigatePreview('next') },
+    { active: splitView, includeMedia: true },
+  )
+  useGlobalShortcut(
+    'arrowup',
+    (e) => { e.preventDefault(); navigatePreview('prev') },
+    { active: splitView, includeMedia: true },
+  )
+  useGlobalShortcut(
+    'arrowleft',
+    (e) => { e.preventDefault(); navigatePreview('prev') },
+    { active: splitView, includeMedia: true },
+  )
+
+  // Esc — close split preview.
+  useGlobalShortcut(
+    'escape',
+    (e) => { e.preventDefault(); closePreview() },
+    { active: splitView },
+  )
+
+  // Backspace — go up one directory. No-op at storage root. Skipped when a
+  // preview is open (Esc-to-close takes priority) or when modifier keys are
+  // held (browser Back / Forward should work normally).
+  useGlobalShortcut(
+    'backspace',
+    (e) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return
-      const target = e.target as HTMLElement | null
-      if (target) {
-        const tag = target.tagName
-        if (
-          tag === 'INPUT' ||
-          tag === 'TEXTAREA' ||
-          tag === 'SELECT' ||
-          target.isContentEditable
-        ) {
-          return
-        }
-      }
       if (previewState) return
       if (!parentInfo) return
       e.preventDefault()
       goToPath(parentInfo.parent)
-    }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
-  }, [previewState, parentInfo, goToPath])
+    },
+  )
 
   // Scroll-to-top: the shell's main element is the scroll container (sidebar
   // and main scroll independently), so we listen on the ref rather than on
@@ -983,8 +1012,6 @@ export function FileList() {
   function prevPage() {
     gotoPage(currentPage - 1)
   }
-
-  const toggleMainSort = () => setSortDir(sortDir === 'asc' ? 'desc' : 'asc')
 
   return (
     <div className="flex h-screen w-full flex-col">
@@ -1080,28 +1107,56 @@ export function FileList() {
               <PathNavigator prefix={prefix} activeStorage={activeStorage} onNavigate={goToPathOrFile} />
             </div>
             <div className="flex shrink-0 items-center gap-2">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    aria-label={sortDir === 'asc' ? 'Sort descending' : 'Sort ascending'}
-                    aria-pressed={sortDir === 'desc'}
-                    onClick={toggleMainSort}
+              {/* Sort dropdown — field selector (name/size/mtime/type) and
+                  direction toggle. The dropdown is compact so it doesn't
+                  crowd the toolbar on narrow viewports. */}
+              <DropdownMenu>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        aria-label={`Sort by ${sortField}, ${sortDir === 'asc' ? 'ascending' : 'descending'}`}
+                        className="gap-1"
+                      >
+                        <ChevronsUpDown className="size-3.5 text-muted-foreground" />
+                        <span className="hidden sm:inline text-xs capitalize">{sortField}</span>
+                        {sortDir === 'asc' ? (
+                          <ArrowDown className="size-3 text-muted-foreground" aria-hidden />
+                        ) : (
+                          <ArrowUp className="size-3 text-muted-foreground" aria-hidden />
+                        )}
+                      </Button>
+                    </DropdownMenuTrigger>
+                  </TooltipTrigger>
+                  <TooltipContent>Sort listing</TooltipContent>
+                </Tooltip>
+                <DropdownMenuContent align="end" className="w-40">
+                  <DropdownMenuLabel className="text-xs">Sort by</DropdownMenuLabel>
+                  <DropdownMenuRadioGroup
+                    value={sortField}
+                    onValueChange={(v) => setSortField(v as typeof sortField)}
+                  >
+                    <DropdownMenuRadioItem value="name">Name</DropdownMenuRadioItem>
+                    <DropdownMenuRadioItem value="size">Size</DropdownMenuRadioItem>
+                    <DropdownMenuRadioItem value="mtime">Modified</DropdownMenuRadioItem>
+                    <DropdownMenuRadioItem value="type">Type</DropdownMenuRadioItem>
+                  </DropdownMenuRadioGroup>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onClick={() => setSortDir(sortDir === 'asc' ? 'desc' : 'asc')}
+                    className="gap-2"
                   >
                     {sortDir === 'asc' ? (
-                      <ArrowDownAZ className="size-4" />
+                      <ArrowDown className="size-3.5" />
                     ) : (
-                      <ArrowDownZA className="size-4" />
+                      <ArrowUp className="size-3.5" />
                     )}
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  {sortDir === 'asc'
-                    ? 'Sort A→Z (click to flip to Z→A)'
-                    : 'Sort Z→A (click to flip to A→Z)'}
-                </TooltipContent>
-              </Tooltip>
+                    {sortDir === 'asc' ? 'Ascending' : 'Descending'}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
@@ -1132,6 +1187,19 @@ export function FileList() {
               </Tooltip>
               {canWrite && (
                 <>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        aria-label="New folder"
+                        onClick={() => setShowNewFolder(true)}
+                      >
+                        <FolderPlus className="size-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Create a new folder here</TooltipContent>
+                  </Tooltip>
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <Button
@@ -1215,6 +1283,14 @@ export function FileList() {
             />
           )}
 
+          {showNewFolder && storageName && (
+            <NewFolderDialog
+              storage={storageName}
+              prefix={prefix}
+              onClose={() => setShowNewFolder(false)}
+            />
+          )}
+
           {showNewFile && storageName && (
             <NewFileDialog
               storage={storageName}
@@ -1230,6 +1306,11 @@ export function FileList() {
               onClose={() => setShowUpload(false)}
             />
           )}
+
+          <ShortcutHelpDialog
+            open={showHelp}
+            onClose={() => setShowHelp(false)}
+          />
 
           {listQuery.isError && (
             <ErrorState
@@ -1349,11 +1430,45 @@ export function FileList() {
                   <TooltipContent>Close preview (Esc)</TooltipContent>
                 </Tooltip>
                 <span
-                  className="truncate text-sm text-muted-foreground"
+                  className="min-w-0 flex-1 truncate text-sm text-muted-foreground"
                   title={previewState!.key}
                 >
                   {previewState!.key}
                 </span>
+                <div className="flex shrink-0 items-center gap-1">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label="Open in new tab"
+                        onClick={() => {
+                          window.open(
+                            proxyUrl(previewState!.key, storageName || undefined),
+                            '_blank',
+                            'noreferrer',
+                          )
+                        }}
+                      >
+                        <ExternalLink className="size-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Open in new tab</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <a
+                        href={proxyUrl(previewState!.key, storageName || undefined)}
+                        download={basenameOf(previewState!.key)}
+                        className="inline-flex size-7 items-center justify-center rounded-[min(var(--radius-md),12px)] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        aria-label="Download"
+                      >
+                        <Download className="size-4" />
+                      </a>
+                    </TooltipTrigger>
+                    <TooltipContent>Download</TooltipContent>
+                  </Tooltip>
+                </div>
               </div>
               <InlinePreview
                 fileKey={previewState!.key}
