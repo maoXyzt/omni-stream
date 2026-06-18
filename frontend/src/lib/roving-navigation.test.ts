@@ -41,6 +41,18 @@ describe('roving navigation guards', () => {
     expect(getRovingStep('list', 'right', 4)).toBeNull()
   })
 
+  it('steps by column count for vertical movement in grid view', () => {
+    expect(getRovingStep('grid', 'down', 3)).toBe(3)
+    expect(getRovingStep('grid', 'up', 3)).toBe(-3)
+    expect(getRovingStep('grid', 'right', 3)).toBe(1)
+    expect(getRovingStep('grid', 'left', 3)).toBe(-1)
+  })
+
+  it('collapses to ±1 when grid has a single column', () => {
+    expect(getRovingStep('grid', 'down', 1)).toBe(1)
+    expect(getRovingStep('grid', 'up', 1)).toBe(-1)
+  })
+
   it('activates rows with Enter or Space only when the row itself has focus', () => {
     const row = { id: 'row' }
     const checkbox = { id: 'checkbox' }
