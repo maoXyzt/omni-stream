@@ -5,6 +5,7 @@ import { fuzzyRank } from '@/lib/fuzzy'
 import type { CommandItem } from '@/hooks/use-command-items'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { cn } from '@/lib/utils'
 
 interface Props {
   open: boolean
@@ -12,9 +13,15 @@ interface Props {
   items: CommandItem[]
 }
 
-// Stable item id used for aria-activedescendant.
+// Stable item id used for aria-activedescendant. Characters outside
+// [A-Za-z0-9_-] are percent-encoded (like URL encoding but with 'x' prefix)
+// so that different input ids always map to different DOM ids.
 function optionId(id: string) {
-  return `cp-option-${id.replace(/[^a-z0-9]/gi, '-')}`
+  const sanitized = id.replace(/[^A-Za-z0-9_-]/g, (ch) => {
+    const code = ch.codePointAt(0)?.toString(16) ?? '0'
+    return `x${code}`
+  })
+  return `cp-option-${sanitized}`
 }
 
 export function CommandPalette({ open, onClose, items }: Props) {
@@ -34,13 +41,22 @@ export function CommandPalette({ open, onClose, items }: Props) {
   // Fuzzy-ranked flat result list.
   const results = useMemo(() => {
     return fuzzyRank(query, items, (item) =>
-      [item.label, item.keywords ?? ''].join(' '),
+      item.keywords ? `${item.label} ${item.keywords}` : item.label,
     ).map((r) => r.item)
   }, [query, items])
 
-  // Clamp activeIndex whenever results length changes.
-  const clampedIndex = results.length === 0 ? 0 : Math.min(activeIndex, results.length - 1)
-  if (clampedIndex !== activeIndex) setActiveIndex(clampedIndex)
+  // Clamp activeIndex whenever results shrink (e.g. user narrows query).
+  // Done in an effect to avoid calling setState during render.
+  useEffect(() => {
+    if (results.length === 0) {
+      setActiveIndex(0)
+    } else {
+      setActiveIndex((i) => Math.min(i, results.length - 1))
+    }
+  }, [results.length])
+
+  // Safe read of active index for rendering (never out of bounds).
+  const safeIndex = results.length === 0 ? 0 : Math.min(activeIndex, results.length - 1)
 
   // Group results while preserving their ranked order.
   const groups = useMemo(() => {
@@ -58,13 +74,14 @@ export function CommandPalette({ open, onClose, items }: Props) {
   // Scroll the active option into view.
   useEffect(() => {
     if (!open || results.length === 0) return
-    const active = results[clampedIndex]
+    const active = results[safeIndex]
     if (!active) return
     const el = listRef.current?.querySelector(`#${optionId(active.id)}`)
     el?.scrollIntoView({ block: 'nearest' })
-  }, [clampedIndex, open, results])
+  }, [safeIndex, open, results])
 
   function handleKeyDown(e: React.KeyboardEvent) {
+    if (results.length === 0) return
     if (e.key === 'ArrowDown') {
       e.preventDefault()
       setActiveIndex((i) => Math.min(i + 1, results.length - 1))
@@ -79,7 +96,7 @@ export function CommandPalette({ open, onClose, items }: Props) {
       setActiveIndex(results.length - 1)
     } else if (e.key === 'Enter') {
       e.preventDefault()
-      const item = results[clampedIndex]
+      const item = results[safeIndex]
       if (item) {
         item.perform()
         onClose()
@@ -87,7 +104,7 @@ export function CommandPalette({ open, onClose, items }: Props) {
     }
   }
 
-  const activeItem = results[clampedIndex]
+  const activeItem = results[safeIndex]
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
@@ -147,12 +164,12 @@ export function CommandPalette({ open, onClose, items }: Props) {
                       id={optionId(item.id)}
                       role="option"
                       aria-selected={isActive}
-                      className={[
-                        'flex cursor-pointer items-center justify-between gap-3 rounded-sm mx-1 px-2 py-1.5 text-sm',
+                      className={cn(
+                        'mx-1 flex cursor-pointer items-center justify-between gap-3 rounded-sm px-2 py-1.5 text-sm',
                         isActive
                           ? 'bg-accent text-accent-foreground'
                           : 'text-foreground hover:bg-accent/50',
-                      ].join(' ')}
+                      )}
                       onPointerDown={(e) => {
                         // Use pointerDown so the input doesn't lose focus on click.
                         e.preventDefault()

@@ -37,6 +37,15 @@ export interface CommandItem {
   perform: () => void
 }
 
+// Static constants — defined at module scope to avoid recreation inside useMemo.
+const SORT_FIELDS: SortField[] = ['name', 'size', 'mtime', 'type']
+const SORT_LABELS: Record<SortField, string> = {
+  name: 'Name',
+  size: 'Size',
+  mtime: 'Modified',
+  type: 'Type',
+}
+
 interface Config {
   // Context
   storageName: string
@@ -143,13 +152,7 @@ export function useCommandItems(config: Config): CommandItem[] {
     })
 
     // Sort-by commands.
-    const SORT_LABELS: Record<SortField, string> = {
-      name: 'Name',
-      size: 'Size',
-      mtime: 'Modified',
-      type: 'Type',
-    };
-    (['name', 'size', 'mtime', 'type'] as SortField[]).forEach((field) => {
+    SORT_FIELDS.forEach((field) => {
       if (field !== sortField) {
         items.push({
           id: `cmd-sort-${field}`,

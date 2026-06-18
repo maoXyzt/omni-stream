@@ -1033,7 +1033,10 @@ export function FileList() {
     viewMode,
     sortField,
     sortDir,
-    entries: filteredEntries,
+    // Use sortedEntries (not filteredEntries) so the palette's "On this page"
+    // group searches across the full loaded page regardless of any active
+    // name/type filter in FilterBar.
+    entries: sortedEntries,
     goToPath,
     switchStorage,
     openPreview,
