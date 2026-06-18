@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
@@ -7,6 +7,8 @@ import {
   ArrowDown,
   BookText,
   Check,
+  ChevronDown,
+  ChevronUp,
   Code,
   Copy,
   Download,
@@ -17,6 +19,7 @@ import {
   Pencil,
   RotateCw,
   Save,
+  Search,
   X,
 } from 'lucide-react'
 
@@ -24,6 +27,7 @@ import { Editor } from '@/lib/code-editor'
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import {
   Dialog,
   DialogContent,
@@ -44,6 +48,7 @@ import { putFile } from '@/api/files'
 import { extractErrorDetail, type ErrorDetail } from '@/lib/api-error'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { TokenPrompt } from '@/components/TokenPrompt'
+import { useGlobalShortcut } from '@/hooks/use-global-shortcut'
 import { useLineNumbers } from '@/hooks/use-line-numbers'
 import { useRowsViewHint } from '@/hooks/use-rows-view-hint'
 import { useServerInfo, useStorages } from '@/hooks/use-storage'
@@ -103,8 +108,39 @@ function loadAllSeverityFor(remainingBytes: number | null): LoadAllSeverity {
   return 'light'
 }
 
+interface MatchRange { line: number; start: number; end: number }
+
+function renderLineWithMarks(
+  raw: string,
+  ranges: MatchRange[],
+  activeIdx: number,
+): React.ReactNode[] {
+  const nodes: React.ReactNode[] = []
+  let pos = 0
+  for (let ri = 0; ri < ranges.length; ri++) {
+    const { start, end } = ranges[ri]
+    if (start > pos) nodes.push(raw.slice(pos, start))
+    nodes.push(
+      <mark
+        key={ri}
+        className={
+          ri === activeIdx
+            ? 'rounded bg-amber-400 ring-1 ring-amber-500'
+            : 'rounded bg-amber-200 dark:bg-amber-800'
+        }
+      >
+        {raw.slice(start, end)}
+      </mark>,
+    )
+    pos = end
+  }
+  if (pos < raw.length) nodes.push(raw.slice(pos))
+  return nodes
+}
+
 export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
   const navigate = useNavigate()
+  const { hash } = useLocation()
   const [searchParams] = useSearchParams()
 
   // True for .md / .markdown — these get a Raw/Rendered toggle defaulting to
@@ -374,6 +410,78 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
   // Persistent UI preference — the gutter is on by default (matches every
   // editor), and the toggle survives modal close + reload via localStorage.
   const [showLineNumbers, setShowLineNumbers] = useLineNumbers()
+
+  // --- Find bar (Cmd+F) ---------------------------------------------------
+
+  const [findOpen, setFindOpen] = useState(false)
+  const [findQuery, setFindQuery] = useState('')
+  const [activeMatch, setActiveMatch] = useState(0)
+  const findInputRef = useRef<HTMLInputElement>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
+
+  // Highlighted line from #L<n> hash deep-link.
+  const [deepLine, setDeepLine] = useState<number | null>(null)
+
+  const matches = useMemo<MatchRange[]>(() => {
+    if (!findQuery) return []
+    const lower = findQuery.toLowerCase()
+    const result: MatchRange[] = []
+    for (let i = 0; i < lines.length; i++) {
+      const lineLower = lines[i].toLowerCase()
+      let pos = 0
+      while (true) {
+        const idx = lineLower.indexOf(lower, pos)
+        if (idx === -1) break
+        result.push({ line: i, start: idx, end: idx + lower.length })
+        pos = idx + lower.length
+      }
+    }
+    return result
+  }, [lines, findQuery])
+
+  // Clamp activeMatch when match count changes (via effect, not render phase).
+  useEffect(() => {
+    if (matches.length === 0) {
+      setActiveMatch(0)
+    } else {
+      setActiveMatch((prev) => Math.min(prev, matches.length - 1))
+    }
+  }, [matches.length])
+
+  // Scroll to the active match.
+  useEffect(() => {
+    if (matches.length === 0 || !scrollRef.current) return
+    const m = matches[activeMatch]
+    if (!m) return
+    scrollRef.current
+      .querySelector(`[data-line="${m.line + 1}"]`)
+      ?.scrollIntoView({ block: 'nearest' })
+  }, [activeMatch, matches])
+
+  // Hash deep-link: #L<n> → scroll and highlight target line.
+  useEffect(() => {
+    const match = /^#L(\d+)$/.exec(hash)
+    if (!match) return
+    const n = parseInt(match[1], 10)
+    if (n < 1 || n > lines.length) return
+    scrollRef.current
+      ?.querySelector(`[data-line="${n}"]`)
+      ?.scrollIntoView({ block: 'center' })
+    setDeepLine(n)
+    const timer = setTimeout(() => setDeepLine(null), 2000)
+    return () => clearTimeout(timer)
+  }, [hash, lines.length])
+
+  // Cmd+F opens the find bar (also works when find input already has focus).
+  useGlobalShortcut(
+    'mod+f',
+    (e) => {
+      e.preventDefault()
+      setFindOpen(true)
+      requestAnimationFrame(() => findInputRef.current?.select())
+    },
+    { allowInEditable: true },
+  )
 
   // Copy the lines currently visible (excludes the trailing partial line while
   // more bytes are pending — see `lines` memo above).
@@ -817,22 +925,150 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
           // + content (`whitespace-pre-wrap break-words` so long lines wrap
           // inside their column without misaligning the gutter). The outer
           // `hljs` class still picks up the theme's background and palette.
-          <div className="hljs h-full w-full overflow-auto p-4 font-mono text-xs leading-relaxed">
+          <div
+            ref={scrollRef}
+            className="hljs h-full w-full overflow-auto p-4 font-mono text-xs leading-relaxed"
+          >
+            {/* Find bar — floats top-right of scroll container */}
+            {findOpen && (
+              <div className="sticky top-0 z-10 float-right ml-2 mb-2 flex items-center gap-1 rounded-md border bg-background p-1 shadow-lg">
+                <Search className="ml-1 size-3.5 shrink-0 text-muted-foreground" />
+                <Input
+                  ref={findInputRef}
+                  value={findQuery}
+                  onChange={(e) => {
+                    setFindQuery(e.target.value)
+                    setActiveMatch(0)
+                  }}
+                  placeholder="Find…"
+                  className="h-6 w-40 border-0 p-0 px-1 text-xs shadow-none focus-visible:ring-0"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault()
+                      setActiveMatch((prev) =>
+                        matches.length ? (prev + 1) % matches.length : 0,
+                      )
+                    } else if (e.key === 'Enter' && e.shiftKey) {
+                      e.preventDefault()
+                      setActiveMatch((prev) =>
+                        matches.length
+                          ? (prev - 1 + matches.length) % matches.length
+                          : 0,
+                      )
+                    } else if (e.key === 'Escape') {
+                      e.stopPropagation()
+                      e.preventDefault()
+                      setFindOpen(false)
+                    }
+                  }}
+                />
+                <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
+                  {matches.length === 0 && findQuery
+                    ? 'No results'
+                    : matches.length > 0
+                      ? `${activeMatch + 1} / ${matches.length}`
+                      : ''}
+                </span>
+                <button
+                  type="button"
+                  aria-label="Previous match"
+                  className="rounded p-0.5 hover:bg-muted disabled:opacity-40"
+                  disabled={matches.length === 0}
+                  onClick={() =>
+                    setActiveMatch((prev) =>
+                      matches.length
+                        ? (prev - 1 + matches.length) % matches.length
+                        : 0,
+                    )
+                  }
+                >
+                  <ChevronUp className="size-3.5" />
+                </button>
+                <button
+                  type="button"
+                  aria-label="Next match"
+                  className="rounded p-0.5 hover:bg-muted disabled:opacity-40"
+                  disabled={matches.length === 0}
+                  onClick={() =>
+                    setActiveMatch((prev) =>
+                      matches.length ? (prev + 1) % matches.length : 0,
+                    )
+                  }
+                >
+                  <ChevronDown className="size-3.5" />
+                </button>
+                <button
+                  type="button"
+                  aria-label="Close find bar"
+                  className="rounded p-0.5 hover:bg-muted"
+                  onClick={() => setFindOpen(false)}
+                >
+                  <X className="size-3.5" />
+                </button>
+              </div>
+            )}
+            {/* Partial-load notice when find is open but file isn't fully loaded */}
+            {findOpen && !state.done && (
+              <div className="sticky top-0 z-10 mb-2 flex items-center gap-2 rounded-md border border-amber-500/40 bg-amber-50/80 px-3 py-1.5 text-xs text-amber-700 dark:bg-amber-950/40 dark:text-amber-400">
+                <AlertCircle className="size-3.5 shrink-0" />
+                Searching loaded portion ·{' '}
+                <button
+                  type="button"
+                  className="underline hover:no-underline"
+                  onClick={() => void startLoadAll()}
+                >
+                  Load all to search the whole file
+                </button>
+              </div>
+            )}
             {lines.map((line, i) => {
+              const lineNum = i + 1
               const html = highlightedLines?.[i] ?? null
+              // Collect matches on this line and which is the active one.
+              const lineMatches =
+                findOpen && findQuery
+                  ? matches.filter((m) => m.line === i)
+                  : []
+              const activeMatchInLine =
+                lineMatches.length > 0 ? matches[activeMatch] : null
+              const activeIdxInLine =
+                activeMatchInLine?.line === i
+                  ? lineMatches.indexOf(activeMatchInLine)
+                  : -1
+              const isDeepLine = deepLine === lineNum
               return (
-                <div key={i} className={cn('flex', showLineNumbers && 'gap-3')}>
+                <div
+                  key={i}
+                  data-line={lineNum}
+                  className={cn(
+                    'flex',
+                    showLineNumbers && 'gap-3',
+                    isDeepLine && 'rounded bg-amber-300/30 ring-1 ring-amber-400/50',
+                  )}
+                >
                   {showLineNumbers && (
-                    <span
-                      aria-hidden="true"
-                      className="shrink-0 select-none text-right text-muted-foreground/60 tabular-nums"
+                    <button
+                      type="button"
+                      aria-label={`Copy link to line ${lineNum}`}
+                      className="shrink-0 select-none text-right text-muted-foreground/60 tabular-nums hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                       style={{ width: `${gutterChars}ch` }}
+                      onClick={() => {
+                        const url = `${window.location.href.split('#')[0]}#L${lineNum}`
+                        navigator.clipboard?.writeText(url).catch(() => {})
+                        toast.success('Link copied')
+                        navigate(
+                          { hash: `#L${lineNum}` },
+                          { replace: true },
+                        )
+                      }}
                     >
-                      {i + 1}
-                    </span>
+                      {lineNum}
+                    </button>
                   )}
                   <span className="min-w-0 flex-1 whitespace-pre-wrap break-words">
-                    {html !== null ? (
+                    {lineMatches.length > 0 ? (
+                      renderLineWithMarks(line, lineMatches, activeIdxInLine)
+                    ) : html !== null ? (
                       <span dangerouslySetInnerHTML={{ __html: html }} />
                     ) : (
                       line
