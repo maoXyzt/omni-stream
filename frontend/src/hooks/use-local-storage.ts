@@ -7,9 +7,7 @@
 //   * `QuotaExceededError` is caught and surfaced via the returned `error`.
 //   * The `storage` event fires only in *other* tabs, so we refresh from disk
 //     there without echoing our own writes.
-//   * Write callbacks keep a `ref` to the latest value so they don't take it
-//     as a dependency and force consumers (often memoized children) to
-//     re-render unnecessarily.
+//   * `set` closes over `key` and `version` only — no value ref needed.
 //
 // Stored shape:  { version: <VERSION>, value: T }
 
