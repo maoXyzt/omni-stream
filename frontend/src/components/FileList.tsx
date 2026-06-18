@@ -116,6 +116,8 @@ import {
 import { useGlobalShortcut } from '@/hooks/use-global-shortcut'
 import { useRecents } from '@/hooks/use-recents'
 import { useSelection } from '@/hooks/use-selection'
+import { useCommandItems } from '@/hooks/use-command-items'
+import { CommandPalette } from '@/components/CommandPalette'
 import type { FileEntry } from '@/types/storage'
 
 const PREVIEW_PARAM = 'preview'
@@ -908,6 +910,7 @@ export function FileList() {
   // `?` help dialog state — mounted here so the shortcut is always active
   // while FileList is rendered.
   const [showHelp, setShowHelp] = useState(false)
+  const [showCommandPalette, setShowCommandPalette] = useState(false)
 
   // ---------------------------------------------------------------------------
   // Global keyboard shortcuts (via the shared single-listener registry).
@@ -918,6 +921,15 @@ export function FileList() {
 
   // `?` — open shortcut help (not '/' to avoid conflict with future search)
   useGlobalShortcut('?', () => setShowHelp((v) => !v))
+
+  // Cmd+K — open command palette. `allowInEditable` so it works even when the
+  // filter input or other text fields have focus (modifier combos don't
+  // conflict with text entry).
+  useGlobalShortcut(
+    'mod+k',
+    (e) => { e.preventDefault(); setShowCommandPalette((v) => !v) },
+    { allowInEditable: true },
+  )
 
   // Split-view arrow keys — navigate prev/next file. Active only while the
   // inline split preview is open (modal handles its own nav).
@@ -1060,6 +1072,75 @@ export function FileList() {
     (e) => handleRovingShortcut(e, 'left'),
     { active: previewState === null },
   )
+
+  // Shared refresh callback — used by the toolbar button and the command palette.
+  const refresh = useCallback(() => {
+    void queryClient.invalidateQueries({
+      queryKey: ['list', storageName, prefix],
+    })
+  }, [queryClient, storageName, prefix])
+
+  // Cross-storage jump — used by the command palette for recents/favorites that
+  // may belong to a different storage. Same-storage folders go via goToPath;
+  // cross-storage targets construct the full route URL.
+  const jumpTo = useCallback(
+    (storage: string, key: string, type: 'folder' | 'file') => {
+      if (type === 'folder') {
+        if (storage === storageName) {
+          goToPath(key)
+        } else {
+          const trail = key ? encodePathSegments(key.endsWith('/') ? key : `${key}/`) : ''
+          navigate({
+            pathname: `/s/${encodeURIComponent(storage)}/${trail}`,
+            search: isValidViewMode(urlViewParamRef.current)
+              ? `?${VIEW_PARAM}=${urlViewParamRef.current}`
+              : '',
+          })
+        }
+      } else {
+        // File: navigate to its parent directory with the preview param set.
+        const slash = key.lastIndexOf('/')
+        const parent = slash >= 0 ? key.slice(0, slash + 1) : ''
+        const base = slash >= 0 ? key.slice(slash + 1) : key
+        const sp = new URLSearchParams()
+        sp.set(PREVIEW_PARAM, base)
+        if (isValidViewMode(urlViewParamRef.current)) {
+          sp.set(VIEW_PARAM, urlViewParamRef.current)
+        }
+        setTokenStack([undefined])
+        navigate({
+          pathname: `/s/${encodeURIComponent(storage)}/${encodePathSegments(parent)}`,
+          search: `?${sp.toString()}`,
+        })
+      }
+    },
+    [storageName, goToPath, navigate],
+  )
+
+  // ── Command palette items ─────────────────────────────────────────────────
+  const commandItems = useCommandItems({
+    storageName,
+    canWrite,
+    viewMode,
+    sortField,
+    sortDir,
+    // Use sortedEntries (not filteredEntries) so the palette's "On this page"
+    // group searches across the full loaded page regardless of any active
+    // name/type filter in FilterBar.
+    entries: sortedEntries,
+    goToPath,
+    switchStorage,
+    openPreview,
+    jumpTo,
+    setShowNewFile,
+    setShowNewFolder,
+    setShowUpload,
+    setViewMode,
+    setSortField,
+    setSortDir,
+    refresh,
+    setShowHelp,
+  })
 
   // Once we know the storages roster, validate the URL's storage name. If it
   // doesn't exist, bounce to the server's default rather than rendering a
@@ -1254,16 +1335,7 @@ export function FileList() {
                     variant="outline"
                     size="sm"
                     aria-label="Refresh listing"
-                    onClick={() => {
-                      // Invalidate every page of the current prefix — pagination
-                      // tokens are S3-opaque and may not survive concurrent
-                      // server-side adds/removes, but invalidating across all
-                      // tokens is cheap and the user is already asking for a
-                      // fresh read. Sidebar siblings stay cached.
-                      void queryClient.invalidateQueries({
-                        queryKey: ['list', storageName, prefix],
-                      })
-                    }}
+                    onClick={refresh}
                     disabled={listQuery.isFetching}
                   >
                     <RotateCw
@@ -1401,6 +1473,12 @@ export function FileList() {
           <ShortcutHelpDialog
             open={showHelp}
             onClose={() => setShowHelp(false)}
+          />
+
+          <CommandPalette
+            open={showCommandPalette}
+            onClose={() => setShowCommandPalette(false)}
+            items={commandItems}
           />
 
           {listQuery.isError && (
