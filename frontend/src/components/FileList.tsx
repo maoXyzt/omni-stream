@@ -35,6 +35,13 @@ import {
 import { ApiError, getStoredToken, setStoredToken } from '@/api/client'
 import { listFiles, proxyUrl, statFile } from '@/api/storage'
 import { basenameOf } from '@/lib/path'
+import {
+  getRovingKey,
+  getRovingStep,
+  shouldActivateRovingRow,
+  shouldEnterRovingRing,
+  type RovingDirection,
+} from '@/lib/roving-navigation'
 import { isMultiBucketS3 } from '@/lib/storage-display'
 import { resolveStorageUri } from '@/lib/resolve-uri'
 import { encodePathSegments } from '@/lib/route-path'
@@ -982,6 +989,90 @@ export function FileList() {
     mainRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
   }, [])
 
+  // ---------------------------------------------------------------------------
+  // Browsing-state arrow-key roving navigation (B3).
+  //
+  // Only active when previewState === null (pure browsing, no split or modal
+  // preview). The split-view arrow handlers above guard on `splitView`, so the
+  // two sets are mutually exclusive — no double-dispatch possible.
+  //
+  // Focus-driven, no state: current position is read from document.activeElement
+  // via the `data-roving-key` attribute on tile buttons (grid) and table rows
+  // (list). FileTile is React.memo'd — we never pass a `focused` prop; only a
+  // stable `data-roving-key` derived from entry.key (memo-safe).
+  // ---------------------------------------------------------------------------
+
+  const moveRovingFocus = useCallback(
+    (dir: RovingDirection): boolean => {
+      const container = mainRef.current
+      if (!container) return false
+
+      const active = document.activeElement
+      const curKey = getRovingKey(active)
+      let idx = curKey
+        ? filteredEntries.findIndex((e) => e.key === curKey)
+        : -1
+
+      if (idx === -1) {
+        // Focus not on a roving entry. Only enter the roving ring when focus is
+        // on the page body / nothing or already belongs to a roving entry, not
+        // when it sits on a toolbar button, filter field, or other control.
+        if (!shouldEnterRovingRing(active, document.body)) return false
+        if (getRovingStep(viewMode, dir, 1) === null) return false
+        idx = 0
+      } else {
+        // Grid: derive column count from the auto-fill computed style so the
+        // up/down step is always exact even as the viewport resizes.
+        const gridEl = container.querySelector('[data-roving-grid]')
+        const cols = gridEl
+          ? getComputedStyle(gridEl).gridTemplateColumns.trim().split(/\s+/).length
+          : 1
+        const step = getRovingStep(viewMode, dir, cols)
+        if (step === null) return false
+        idx = Math.max(0, Math.min(filteredEntries.length - 1, idx + step))
+      }
+
+      const target = filteredEntries[idx]
+      if (!target) return false
+      const el = container.querySelector(
+        `[data-roving-key="${CSS.escape(target.key)}"]`,
+      )
+      if (!(el instanceof HTMLElement)) return false
+      el.focus({ preventScroll: true })
+      el.scrollIntoView({ block: 'nearest' })
+      return true
+    },
+    [filteredEntries, mainRef, viewMode],
+  )
+
+  const handleRovingShortcut = useCallback(
+    (e: KeyboardEvent, dir: RovingDirection) => {
+      if (moveRovingFocus(dir)) e.preventDefault()
+    },
+    [moveRovingFocus],
+  )
+
+  useGlobalShortcut(
+    'arrowdown',
+    (e) => handleRovingShortcut(e, 'down'),
+    { active: previewState === null },
+  )
+  useGlobalShortcut(
+    'arrowright',
+    (e) => handleRovingShortcut(e, 'right'),
+    { active: previewState === null },
+  )
+  useGlobalShortcut(
+    'arrowup',
+    (e) => handleRovingShortcut(e, 'up'),
+    { active: previewState === null },
+  )
+  useGlobalShortcut(
+    'arrowleft',
+    (e) => handleRovingShortcut(e, 'left'),
+    { active: previewState === null },
+  )
+
   // Shared refresh callback — used by the toolbar button and the command palette.
   const refresh = useCallback(() => {
     void queryClient.invalidateQueries({
@@ -1799,6 +1890,17 @@ function FileRow({
       <TableRow
         className="cursor-pointer hover:bg-muted/50"
         onClick={() => onSelect(entry)}
+        // Roving navigation: make the row focusable and handle Enter so that
+        // arrow-key focus works in list view. The <tr> is not a native button,
+        // so Enter activation must be explicit. tabIndex={-1} removes the row
+        // from the natural Tab order (arrow keys are the intended nav path).
+        tabIndex={-1}
+        data-roving-key={entry.key}
+        onKeyDown={(e) => {
+          if (!shouldActivateRovingRow(e.key, e.target, e.currentTarget)) return
+          e.preventDefault()
+          onSelect(entry)
+        }}
       >
         <TableCell
           onClick={(e) => {
@@ -2285,4 +2387,3 @@ function displayName(key: string, prefix: string): string {
   const rel = key.startsWith(prefix) ? key.slice(prefix.length) : key
   return rel.replace(/\/+$/, '') || key
 }
-

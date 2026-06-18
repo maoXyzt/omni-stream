@@ -70,6 +70,10 @@ export const FileTile = memo(function FileTile({
           // names that aren't actually truncated also get a redundant tooltip
           // on long hovers, which is acceptable.
           title={name}
+          // Stable data attribute for roving focus navigation — queried by the
+          // arrow-key handlers in FileList. Derived purely from `entry.key` so
+          // it never causes React.memo to re-render.
+          data-roving-key={entry.key}
           className="flex flex-col gap-1.5 text-left focus-visible:outline-none"
         >
           {/* Hover state stacks four cues, each cheap on its own:
