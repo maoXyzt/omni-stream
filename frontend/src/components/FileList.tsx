@@ -970,6 +970,92 @@ export function FileList() {
     mainRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
   }, [])
 
+  // ---------------------------------------------------------------------------
+  // Browsing-state arrow-key roving navigation (B3).
+  //
+  // Only active when previewState === null (pure browsing, no split or modal
+  // preview). The split-view arrow handlers above guard on `splitView`, so the
+  // two sets are mutually exclusive — no double-dispatch possible.
+  //
+  // Focus-driven, no state: current position is read from document.activeElement
+  // via the `data-roving-key` attribute on tile buttons (grid) and table rows
+  // (list). FileTile is React.memo'd — we never pass a `focused` prop; only a
+  // stable `data-roving-key` derived from entry.key (memo-safe).
+  // ---------------------------------------------------------------------------
+
+  const moveRovingFocus = useCallback(
+    (dir: 'up' | 'down' | 'left' | 'right') => {
+      const container = mainRef.current
+      if (!container) return
+
+      const active = document.activeElement
+      const curKey =
+        active instanceof Element ? active.getAttribute('data-roving-key') : null
+      let idx = curKey
+        ? filteredEntries.findIndex((e) => e.key === curKey)
+        : -1
+
+      if (idx === -1) {
+        // Focus not on a roving entry. Only enter the roving ring when focus is
+        // inside the listing container (or body / nothing), not when it sits on
+        // a toolbar button, sidebar item, or other external control.
+        if (active && active !== document.body && !container.contains(active)) return
+        idx = 0
+      } else {
+        let step = 0
+        if (viewMode === 'list') {
+          if (dir === 'down') step = 1
+          else if (dir === 'up') step = -1
+          // left / right ignored in list view — don't override row inline-start
+        } else {
+          // Grid: derive column count from the auto-fill computed style so the
+          // up/down step is always exact even as the viewport resizes.
+          if (dir === 'right') step = 1
+          else if (dir === 'left') step = -1
+          else {
+            const gridEl = container.querySelector('[data-roving-grid]')
+            const cols = gridEl
+              ? getComputedStyle(gridEl).gridTemplateColumns.trim().split(/\s+/).length
+              : 1
+            step = dir === 'down' ? cols : -cols
+          }
+        }
+        idx = Math.max(0, Math.min(filteredEntries.length - 1, idx + step))
+      }
+
+      const target = filteredEntries[idx]
+      if (!target) return
+      const el = container.querySelector(
+        `[data-roving-key="${CSS.escape(target.key)}"]`,
+      )
+      if (!(el instanceof HTMLElement)) return
+      el.focus({ preventScroll: true })
+      el.scrollIntoView({ block: 'nearest' })
+    },
+    [filteredEntries, mainRef, viewMode],
+  )
+
+  useGlobalShortcut(
+    'arrowdown',
+    (e) => { e.preventDefault(); moveRovingFocus('down') },
+    { active: previewState === null },
+  )
+  useGlobalShortcut(
+    'arrowright',
+    (e) => { e.preventDefault(); moveRovingFocus('right') },
+    { active: previewState === null },
+  )
+  useGlobalShortcut(
+    'arrowup',
+    (e) => { e.preventDefault(); moveRovingFocus('up') },
+    { active: previewState === null },
+  )
+  useGlobalShortcut(
+    'arrowleft',
+    (e) => { e.preventDefault(); moveRovingFocus('left') },
+    { active: previewState === null },
+  )
+
   // Once we know the storages roster, validate the URL's storage name. If it
   // doesn't exist, bounce to the server's default rather than rendering a
   // perpetual 404 for a typo'd / removed backend.
@@ -1721,6 +1807,18 @@ function FileRow({
       <TableRow
         className="cursor-pointer hover:bg-muted/50"
         onClick={() => onSelect(entry)}
+        // Roving navigation: make the row focusable and handle Enter so that
+        // arrow-key focus works in list view. The <tr> is not a native button,
+        // so Enter activation must be explicit. tabIndex={-1} removes the row
+        // from the natural Tab order (arrow keys are the intended nav path).
+        tabIndex={-1}
+        data-roving-key={entry.key}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault()
+            onSelect(entry)
+          }
+        }}
       >
         <TableCell
           onClick={(e) => {

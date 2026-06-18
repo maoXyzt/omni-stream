@@ -44,7 +44,12 @@ export function FileGrid({
     // `auto-fill` (vs `auto-fit`) keeps empty tracks reserved at their min
     // size, so a folder containing two files renders two ~180px tiles with
     // empty space to their right instead of stretching each to half the row.
-    <div className="grid grid-cols-[repeat(auto-fill,minmax(min(180px,100%),1fr))] gap-3">
+    <div
+      className="grid grid-cols-[repeat(auto-fill,minmax(min(180px,100%),1fr))] gap-3"
+      // Marker for the roving arrow-key navigation in FileList: used to read
+      // the computed column count at runtime via getComputedStyle.
+      data-roving-grid
+    >
       {entries.map((entry) => (
         <FileTile
           key={entry.key}
