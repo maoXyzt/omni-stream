@@ -35,6 +35,13 @@ import {
 import { ApiError, getStoredToken, setStoredToken } from '@/api/client'
 import { listFiles, proxyUrl, statFile } from '@/api/storage'
 import { basenameOf } from '@/lib/path'
+import {
+  getRovingKey,
+  getRovingStep,
+  shouldActivateRovingRow,
+  shouldEnterRovingRing,
+  type RovingDirection,
+} from '@/lib/roving-navigation'
 import { isMultiBucketS3 } from '@/lib/storage-display'
 import { resolveStorageUri } from '@/lib/resolve-uri'
 import { encodePathSegments } from '@/lib/route-path'
@@ -984,75 +991,73 @@ export function FileList() {
   // ---------------------------------------------------------------------------
 
   const moveRovingFocus = useCallback(
-    (dir: 'up' | 'down' | 'left' | 'right') => {
+    (dir: RovingDirection): boolean => {
       const container = mainRef.current
-      if (!container) return
+      if (!container) return false
 
       const active = document.activeElement
-      const curKey =
-        active instanceof Element ? active.getAttribute('data-roving-key') : null
+      const curKey = getRovingKey(active)
       let idx = curKey
         ? filteredEntries.findIndex((e) => e.key === curKey)
         : -1
 
       if (idx === -1) {
         // Focus not on a roving entry. Only enter the roving ring when focus is
-        // inside the listing container (or body / nothing), not when it sits on
-        // a toolbar button, sidebar item, or other external control.
-        if (active && active !== document.body && !container.contains(active)) return
+        // on the page body / nothing or already belongs to a roving entry, not
+        // when it sits on a toolbar button, filter field, or other control.
+        if (!shouldEnterRovingRing(active, document.body)) return false
+        if (getRovingStep(viewMode, dir, 1) === null) return false
         idx = 0
       } else {
-        let step = 0
-        if (viewMode === 'list') {
-          if (dir === 'down') step = 1
-          else if (dir === 'up') step = -1
-          // left / right ignored in list view — don't override row inline-start
-        } else {
-          // Grid: derive column count from the auto-fill computed style so the
-          // up/down step is always exact even as the viewport resizes.
-          if (dir === 'right') step = 1
-          else if (dir === 'left') step = -1
-          else {
-            const gridEl = container.querySelector('[data-roving-grid]')
-            const cols = gridEl
-              ? getComputedStyle(gridEl).gridTemplateColumns.trim().split(/\s+/).length
-              : 1
-            step = dir === 'down' ? cols : -cols
-          }
-        }
+        // Grid: derive column count from the auto-fill computed style so the
+        // up/down step is always exact even as the viewport resizes.
+        const gridEl = container.querySelector('[data-roving-grid]')
+        const cols = gridEl
+          ? getComputedStyle(gridEl).gridTemplateColumns.trim().split(/\s+/).length
+          : 1
+        const step = getRovingStep(viewMode, dir, cols)
+        if (step === null) return false
         idx = Math.max(0, Math.min(filteredEntries.length - 1, idx + step))
       }
 
       const target = filteredEntries[idx]
-      if (!target) return
+      if (!target) return false
       const el = container.querySelector(
         `[data-roving-key="${CSS.escape(target.key)}"]`,
       )
-      if (!(el instanceof HTMLElement)) return
+      if (!(el instanceof HTMLElement)) return false
       el.focus({ preventScroll: true })
       el.scrollIntoView({ block: 'nearest' })
+      return true
     },
     [filteredEntries, mainRef, viewMode],
   )
 
+  const handleRovingShortcut = useCallback(
+    (e: KeyboardEvent, dir: RovingDirection) => {
+      if (moveRovingFocus(dir)) e.preventDefault()
+    },
+    [moveRovingFocus],
+  )
+
   useGlobalShortcut(
     'arrowdown',
-    (e) => { e.preventDefault(); moveRovingFocus('down') },
+    (e) => handleRovingShortcut(e, 'down'),
     { active: previewState === null },
   )
   useGlobalShortcut(
     'arrowright',
-    (e) => { e.preventDefault(); moveRovingFocus('right') },
+    (e) => handleRovingShortcut(e, 'right'),
     { active: previewState === null },
   )
   useGlobalShortcut(
     'arrowup',
-    (e) => { e.preventDefault(); moveRovingFocus('up') },
+    (e) => handleRovingShortcut(e, 'up'),
     { active: previewState === null },
   )
   useGlobalShortcut(
     'arrowleft',
-    (e) => { e.preventDefault(); moveRovingFocus('left') },
+    (e) => handleRovingShortcut(e, 'left'),
     { active: previewState === null },
   )
 
@@ -1814,10 +1819,9 @@ function FileRow({
         tabIndex={-1}
         data-roving-key={entry.key}
         onKeyDown={(e) => {
-          if (e.key === 'Enter') {
-            e.preventDefault()
-            onSelect(entry)
-          }
+          if (!shouldActivateRovingRow(e.key, e.target, e.currentTarget)) return
+          e.preventDefault()
+          onSelect(entry)
         }}
       >
         <TableCell
@@ -2305,4 +2309,3 @@ function displayName(key: string, prefix: string): string {
   const rel = key.startsWith(prefix) ? key.slice(prefix.length) : key
   return rel.replace(/\/+$/, '') || key
 }
-
