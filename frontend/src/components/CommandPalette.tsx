@@ -13,15 +13,12 @@ interface Props {
   items: CommandItem[]
 }
 
-// Stable item id used for aria-activedescendant. Characters outside
-// [A-Za-z0-9_-] are percent-encoded (like URL encoding but with 'x' prefix)
-// so that different input ids always map to different DOM ids.
+// Stable item id used for aria-activedescendant. Every character is encoded
+// as its hex codepoint joined by '-', guaranteeing a unique DOM id for every
+// distinct input id (different char sequences → different codepoint sequences).
 function optionId(id: string) {
-  const sanitized = id.replace(/[^A-Za-z0-9_-]/g, (ch) => {
-    const code = ch.codePointAt(0)?.toString(16) ?? '0'
-    return `x${code}`
-  })
-  return `cp-option-${sanitized}`
+  const encoded = Array.from(id, (ch) => ch.codePointAt(0)?.toString(16) ?? '0').join('-')
+  return `cp-option-${encoded}`
 }
 
 export function CommandPalette({ open, onClose, items }: Props) {
