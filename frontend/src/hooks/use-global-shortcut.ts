@@ -21,6 +21,9 @@
 //
 //   // Include media elements in the "editable" guard
 //   useGlobalShortcut('arrowdown', next, { includeMedia: true })
+//
+//   // Also fires when an editable element has focus (e.g. modifier combos like Cmd+K)
+//   useGlobalShortcut('mod+k', open, { allowInEditable: true })
 
 import { useEffect, useRef } from 'react'
 
@@ -35,6 +38,7 @@ type Handler = {
   combo: KeyCombo
   fn: (e: KeyboardEvent) => void
   includeMedia: boolean
+  allowInEditable: boolean
 }
 
 // Ordered list of registered handlers. We don't bother with a WeakMap here
@@ -58,7 +62,7 @@ function dispatch(e: KeyboardEvent) {
     // A prior handler may have called e.preventDefault() to signal it handled
     // the event — stop dispatching to avoid double-handling.
     if (e.defaultPrevented) break
-    if (isEditableTarget(e, h.includeMedia)) continue
+    if (!h.allowInEditable && isEditableTarget(e, h.includeMedia)) continue
     if (!matchesCombo(e, h.combo)) continue
     h.fn(e)
   }
@@ -76,6 +80,10 @@ interface Options {
   /// VIDEO and AUDIO elements. Useful for shortcuts that should skip while
   /// media controls have focus.
   includeMedia?: boolean
+  /// When true, the editable-element guard is bypassed so the shortcut also
+  /// fires when an INPUT/TEXTAREA/etc. has focus. Safe for modifier combos
+  /// like Cmd+K that don't conflict with text entry.
+  allowInEditable?: boolean
 }
 
 /// Register a global keyboard shortcut.
@@ -90,7 +98,7 @@ interface Options {
 export function useGlobalShortcut(
   combo: string,
   handler: (e: KeyboardEvent) => void,
-  { active = true, includeMedia = false }: Options = {},
+  { active = true, includeMedia = false, allowInEditable = false }: Options = {},
 ): void {
   // Stable ref so the effect doesn't re-run when `handler` changes identity
   // (common with inline arrow functions in render). Synced via useEffect to
@@ -108,10 +116,11 @@ export function useGlobalShortcut(
       combo: parsed,
       fn: (e) => handlerRef.current(e),
       includeMedia,
+      allowInEditable,
     }
     handlers.push(entry)
     return () => {
       handlers = handlers.filter((h) => h !== entry)
     }
-  }, [combo, active, includeMedia])
+  }, [combo, active, includeMedia, allowInEditable])
 }
