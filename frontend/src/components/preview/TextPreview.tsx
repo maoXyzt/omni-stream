@@ -421,6 +421,7 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
 
   // Highlighted line from #L<n> hash deep-link.
   const [deepLine, setDeepLine] = useState<number | null>(null)
+  const lastScrolledHashRef = useRef<string | null>(null)
 
   const matches = useMemo<MatchRange[]>(() => {
     if (!findQuery) return []
@@ -438,6 +439,23 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
     }
     return result
   }, [lines, findQuery])
+
+  // Pre-bucket matches by line so the render loop can do O(1) lookups instead
+  // of O(M) filter + indexOf per line (avoids O(N×M) total complexity).
+  const matchesByLine = useMemo(() => {
+    const buckets: Array<{ ranges: MatchRange[]; activeIdx: number }> = Array.from(
+      { length: lines.length },
+      () => ({ ranges: [], activeIdx: -1 }),
+    )
+    for (let gi = 0; gi < matches.length; gi++) {
+      const m = matches[gi]
+      const bucket = buckets[m.line]
+      if (!bucket) continue
+      if (gi === activeMatch) bucket.activeIdx = bucket.ranges.length
+      bucket.ranges.push(m)
+    }
+    return buckets
+  }, [lines.length, matches, activeMatch])
 
   // Clamp activeMatch when match count changes (via effect, not render phase).
   useEffect(() => {
@@ -459,11 +477,18 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
   }, [activeMatch, matches])
 
   // Hash deep-link: #L<n> → scroll and highlight target line.
+  // lastScrolledHashRef prevents re-scrolling every time a new chunk loads
+  // (lines.length changes) after the target line is already visible.
   useEffect(() => {
     const match = /^#L(\d+)$/.exec(hash)
-    if (!match) return
+    if (!match) {
+      lastScrolledHashRef.current = null
+      return
+    }
+    if (lastScrolledHashRef.current === hash) return
     const n = parseInt(match[1], 10)
     if (n < 1 || n > lines.length) return
+    lastScrolledHashRef.current = hash
     scrollRef.current
       ?.querySelector(`[data-line="${n}"]`)
       ?.scrollIntoView({ block: 'center' })
@@ -471,17 +496,6 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
     const timer = setTimeout(() => setDeepLine(null), 2000)
     return () => clearTimeout(timer)
   }, [hash, lines.length])
-
-  // Cmd+F opens the find bar (also works when find input already has focus).
-  useGlobalShortcut(
-    'mod+f',
-    (e) => {
-      e.preventDefault()
-      setFindOpen(true)
-      requestAnimationFrame(() => findInputRef.current?.select())
-    },
-    { allowInEditable: true },
-  )
 
   // Copy the lines currently visible (excludes the trailing partial line while
   // more bytes are pending — see `lines` memo above).
@@ -533,6 +547,27 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
     state.totalBytes !== null && state.totalBytes > MAX_EDIT_BYTES
 
   const [editing, setEditing] = useState(false)
+
+  // Find bar is only usable in raw/code mode with content loaded.
+  const findEnabled = !editing && (!isMarkdown || view === 'raw') && lines.length > 0
+
+  // Close find bar automatically when leaving the mode that renders it.
+  useEffect(() => {
+    if (!findEnabled) setFindOpen(false)
+  }, [findEnabled])
+
+  // Cmd+F opens the find bar (also works when find input already has focus).
+  // Gated so edit-mode and Markdown-rendered-mode don't block browser native find.
+  useGlobalShortcut(
+    'mod+f',
+    (e) => {
+      e.preventDefault()
+      setFindOpen(true)
+      requestAnimationFrame(() => findInputRef.current?.select())
+    },
+    { active: findEnabled, allowInEditable: true },
+  )
+
   const [draft, setDraft] = useState('')
   // Set when Edit is clicked on a not-yet-fully-loaded file: a load-all runs
   // and the effect below enters edit mode once the whole file is in memory.
@@ -1024,17 +1059,12 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
             {lines.map((line, i) => {
               const lineNum = i + 1
               const html = highlightedLines?.[i] ?? null
-              // Collect matches on this line and which is the active one.
-              const lineMatches =
+              const lineMatchState =
                 findOpen && findQuery
-                  ? matches.filter((m) => m.line === i)
-                  : []
-              const activeMatchInLine =
-                lineMatches.length > 0 ? matches[activeMatch] : null
-              const activeIdxInLine =
-                activeMatchInLine?.line === i
-                  ? lineMatches.indexOf(activeMatchInLine)
-                  : -1
+                  ? (matchesByLine[i] ?? { ranges: [], activeIdx: -1 })
+                  : { ranges: [], activeIdx: -1 }
+              const lineMatches = lineMatchState.ranges
+              const activeIdxInLine = lineMatchState.activeIdx
               const isDeepLine = deepLine === lineNum
               return (
                 <div
