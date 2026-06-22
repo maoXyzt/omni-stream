@@ -49,6 +49,18 @@ describe('buildTitle', () => {
     )
   })
 
+  it('keeps encoded slashes inside their original segment', () => {
+    expect(buildTitle('/s/bkt/folder%2Fname/file.txt', 'h')).toBe(
+      'bkt/folder/name · file.txt · h · OmniStream',
+    )
+  })
+
+  it('decodes valid segments even when another segment is malformed', () => {
+    expect(buildTitle('/s/bkt/%E0%A4%A/a%20b.txt', 'h')).toBe(
+      'bkt/%E0%A4%A · a b.txt · h · OmniStream',
+    )
+  })
+
   it('strips trailing slashes when computing the leaf', () => {
     expect(buildTitle('/s/bkt/data/2025/', 'h')).toBe('bkt/data · 2025 · h · OmniStream')
   })

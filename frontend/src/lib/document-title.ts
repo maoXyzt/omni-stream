@@ -15,20 +15,19 @@ export function buildTitle(pathname: string, hostname: string | undefined): stri
   let leaf: string | null = null
   if (m) {
     storage = safeDecode(m[1])
-    const rest = m[2] ? safeDecode(m[2]).replace(/\/+$/, '') : ''
+    const rest = m[2] ? m[2].replace(/\/+$/, '') : ''
     if (rest) {
-      const parts = rest.split('/')
+      const parts = rest.split('/').map(safeDecode)
       const first = parts[0] || null
       context = first ? `${storage}/${first}` : storage
       leaf = parts.length > 1 ? (parts[parts.length - 1] || null) : null
     }
   }
   const shortHost = shortenHost(hostname)
+  const scope = storage && shortHost ? `${storage}@${shortHost}` : (storage ?? shortHost ?? null)
   const head = context
     ? [context, leaf, shortHost].filter(Boolean).join(' · ')
-    : [storage && shortHost ? `${storage}@${shortHost}` : (storage ?? shortHost ?? null)]
-        .filter(Boolean)
-        .join(' · ')
+    : scope
   return head ? `${head} · OmniStream` : 'OmniStream'
 }
 
