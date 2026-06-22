@@ -204,7 +204,7 @@ If the binary was built with `--features duckdb` (PyPI wheels include it; `cargo
 [sql]
 # enabled = true            # default; kill-switch independent of the build feature
 # memory_limit = "512MB"    # default; DuckDB memory limit per query connection
-# threads = 2               # default; DuckDB threads per query connection
+# threads = 1               # default; DuckDB threads per query connection; higher improves throughput but raises peak memory
 # query_timeout_secs = 300    # default (5 min); interactive SELECT interrupted past this, returns 408
 # convert_timeout_secs = 1800 # default (30 min); background JSONL/CSV→Parquet conversion timeout
 # max_rows = 10000            # default; results beyond this are truncated (truncated = true)

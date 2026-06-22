@@ -336,7 +336,7 @@ impl Default for SqlConfig {
     Self {
       enabled: true,
       memory_limit: "512MB".to_string(),
-      threads: 2,
+      threads: 1,
       query_timeout_secs: 300,
       convert_timeout_secs: 1800,
       convert_threads: 1,
@@ -745,7 +745,7 @@ local = { root_path = "/tmp" }
     let cfg = parse(raw);
     assert!(cfg.sql.enabled);
     assert_eq!(cfg.sql.memory_limit, "512MB");
-    assert_eq!(cfg.sql.threads, 2);
+    assert_eq!(cfg.sql.threads, 1);
     assert_eq!(cfg.sql.query_timeout_secs, 300);
     assert_eq!(cfg.sql.max_rows, 10_000);
   }
