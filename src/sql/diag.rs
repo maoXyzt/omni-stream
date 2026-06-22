@@ -53,9 +53,11 @@ pub fn diagnose(target: &SqlTarget, context: Option<&str>, raw: &str) -> Option<
       hint: format!(
         "The operation on {path_desc} exceeded the server's DuckDB memory budget \
          (`[sql].memory_limit`, default 512MB). Try raising `[sql].memory_limit` \
-         (e.g. '2GB') if the host has the RAM. For large-file conversions, \
-         lowering `[sql].convert_threads` also reduces peak memory by limiting \
-         the number of non-spillable Parquet write buffers held concurrently."
+         (e.g. '2GB') if the host has the RAM. For interactive queries, lowering \
+         `[sql].threads` reduces peak scan memory by limiting concurrent DuckDB \
+         workers. For large-file conversions, lowering `[sql].convert_threads` \
+         also reduces peak memory by limiting the number of non-spillable Parquet \
+         write buffers held concurrently."
       ),
     });
   }
@@ -256,6 +258,11 @@ mod tests {
     assert!(
       diag.hint.contains("memory_limit"),
       "hint should reference memory_limit: {}",
+      diag.hint
+    );
+    assert!(
+      diag.hint.contains("[sql].threads"),
+      "query OOM hint should mention lowering query threads: {}",
       diag.hint
     );
   }

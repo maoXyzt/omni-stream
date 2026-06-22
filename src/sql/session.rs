@@ -276,7 +276,7 @@ mod tests {
     assert!(pos("temp_directory") < pos("allowed_directories"));
     assert!(pos("allowed_directories") < pos("lock_configuration"));
     assert!(sql.contains("SET memory_limit = '512MB'"));
-    assert!(sql.contains("SET threads = 2"));
+    assert!(sql.contains("SET threads = 1"));
     assert!(sql.contains("SET preserve_insertion_order = false"));
     assert!(!sql.contains("INSTALL aws"), "static creds need no aws ext");
     assert!(
