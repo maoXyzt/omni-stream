@@ -1,7 +1,8 @@
 /// Build the tab title from the active route + server hostname:
-/// `<leaf> · <storage>@<host> · OmniStream`. Segments missing for the
-/// current state (no storage selected, at the storage root, /api/server
-/// still loading) are dropped so the title never has stranded separators.
+/// `<storage>/<bucket-or-context> · <leaf> · <host> · OmniStream`. Segments
+/// missing for the current state (no storage selected, at the storage root,
+/// /api/server still loading) are dropped so the title never has stranded
+/// separators.
 ///
 /// Route prefixes are kept in sync with `<Routes>` in `App.tsx` — extend
 /// the character class in ROUTE_RE when adding new storage-scoped routes.
@@ -10,18 +11,23 @@ const ROUTE_RE = /^\/[sr]\/([^/]+)(?:\/(.*))?$/
 export function buildTitle(pathname: string, hostname: string | undefined): string {
   const m = pathname.match(ROUTE_RE)
   let storage: string | null = null
+  let context: string | null = null
   let leaf: string | null = null
   if (m) {
     storage = safeDecode(m[1])
-    const rest = m[2] ? safeDecode(m[2]).replace(/\/+$/, '') : ''
+    const rest = m[2] ? m[2].replace(/\/+$/, '') : ''
     if (rest) {
-      const parts = rest.split('/')
-      leaf = parts[parts.length - 1] || null
+      const parts = rest.split('/').map(safeDecode)
+      const first = parts[0] || null
+      context = first ? `${storage}/${first}` : storage
+      leaf = parts.length > 1 ? (parts[parts.length - 1] || null) : null
     }
   }
   const shortHost = shortenHost(hostname)
   const scope = storage && shortHost ? `${storage}@${shortHost}` : (storage ?? shortHost ?? null)
-  const head = [leaf, scope].filter(Boolean).join(' · ')
+  const head = context
+    ? [context, leaf, shortHost].filter(Boolean).join(' · ')
+    : scope
   return head ? `${head} · OmniStream` : 'OmniStream'
 }
 

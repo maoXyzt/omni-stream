@@ -15,20 +15,20 @@ describe('buildTitle', () => {
     expect(buildTitle('/s/my-bucket', 'myhost')).toBe('my-bucket@myhost · OmniStream')
   })
 
-  it('renders leaf · storage@host inside a directory', () => {
+  it('renders storage/context first inside a directory', () => {
     expect(buildTitle('/s/my-bucket/data/2025/06', 'myhost')).toBe(
-      '06 · my-bucket@myhost · OmniStream',
+      'my-bucket/data · 06 · myhost · OmniStream',
     )
   })
 
   it('renders the rows view the same way as the file list view', () => {
     expect(buildTitle('/r/my-bucket/data/file.csv', 'myhost')).toBe(
-      'file.csv · my-bucket@myhost · OmniStream',
+      'my-bucket/data · file.csv · myhost · OmniStream',
     )
   })
 
   it('drops storage@ prefix when no host is known yet', () => {
-    expect(buildTitle('/s/my-bucket/a/b', undefined)).toBe('b · my-bucket · OmniStream')
+    expect(buildTitle('/s/my-bucket/a/b', undefined)).toBe('my-bucket/a · b · OmniStream')
   })
 
   it('shortens FQDN hostnames to the first label', () => {
@@ -44,16 +44,30 @@ describe('buildTitle', () => {
   })
 
   it('decodes percent-encoded route segments', () => {
-    expect(buildTitle('/s/bkt/my%20folder/a%20b.txt', 'h')).toBe('a b.txt · bkt@h · OmniStream')
+    expect(buildTitle('/s/bkt/my%20folder/a%20b.txt', 'h')).toBe(
+      'bkt/my folder · a b.txt · h · OmniStream',
+    )
+  })
+
+  it('keeps encoded slashes inside their original segment', () => {
+    expect(buildTitle('/s/bkt/folder%2Fname/file.txt', 'h')).toBe(
+      'bkt/folder/name · file.txt · h · OmniStream',
+    )
+  })
+
+  it('decodes valid segments even when another segment is malformed', () => {
+    expect(buildTitle('/s/bkt/%E0%A4%A/a%20b.txt', 'h')).toBe(
+      'bkt/%E0%A4%A · a b.txt · h · OmniStream',
+    )
   })
 
   it('strips trailing slashes when computing the leaf', () => {
-    expect(buildTitle('/s/bkt/data/2025/', 'h')).toBe('2025 · bkt@h · OmniStream')
+    expect(buildTitle('/s/bkt/data/2025/', 'h')).toBe('bkt/data · 2025 · h · OmniStream')
   })
 
   it('returns the raw segment when decoding fails', () => {
     // "%E0%A4%A" is a truncated UTF-8 sequence; decodeURIComponent throws.
-    expect(buildTitle('/s/bkt/%E0%A4%A', 'h')).toBe('%E0%A4%A · bkt@h · OmniStream')
+    expect(buildTitle('/s/bkt/%E0%A4%A', 'h')).toBe('bkt/%E0%A4%A · h · OmniStream')
   })
 
   it('falls back to brand-only for unrecognized routes', () => {
