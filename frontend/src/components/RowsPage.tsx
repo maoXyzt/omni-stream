@@ -90,9 +90,9 @@ export function RowsPage() {
           Files
         </Button>
         <div className="flex min-w-0 flex-1 flex-col">
-          <span className="truncate font-mono text-sm" title={fileKey}>
+          <h1 className="truncate font-mono text-sm" title={fileKey}>
             {fileName}
-          </span>
+          </h1>
           <span className="truncate text-[11px] text-muted-foreground" title={fileKey}>
             {storageName} · {fileKey}
           </span>
@@ -102,7 +102,11 @@ export function RowsPage() {
         </span>
       </header>
 
-      <main className="flex min-h-0 flex-1 flex-col overflow-hidden p-4">
+      <main
+        id="main-content"
+        tabIndex={-1}
+        className="flex min-h-0 flex-1 flex-col overflow-hidden p-4"
+      >
         {sourceQuery.error ? (
           <Alert variant="destructive" className="max-w-xl">
             <AlertCircle className="size-4" />

@@ -1246,6 +1246,7 @@ export function FileList() {
           </>
         )}
         <main
+          id="main-content"
           ref={mainRef}
           tabIndex={-1}
           onScroll={handleMainScroll}
@@ -1836,7 +1837,12 @@ function ShareLinkButton() {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Button variant="outline" size="sm" onClick={onClick}>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={onClick}
+          aria-live="polite"
+        >
           {copied ? (
             <>
               <Check className="size-4" />

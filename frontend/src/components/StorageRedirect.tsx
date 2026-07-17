@@ -33,17 +33,28 @@ export function StorageRedirect() {
 
   if (isPending) {
     return (
-      <div className="mx-auto flex max-w-5xl flex-col gap-2 p-6">
+      <main
+        id="main-content"
+        tabIndex={-1}
+        aria-busy="true"
+        className="mx-auto flex max-w-5xl flex-col gap-2 p-6"
+      >
+        <h1 className="sr-only">OmniStream</h1>
         <Skeleton className="h-8 w-48" />
         <Skeleton className="h-10 w-full" />
-      </div>
+      </main>
     )
   }
 
   if (error || !data) {
     const message = error instanceof Error ? error.message : 'unknown error'
     return (
-      <div className="mx-auto max-w-5xl p-6">
+      <main
+        id="main-content"
+        tabIndex={-1}
+        className="mx-auto max-w-5xl p-6"
+      >
+        <h1 className="sr-only">OmniStream</h1>
         <Alert variant="destructive">
           <AlertCircle className="size-4" />
           <AlertTitle>Failed to load storages</AlertTitle>
@@ -65,7 +76,7 @@ export function StorageRedirect() {
             </Button>
           </AlertDescription>
         </Alert>
-      </div>
+      </main>
     )
   }
 

@@ -585,7 +585,7 @@ function AiPromptDialog({
           <Button variant="outline" onClick={onClose}>
             Close
           </Button>
-          <Button onClick={handleCopy}>
+          <Button onClick={handleCopy} aria-live="polite">
             {copied ? (
               <>
                 <Check className="size-4" />
@@ -830,7 +830,7 @@ function PresetsSection({
                 type="button"
                 onClick={() => onLoad(p)}
                 title={`Load "${p.name}"`}
-                className="flex min-w-0 flex-1 items-center gap-1.5 px-1.5 py-1 text-left text-xs focus:outline-none"
+                className="flex min-w-0 flex-1 items-center gap-1.5 px-1.5 py-1 text-left text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <span className="truncate">{p.name}</span>
                 <PresetMatchBadge match={match} />
@@ -840,7 +840,7 @@ function PresetsSection({
                 onClick={() => presets.remove(p.id)}
                 title={`Delete "${p.name}"`}
                 aria-label={`Delete preset ${p.name}`}
-                className="mr-1 rounded p-0.5 text-muted-foreground opacity-0 hover:text-destructive focus:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100"
+                className="mr-1 rounded p-0.5 text-muted-foreground opacity-0 hover:text-destructive focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100"
               >
                 <Trash2 className="size-3" />
               </button>
