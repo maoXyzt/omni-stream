@@ -1,6 +1,12 @@
 import { useEffect } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom'
+import {
+  createBrowserRouter,
+  Navigate,
+  Outlet,
+  RouterProvider,
+  useLocation,
+} from 'react-router-dom'
 
 import { FileList } from '@/components/FileList'
 import { RowsPage } from '@/components/RowsPage'
@@ -20,26 +26,42 @@ const queryClient = new QueryClient({
   },
 })
 
+// The data router gives editors React Router's native navigation blocker.
+// Route paths and rendered pages stay identical to the former BrowserRouter
+// setup; only navigation coordination changes.
+const router = createBrowserRouter([
+  {
+    element: <RouterShell />,
+    children: [
+      { path: '/', element: <StorageRedirect /> },
+      { path: '/s/:storage/*', element: <FileList /> },
+      { path: '/r/:storage/*', element: <RowsPage /> },
+      { path: '*', element: <Navigate to="/" replace /> },
+    ],
+  },
+])
+
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TreeExpandedJanitor />
       <Toaster />
-      <BrowserRouter>
-        <DocumentTitle />
-        <Routes>
-          <Route path="/" element={<StorageRedirect />} />
-          <Route path="/s/:storage/*" element={<FileList />} />
-          <Route path="/r/:storage/*" element={<RowsPage />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </BrowserRouter>
+      <RouterProvider router={router} />
     </QueryClientProvider>
   )
 }
 
+function RouterShell() {
+  return (
+    <>
+      <DocumentTitle />
+      <Outlet />
+    </>
+  )
+}
+
 /// Keeps the tab title and favicon in sync with the active route via
-/// `buildTitle` / `buildFaviconHref`. Sits inside BrowserRouter so it can
+/// `buildTitle` / `buildFaviconHref`. Sits inside the router so it can
 /// read the current pathname. The favicon swap reuses the existing
 /// `<link rel="icon">` from index.html — replacing the href rather than
 /// adding/removing nodes avoids racing the browser's first-paint icon load.

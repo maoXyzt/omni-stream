@@ -1,3 +1,4 @@
+import { useRef } from 'react'
 import { Download, ExternalLink } from 'lucide-react'
 
 import { proxyUrl } from '@/api/storage'
@@ -37,6 +38,8 @@ export function PreviewModal({
   onClose,
   onNavigate,
 }: Props) {
+  const contentRef = useRef<HTMLDivElement>(null)
+  const previousFocusRef = useRef<HTMLElement | null>(null)
   const src = proxyUrl(fileKey, storage, version)
   const type = getPreviewType(kind)
   const Previewer = type?.Component
@@ -70,12 +73,26 @@ export function PreviewModal({
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent
-        // Radix focuses the first focusable element when the dialog opens,
-        // which lands on TextPreview's language <select>. Browsers map arrow
-        // keys on a focused select to cycle options, blocking our prev/next
-        // navigation. Preventing the initial focus lets arrow keys bubble to
-        // the window listener; users can still Tab into the select.
-        onOpenAutoFocus={(e) => e.preventDefault()}
+        ref={contentRef}
+        tabIndex={-1}
+        // Keep initial focus inside the modal without landing on TextPreview's
+        // language select, where arrow keys change the option instead of
+        // navigating files. Users can still Tab into every control.
+        onOpenAutoFocus={(e) => {
+          e.preventDefault()
+          previousFocusRef.current =
+            document.activeElement instanceof HTMLElement
+              ? document.activeElement
+              : null
+          contentRef.current?.focus({ preventScroll: true })
+        }}
+        onCloseAutoFocus={(e) => {
+          e.preventDefault()
+          const previousFocus = previousFocusRef.current
+          if (previousFocus?.isConnected) {
+            previousFocus.focus({ preventScroll: true })
+          }
+        }}
         className="flex h-[95vh] w-[95vw] max-w-[95vw] flex-col sm:max-w-[95vw]"
       >
         <DialogHeader>

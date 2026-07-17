@@ -220,6 +220,7 @@ export function UploadDialog({ storage, prefix, onClose }: UploadDialogProps) {
     (i) => i.status === 'pending' || i.status === 'error',
   ).length
   const doneCount = items.filter((i) => i.status === 'done').length
+  const uploadableCount = items.filter((i) => i.status !== 'too-large').length
 
   return (
     <>
@@ -286,20 +287,33 @@ export function UploadDialog({ storage, prefix, onClose }: UploadDialogProps) {
                   key={item.key}
                   className="flex items-center gap-3 px-3 py-2 text-sm"
                 >
-                  <StatusIcon status={item.status} progress={item.progress} />
+                  <StatusIcon status={item.status} />
                   <div className="min-w-0 flex-1">
                     <div className="truncate font-medium">{item.file.name}</div>
-                    <div className="text-xs text-muted-foreground">
+                    <div
+                      role={item.status === 'error' ? 'alert' : undefined}
+                      className="text-xs text-muted-foreground"
+                    >
                       {item.status === 'too-large'
                         ? `Too large (${formatBytes(item.file.size)} > ${formatBytes(MAX_PUT_BYTES)})`
                         : item.status === 'error'
                           ? item.error
                           : item.status === 'uploading'
                             ? `${item.progress}%`
-                            : formatBytes(item.file.size)}
+                            : item.status === 'done'
+                              ? `Uploaded · ${formatBytes(item.file.size)}`
+                              : formatBytes(item.file.size)}
                     </div>
                     {item.status === 'uploading' && (
-                      <div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-muted">
+                      <div
+                        role="progressbar"
+                        aria-label={`Uploading ${item.file.name}`}
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                        aria-valuenow={Math.round(item.progress)}
+                        aria-valuetext={`${Math.round(item.progress)}% uploaded`}
+                        className="mt-1 h-1 w-full overflow-hidden rounded-full bg-muted"
+                      >
                         <div
                           className="h-full rounded-full bg-primary transition-all duration-150"
                           style={{ width: `${item.progress}%` }}
@@ -311,6 +325,14 @@ export function UploadDialog({ storage, prefix, onClose }: UploadDialogProps) {
               ))}
             </div>
           )}
+
+          <p role="status" aria-live="polite" className="sr-only">
+            {uploading
+              ? `Uploading files. ${doneCount} of ${uploadableCount} complete.`
+              : doneCount > 0 && pendingCount === 0
+                ? `Upload complete. ${doneCount} file${doneCount === 1 ? '' : 's'} uploaded.`
+                : ''}
+          </p>
 
           <DialogFooter>
             <Button variant="outline" disabled={uploading} onClick={onClose}>
@@ -362,21 +384,34 @@ export function UploadDialog({ storage, prefix, onClose }: UploadDialogProps) {
 
 function StatusIcon({
   status,
-  progress,
 }: {
   status: UploadStatus
-  progress: number
 }) {
   if (status === 'done')
-    return <CheckCircle2 className="size-4 shrink-0 text-green-500" />
+    return (
+      <CheckCircle2
+        aria-hidden="true"
+        className="size-4 shrink-0 text-green-500"
+      />
+    )
   if (status === 'error' || status === 'too-large')
-    return <XCircle className="size-4 shrink-0 text-destructive" />
+    return (
+      <XCircle
+        aria-hidden="true"
+        className="size-4 shrink-0 text-destructive"
+      />
+    )
   if (status === 'uploading')
     return (
       <Loader2
+        aria-hidden="true"
         className="size-4 shrink-0 animate-spin text-primary"
-        aria-label={`${progress}%`}
       />
     )
-  return <div className="size-4 shrink-0 rounded-full border-2 border-muted-foreground/30" />
+  return (
+    <div
+      aria-hidden="true"
+      className="size-4 shrink-0 rounded-full border-2 border-muted-foreground/30"
+    />
+  )
 }
