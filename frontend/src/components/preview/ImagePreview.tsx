@@ -40,6 +40,8 @@ export function ImagePreview({ fileKey, src, storage }: PreviewerProps) {
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [natural, setNatural] = useState<{ w: number; h: number } | null>(null)
   const [loaded, setLoaded] = useState(false)
+  const [loadFailed, setLoadFailed] = useState(false)
+  const [loadAttempt, setLoadAttempt] = useState(0)
   // Progressive-loading placeholder state. `thumbLoaded` flips when the
   // low-res thumbnail is ready (stops the spinner); `thumbErrored` flips on
   // any thumbnail request failure (404 = thumbnails disabled, 415 = format
@@ -55,6 +57,8 @@ export function ImagePreview({ fileKey, src, storage }: PreviewerProps) {
   if (src !== trackedSrc) {
     setTrackedSrc(src)
     setLoaded(false)
+    setLoadFailed(false)
+    setLoadAttempt(0)
     setNatural(null)
     setThumbLoaded(false)
     setThumbErrored(false)
@@ -162,6 +166,16 @@ export function ImagePreview({ fileKey, src, storage }: PreviewerProps) {
       h: e.currentTarget.naturalHeight,
     })
     setLoaded(true)
+    setLoadFailed(false)
+  }
+
+  const retryLoad = () => {
+    setLoaded(false)
+    setLoadFailed(false)
+    setNatural(null)
+    setThumbLoaded(false)
+    setThumbErrored(false)
+    setLoadAttempt((value) => value + 1)
   }
 
   // --- Grab-to-pan -------------------------------------------------------
@@ -214,6 +228,10 @@ export function ImagePreview({ fileKey, src, storage }: PreviewerProps) {
   // Whether the image's logical width/height are swapped after rotation.
   const isRotated90 = rotation === 90 || rotation === 270
   const scale = typeof zoom === 'number' ? zoom : null
+  const imageSrc =
+    loadAttempt === 0
+      ? src
+      : `${src}${src.includes('?') ? '&' : '?'}_retry=${loadAttempt}`
 
   return (
     <div
@@ -223,7 +241,7 @@ export function ImagePreview({ fileKey, src, storage }: PreviewerProps) {
       {/* Spinner hides as soon as either the thumbnail or the full image is
           ready. When thumbnails are disabled/unsupported, `thumbLoaded` stays
           false and the condition degrades to the original `!loaded` behaviour. */}
-      {!loaded && !thumbLoaded && <PreviewSpinner />}
+      {!loadFailed && !loaded && !thumbLoaded && <PreviewSpinner />}
       {isFit ? (
         // Fit mode: no scroll wrapper. The flex container is pinned to the
         // outer box, and the image uses min-h-0/min-w-0 so flex doesn't grant
@@ -255,9 +273,11 @@ export function ImagePreview({ fileKey, src, storage }: PreviewerProps) {
             </div>
           )}
           <img
-            src={src}
+            key={loadAttempt}
+            src={imageSrc}
             alt={fileKey}
             onLoad={onLoad}
+            onError={() => setLoadFailed(true)}
             decoding="async"
             className={cn(
               // `relative` makes this a positioned element so it shares the
@@ -284,9 +304,11 @@ export function ImagePreview({ fileKey, src, storage }: PreviewerProps) {
         >
           <div className="flex min-h-full min-w-full items-center justify-center p-2">
             <img
-              src={src}
+              key={loadAttempt}
+              src={imageSrc}
               alt={fileKey}
               onLoad={onLoad}
+              onError={() => setLoadFailed(true)}
               decoding="async"
               className="max-w-none rounded-md"
               style={
@@ -306,7 +328,25 @@ export function ImagePreview({ fileKey, src, storage }: PreviewerProps) {
         </div>
       )}
 
-      <div className="absolute top-2 right-2 flex items-center gap-1 rounded-md border bg-background/90 p-1 shadow-sm backdrop-blur supports-backdrop-filter:bg-background/70">
+      {loadFailed && (
+        <div
+          role="alert"
+          className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-muted/95 text-center"
+        >
+          <p className="text-sm font-medium text-destructive">
+            Failed to load image.
+          </p>
+          <Button type="button" variant="outline" size="sm" onClick={retryLoad}>
+            <RotateCw className="size-4" />
+            Retry
+          </Button>
+        </div>
+      )}
+
+      <div
+        hidden={loadFailed}
+        className="absolute top-2 right-2 flex items-center gap-1 rounded-md border bg-background/90 p-1 shadow-sm backdrop-blur supports-backdrop-filter:bg-background/70"
+      >
         <Tooltip>
           <TooltipTrigger asChild>
             <Button variant="ghost" size="icon-sm" onClick={zoomOut} aria-label="Zoom out">
@@ -405,7 +445,10 @@ export function ImagePreview({ fileKey, src, storage }: PreviewerProps) {
           to load (natural dimensions); file size waits on /api/stat. We
           render either dash when the data isn't ready yet rather than
           gating the whole overlay, so the layout doesn't pop in. */}
-      <div className="absolute bottom-2 left-2 flex items-center gap-2 rounded-md border bg-background/90 px-2 py-1 font-mono text-xs text-muted-foreground shadow-sm backdrop-blur supports-backdrop-filter:bg-background/70">
+      <div
+        hidden={loadFailed}
+        className="absolute bottom-2 left-2 flex items-center gap-2 rounded-md border bg-background/90 px-2 py-1 font-mono text-xs text-muted-foreground shadow-sm backdrop-blur supports-backdrop-filter:bg-background/70"
+      >
         <span className="tabular-nums">
           {natural ? `${natural.w}×${natural.h}` : '—'}
         </span>

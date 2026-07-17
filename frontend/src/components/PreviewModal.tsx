@@ -1,3 +1,4 @@
+import { useRef, type RefObject } from 'react'
 import { Download, ExternalLink } from 'lucide-react'
 
 import { proxyUrl } from '@/api/storage'
@@ -5,6 +6,7 @@ import { useGlobalShortcut } from '@/hooks/use-global-shortcut'
 import { getPreviewType } from '@/components/preview/registry'
 import type { PreviewKind } from '@/components/preview/types'
 import { Button } from '@/components/ui/button'
+import { getPreviewReturnFocus } from '@/lib/accessibility'
 import {
   Dialog,
   DialogContent,
@@ -27,6 +29,7 @@ interface Props {
   version?: string | null
   onClose: () => void
   onNavigate?: (dir: 'prev' | 'next') => void
+  fallbackFocusRef?: RefObject<HTMLElement | null>
 }
 
 export function PreviewModal({
@@ -36,7 +39,10 @@ export function PreviewModal({
   version,
   onClose,
   onNavigate,
+  fallbackFocusRef,
 }: Props) {
+  const contentRef = useRef<HTMLDivElement>(null)
+  const previousFocusRef = useRef<HTMLElement | null>(null)
   const src = proxyUrl(fileKey, storage, version)
   const type = getPreviewType(kind)
   const Previewer = type?.Component
@@ -70,12 +76,28 @@ export function PreviewModal({
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent
-        // Radix focuses the first focusable element when the dialog opens,
-        // which lands on TextPreview's language <select>. Browsers map arrow
-        // keys on a focused select to cycle options, blocking our prev/next
-        // navigation. Preventing the initial focus lets arrow keys bubble to
-        // the window listener; users can still Tab into the select.
-        onOpenAutoFocus={(e) => e.preventDefault()}
+        ref={contentRef}
+        tabIndex={-1}
+        // Keep initial focus inside the modal without landing on TextPreview's
+        // language select, where arrow keys change the option instead of
+        // navigating files. Users can still Tab into every control.
+        onOpenAutoFocus={(e) => {
+          e.preventDefault()
+          previousFocusRef.current =
+            document.activeElement instanceof HTMLElement
+              ? document.activeElement
+              : null
+          contentRef.current?.focus({ preventScroll: true })
+        }}
+        onCloseAutoFocus={(e) => {
+          const focusTarget = getPreviewReturnFocus(
+            previousFocusRef.current,
+            fallbackFocusRef?.current ?? null,
+          )
+          if (!focusTarget) return
+          e.preventDefault()
+          focusTarget.focus({ preventScroll: true })
+        }}
         className="flex h-[95vh] w-[95vw] max-w-[95vw] flex-col sm:max-w-[95vw]"
       >
         <DialogHeader>

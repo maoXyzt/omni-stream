@@ -1247,6 +1247,7 @@ export function FileList() {
         )}
         <main
           ref={mainRef}
+          tabIndex={-1}
           onScroll={handleMainScroll}
           className="flex w-full min-w-0 flex-col gap-4 overflow-y-auto px-6 py-4"
         >
@@ -1802,6 +1803,7 @@ export function FileList() {
           version={previewVersion}
           onClose={closePreview}
           onNavigate={navigatePreview}
+          fallbackFocusRef={mainRef}
         />
       )}
     </div>

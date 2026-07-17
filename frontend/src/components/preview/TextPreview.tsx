@@ -1,5 +1,11 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
+import {
+  useBeforeUnload,
+  useBlocker,
+  useLocation,
+  useNavigate,
+  useSearchParams,
+} from 'react-router-dom'
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
@@ -580,6 +586,16 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
   const [saveAuth, setSaveAuth] = useState(false)
 
   const dirty = editing && draft !== state.text
+  const navigationBlocker = useBlocker(dirty)
+  const handleBeforeUnload = useCallback(
+    (event: BeforeUnloadEvent) => {
+      if (!dirty) return
+      event.preventDefault()
+      event.returnValue = ''
+    },
+    [dirty],
+  )
+  useBeforeUnload(handleBeforeUnload)
 
   const enterEdit = useCallback(() => {
     if (tooLargeToEdit) return
@@ -607,6 +623,7 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
     try {
       await putFile(storage, fileKey, draft, true)
       toast.success(`Saved ${fileKey}`)
+      if (navigationBlocker.state === 'blocked') navigationBlocker.reset()
       setConfirmSave(false)
       setEditing(false)
       // Refresh the preview buffer + listing + stat so the new content/size show.
@@ -629,7 +646,7 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
     } finally {
       setSaving(false)
     }
-  }, [storage, fileKey, draft, src, queryClient])
+  }, [storage, fileKey, draft, src, queryClient, navigationBlocker])
 
   const cancelEdit = useCallback(() => {
     if (dirty) setDiscardConfirm(true)
@@ -1375,6 +1392,23 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
           setEditing(false)
         }}
         onCancel={() => setDiscardConfirm(false)}
+      />
+      <ConfirmDialog
+        open={navigationBlocker.state === 'blocked'}
+        title="Leave without saving?"
+        description="Your unsaved edits will be lost."
+        confirmLabel="Leave"
+        destructive
+        onConfirm={() => {
+          if (navigationBlocker.state === 'blocked') {
+            navigationBlocker.proceed()
+          }
+        }}
+        onCancel={() => {
+          if (navigationBlocker.state === 'blocked') {
+            navigationBlocker.reset()
+          }
+        }}
       />
       {saveAuth && (
         <TokenPrompt
