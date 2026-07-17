@@ -16,6 +16,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { getUploadStatusMessage } from '@/lib/accessibility'
 import { MAX_PUT_BYTES } from '@/lib/upload-limits'
 import { cn } from '@/lib/utils'
 
@@ -220,6 +221,7 @@ export function UploadDialog({ storage, prefix, onClose }: UploadDialogProps) {
     (i) => i.status === 'pending' || i.status === 'error',
   ).length
   const doneCount = items.filter((i) => i.status === 'done').length
+  const errorCount = items.filter((i) => i.status === 'error').length
   const uploadableCount = items.filter((i) => i.status !== 'too-large').length
 
   return (
@@ -327,11 +329,13 @@ export function UploadDialog({ storage, prefix, onClose }: UploadDialogProps) {
           )}
 
           <p role="status" aria-live="polite" className="sr-only">
-            {uploading
-              ? `Uploading files. ${doneCount} of ${uploadableCount} complete.`
-              : doneCount > 0 && pendingCount === 0
-                ? `Upload complete. ${doneCount} file${doneCount === 1 ? '' : 's'} uploaded.`
-                : ''}
+            {getUploadStatusMessage(
+              uploading,
+              doneCount,
+              errorCount,
+              pendingCount,
+              uploadableCount,
+            )}
           </p>
 
           <DialogFooter>

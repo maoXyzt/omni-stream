@@ -1,4 +1,4 @@
-import { useRef } from 'react'
+import { useRef, type RefObject } from 'react'
 import { Download, ExternalLink } from 'lucide-react'
 
 import { proxyUrl } from '@/api/storage'
@@ -6,6 +6,7 @@ import { useGlobalShortcut } from '@/hooks/use-global-shortcut'
 import { getPreviewType } from '@/components/preview/registry'
 import type { PreviewKind } from '@/components/preview/types'
 import { Button } from '@/components/ui/button'
+import { getPreviewReturnFocus } from '@/lib/accessibility'
 import {
   Dialog,
   DialogContent,
@@ -28,6 +29,7 @@ interface Props {
   version?: string | null
   onClose: () => void
   onNavigate?: (dir: 'prev' | 'next') => void
+  fallbackFocusRef?: RefObject<HTMLElement | null>
 }
 
 export function PreviewModal({
@@ -37,6 +39,7 @@ export function PreviewModal({
   version,
   onClose,
   onNavigate,
+  fallbackFocusRef,
 }: Props) {
   const contentRef = useRef<HTMLDivElement>(null)
   const previousFocusRef = useRef<HTMLElement | null>(null)
@@ -87,11 +90,13 @@ export function PreviewModal({
           contentRef.current?.focus({ preventScroll: true })
         }}
         onCloseAutoFocus={(e) => {
+          const focusTarget = getPreviewReturnFocus(
+            previousFocusRef.current,
+            fallbackFocusRef?.current ?? null,
+          )
+          if (!focusTarget) return
           e.preventDefault()
-          const previousFocus = previousFocusRef.current
-          if (previousFocus?.isConnected) {
-            previousFocus.focus({ preventScroll: true })
-          }
+          focusTarget.focus({ preventScroll: true })
         }}
         className="flex h-[95vh] w-[95vw] max-w-[95vw] flex-col sm:max-w-[95vw]"
       >
