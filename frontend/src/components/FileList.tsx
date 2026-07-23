@@ -1,4 +1,13 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
@@ -40,6 +49,7 @@ import {
   getRovingKey,
   getRovingEntryAction,
   getRovingStep,
+  getRovingTabStopKey,
   shouldEnterRovingRing,
   type RovingDirection,
 } from '@/lib/roving-navigation'
@@ -981,6 +991,19 @@ export function FileList() {
   // window. Threshold 100px = roughly "user has scrolled past the toolbar".
   const mainRef = useRef<HTMLElement>(null)
   const [scrolled, setScrolled] = useState(false)
+
+  useLayoutEffect(() => {
+    const container = mainRef.current
+    if (!container) return
+    const targetKey = getRovingTabStopKey(
+      filteredEntries.map((entry) => entry.key),
+      getRovingKey(document.activeElement),
+    )
+    container.querySelectorAll<HTMLElement>('[data-roving-key]').forEach((entry) => {
+      entry.tabIndex = getRovingKey(entry) === targetKey ? 0 : -1
+    })
+  }, [filteredEntries, viewMode])
+
   const handleMainScroll = useCallback(() => {
     const el = mainRef.current
     if (!el) return

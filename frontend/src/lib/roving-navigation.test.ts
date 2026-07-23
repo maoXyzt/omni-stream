@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  getRovingTabStopKey,
   getRovingStep,
   getRovingEntryAction,
   isRovingEntryTarget,
@@ -32,6 +33,12 @@ describe('roving navigation guards', () => {
     expect(isRovingEntryTarget(entry)).toBe(true)
     expect(isRovingEntryTarget(toolbarButton)).toBe(false)
     expect(isRovingEntryTarget(null)).toBe(false)
+  })
+
+  it('keeps one valid tab stop across reordering', () => {
+    expect(getRovingTabStopKey(['c', 'b', 'a'], 'b')).toBe('b')
+    expect(getRovingTabStopKey(['c', 'b', 'a'], 'missing')).toBe('c')
+    expect(getRovingTabStopKey([], null)).toBeNull()
   })
 
   it('does not handle horizontal movement in list view', () => {
