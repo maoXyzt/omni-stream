@@ -2343,6 +2343,13 @@ function Pager({
   const prevBusy = busy && pendingAction === 'prev'
   const nextBusy = busy && pendingAction === 'next'
   const centerBusy = busy && !prevBusy && !nextBusy
+  const loadingMessage = prevBusy
+    ? 'Loading previous page'
+    : nextBusy
+      ? 'Loading next page'
+      : centerBusy
+        ? 'Loading page'
+        : ''
   const commit = () => {
     const n = Number(input)
     if (!Number.isFinite(n) || n < 1) {
@@ -2370,10 +2377,14 @@ function Pager({
 
   return (
     <div className="flex flex-wrap items-center justify-end gap-2">
+      <span className="sr-only" role="status" aria-live="polite">
+        {loadingMessage}
+      </span>
       <Button
         variant="outline"
         size="sm"
-        aria-label="Previous page"
+        aria-label={prevBusy ? loadingMessage : 'Previous page'}
+        aria-busy={prevBusy || undefined}
         disabled={!hasPrev || busy}
         onClick={() => {
           setPendingAction('prev')
@@ -2381,11 +2392,13 @@ function Pager({
         }}
       >
         {prevBusy ? (
-          <Loader2 className="size-4 animate-spin" />
+          <Loader2 className="size-4 animate-spin" aria-hidden="true" />
         ) : (
           <ChevronLeft className="size-4" />
         )}
-        <span className="hidden sm:inline">{prevBusy ? 'Loading…' : 'Prev'}</span>
+        <span className={cn(!prevBusy && 'hidden sm:inline')}>
+          {prevBusy ? 'Loading…' : 'Prev'}
+        </span>
       </Button>
       <div className="flex items-center gap-1.5">
         <span className="hidden text-xs text-muted-foreground sm:inline">Page</span>
@@ -2417,24 +2430,27 @@ function Pager({
         )}
         {centerBusy && (
           <span className="flex items-center gap-1 text-xs text-muted-foreground">
-            <Loader2 className="size-3.5 animate-spin" />
-            <span className="hidden sm:inline">Loading…</span>
+            <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+            <span>Loading…</span>
           </span>
         )}
       </div>
       <Button
         variant="outline"
         size="sm"
-        aria-label="Next page"
+        aria-label={nextBusy ? loadingMessage : 'Next page'}
+        aria-busy={nextBusy || undefined}
         disabled={!hasNext || busy}
         onClick={() => {
           setPendingAction('next')
           onNext()
         }}
       >
-        <span className="hidden sm:inline">{nextBusy ? 'Loading…' : 'Next'}</span>
+        <span className={cn(!nextBusy && 'hidden sm:inline')}>
+          {nextBusy ? 'Loading…' : 'Next'}
+        </span>
         {nextBusy ? (
-          <Loader2 className="size-4 animate-spin" />
+          <Loader2 className="size-4 animate-spin" aria-hidden="true" />
         ) : (
           <ChevronRight className="size-4" />
         )}
