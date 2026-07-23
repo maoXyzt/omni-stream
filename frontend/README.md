@@ -93,8 +93,9 @@ src/
 
 * 路径别名 `@/*` → `src/*`（见 `tsconfig.app.json` / `vite.config.ts` /
   `vitest.config.ts`，三处必须保持一致）。
-* `components/ui/` 下的文件由 `shadcn` CLI 生成 —— 不要手动重命名/拆分内部 API；
-  扩展样式去 `components/` 里再包一层。
+* `components/ui/` 下的文件由 `shadcn` CLI 生成 —— 不要手动重命名/拆分内部 API。
+  焦点、触控目标等全局无障碍不变量直接维护在 primitive 中；业务特定的样式扩展
+  去 `components/` 里再包一层。
 
 ---
 

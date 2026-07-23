@@ -987,7 +987,12 @@ export function FileList() {
     setScrolled(el.scrollTop > 100)
   }, [])
   const scrollToTop = useCallback(() => {
-    mainRef.current?.scrollTo({ top: 0 })
+    mainRef.current?.scrollTo({
+      top: 0,
+      behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches
+        ? 'auto'
+        : 'smooth',
+    })
   }, [])
 
   // ---------------------------------------------------------------------------
@@ -2337,8 +2342,7 @@ function Pager({
 
   const prevBusy = busy && pendingAction === 'prev'
   const nextBusy = busy && pendingAction === 'next'
-  const centerBusy =
-    (walking || pendingAction === 'goto') && !prevBusy && !nextBusy
+  const centerBusy = busy && !prevBusy && !nextBusy
   const commit = () => {
     const n = Number(input)
     if (!Number.isFinite(n) || n < 1) {
