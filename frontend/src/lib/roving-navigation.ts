@@ -28,6 +28,15 @@ export function shouldEnterRovingRing(active: unknown, body: unknown): boolean {
   return active == null || active === body || isRovingEntryTarget(active)
 }
 
+export function getRovingTabStopKey(
+  keys: readonly string[],
+  activeKey: string | null,
+): string | null {
+  return activeKey !== null && keys.includes(activeKey)
+    ? activeKey
+    : (keys[0] ?? null)
+}
+
 export function getRovingStep(
   viewMode: ViewMode,
   dir: RovingDirection,
@@ -44,10 +53,14 @@ export function getRovingStep(
   return dir === 'down' ? columns : -columns
 }
 
-export function shouldActivateRovingRow(
+export function getRovingEntryAction(
   key: string,
   target: unknown,
   currentTarget: unknown,
-): boolean {
-  return target === currentTarget && (key === 'Enter' || key === ' ')
+  selectable: boolean,
+): 'activate' | 'select' | null {
+  if (target !== currentTarget) return null
+  if (key === 'Enter') return 'activate'
+  if (key === ' ') return selectable ? 'select' : 'activate'
+  return null
 }

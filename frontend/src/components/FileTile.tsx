@@ -13,6 +13,7 @@ import {
 import type { GridFit } from '@/hooks/use-grid-fit'
 import { extensionOf } from '@/lib/path'
 import { canThumbnail, GRID_THUMB_MIN_BYTES } from '@/lib/thumbnail'
+import { getRovingEntryAction } from '@/lib/roving-navigation'
 import { cn } from '@/lib/utils'
 import type { FileEntry } from '@/types/storage'
 
@@ -25,6 +26,7 @@ interface FileTileProps {
   inBucketRoot: boolean
   fit: GridFit
   onSelect: (entry: FileEntry) => void
+  rovingTabIndex: 0 | -1
   /// When provided, the tile shows a checkbox in the top-left corner.
   selectionChecked?: boolean
   onSelectionToggle?: (entry: FileEntry, shiftKey: boolean) => void
@@ -43,6 +45,7 @@ export const FileTile = memo(function FileTile({
   inBucketRoot,
   fit,
   onSelect,
+  rovingTabIndex,
   selectionChecked,
   onSelectionToggle,
 }: FileTileProps) {
@@ -70,6 +73,21 @@ export const FileTile = memo(function FileTile({
           // names that aren't actually truncated also get a redundant tooltip
           // on long hovers, which is acceptable.
           title={name}
+          tabIndex={rovingTabIndex}
+          onKeyDown={(e) => {
+            if (
+              getRovingEntryAction(
+                e.key,
+                e.target,
+                e.currentTarget,
+                selectable,
+              ) !== 'select'
+            ) {
+              return
+            }
+            e.preventDefault()
+            onSelectionToggle?.(entry, e.shiftKey)
+          }}
           // Stable data attribute for roving focus navigation — queried by the
           // arrow-key handlers in FileList. Derived purely from `entry.key` so
           // it never causes React.memo to re-render.
@@ -125,6 +143,7 @@ export const FileTile = memo(function FileTile({
               selectionChecked
                 ? 'opacity-100'
                 : 'opacity-0 group-hover:opacity-100 group-has-[:focus-visible]:opacity-100',
+              'pointer-coarse:opacity-100',
             )}
             onClick={(e) => {
               e.stopPropagation()
@@ -134,7 +153,8 @@ export const FileTile = memo(function FileTile({
             <Checkbox
               checked={selectionChecked ?? false}
               aria-label={`Select ${name}`}
-              className="bg-background/90 shadow-sm"
+              tabIndex={-1}
+              className="before:bg-background/90 before:shadow-sm"
             />
           </div>
         )}

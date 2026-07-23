@@ -59,10 +59,15 @@ export function BatchMoveDialog({
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-1">
+          <label htmlFor="batch-move-destination" className="text-sm font-medium">
+            Destination
+          </label>
           <Input
+            id="batch-move-destination"
             autoFocus
             placeholder="path/to/destination/"
             value={value}
+            aria-describedby="batch-move-destination-help"
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !busy) {
@@ -71,7 +76,10 @@ export function BatchMoveDialog({
               }
             }}
           />
-          <p className="text-xs text-muted-foreground">
+          <p
+            id="batch-move-destination-help"
+            className="text-xs text-muted-foreground"
+          >
             Leave empty to move to the root directory.
           </p>
         </div>

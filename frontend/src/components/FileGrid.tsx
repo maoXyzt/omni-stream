@@ -50,7 +50,7 @@ export function FileGrid({
       // the computed column count at runtime via getComputedStyle.
       data-roving-grid
     >
-      {entries.map((entry) => (
+      {entries.map((entry, index) => (
         <FileTile
           key={entry.key}
           entry={entry}
@@ -63,6 +63,7 @@ export function FileGrid({
             selectedKeys !== undefined ? selectedKeys.has(entry.key) : undefined
           }
           onSelectionToggle={onSelectionToggle}
+          rovingTabIndex={index === 0 ? 0 : -1}
         />
       ))}
     </div>

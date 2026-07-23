@@ -106,10 +106,16 @@ export function NewFolderDialog({ storage, prefix, onClose }: Props) {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-1">
+            <label htmlFor="new-folder-name" className="text-sm font-medium">
+              Folder name
+            </label>
             <Input
+              id="new-folder-name"
               autoFocus
               placeholder="folder-name"
               value={name}
+              aria-invalid={Boolean(nameError)}
+              aria-describedby={nameError ? 'new-folder-name-error' : undefined}
               onChange={(e) => setName(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && canSubmit) {
@@ -119,7 +125,13 @@ export function NewFolderDialog({ storage, prefix, onClose }: Props) {
               }}
             />
             {nameError && (
-              <p className="text-xs text-destructive">{nameError}</p>
+              <p
+                id="new-folder-name-error"
+                role="alert"
+                className="text-xs text-destructive"
+              >
+                {nameError}
+              </p>
             )}
           </div>
           <DialogFooter>

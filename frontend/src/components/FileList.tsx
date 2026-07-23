@@ -1,4 +1,13 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
@@ -23,6 +32,7 @@ import {
   KeyRound,
   Loader2,
   LogOut,
+  Ellipsis,
   PanelLeft,
   PanelLeftClose,
   RotateCw,
@@ -37,8 +47,9 @@ import { listFiles, proxyUrl, statFile } from '@/api/storage'
 import { basenameOf } from '@/lib/path'
 import {
   getRovingKey,
+  getRovingEntryAction,
   getRovingStep,
-  shouldActivateRovingRow,
+  getRovingTabStopKey,
   shouldEnterRovingRing,
   type RovingDirection,
 } from '@/lib/roving-navigation'
@@ -980,13 +991,31 @@ export function FileList() {
   // window. Threshold 100px = roughly "user has scrolled past the toolbar".
   const mainRef = useRef<HTMLElement>(null)
   const [scrolled, setScrolled] = useState(false)
+
+  useLayoutEffect(() => {
+    const container = mainRef.current
+    if (!container) return
+    const targetKey = getRovingTabStopKey(
+      filteredEntries.map((entry) => entry.key),
+      getRovingKey(document.activeElement),
+    )
+    container.querySelectorAll<HTMLElement>('[data-roving-key]').forEach((entry) => {
+      entry.tabIndex = getRovingKey(entry) === targetKey ? 0 : -1
+    })
+  }, [filteredEntries, viewMode])
+
   const handleMainScroll = useCallback(() => {
     const el = mainRef.current
     if (!el) return
     setScrolled(el.scrollTop > 100)
   }, [])
   const scrollToTop = useCallback(() => {
-    mainRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
+    mainRef.current?.scrollTo({
+      top: 0,
+      behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches
+        ? 'auto'
+        : 'smooth',
+    })
   }, [])
 
   // ---------------------------------------------------------------------------
@@ -1038,6 +1067,10 @@ export function FileList() {
         `[data-roving-key="${CSS.escape(target.key)}"]`,
       )
       if (!(el instanceof HTMLElement)) return false
+      if (active instanceof HTMLElement && getRovingKey(active) !== null) {
+        active.tabIndex = -1
+      }
+      el.tabIndex = 0
       el.focus({ preventScroll: true })
       el.scrollIntoView({ block: 'nearest' })
       return true
@@ -1186,12 +1219,12 @@ export function FileList() {
   }
 
   return (
-    <div className="flex h-screen w-full flex-col">
-      <header className="flex shrink-0 flex-wrap items-center gap-3 border-b border-border bg-background px-6 py-3">
-        <h1 className="text-2xl font-semibold">
+    <div className="flex h-dvh w-full flex-col">
+      <header className="flex shrink-0 flex-wrap items-center gap-3 border-b border-border bg-background px-3 py-3 sm:px-6">
+        <h1 className="min-w-0 text-2xl font-semibold">
           OmniStream
           {serverInfo.data?.hostname && (
-            <span className="ml-2 text-base font-normal text-muted-foreground">
+            <span className="ml-2 hidden max-w-[40vw] truncate align-middle text-base font-normal text-muted-foreground md:inline-block">
               {serverInfo.data.hostname}
             </span>
           )}
@@ -1250,7 +1283,7 @@ export function FileList() {
           ref={mainRef}
           tabIndex={-1}
           onScroll={handleMainScroll}
-          className="flex w-full min-w-0 flex-col gap-4 overflow-y-auto px-6 py-4"
+          className="flex w-full min-w-0 flex-col gap-4 overflow-y-auto px-3 py-4 sm:px-6"
         >
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex min-w-0 flex-1 items-center gap-1">
@@ -1280,7 +1313,7 @@ export function FileList() {
               <PathBreadcrumb prefix={prefix} onNavigate={goToPath} />
               <PathNavigator prefix={prefix} activeStorage={activeStorage} onNavigate={goToPathOrFile} />
             </div>
-            <div className="flex shrink-0 items-center gap-2">
+            <div className="flex w-full shrink-0 flex-wrap items-center justify-between gap-2 lg:w-auto lg:justify-start">
               {/* Sort dropdown — field selector (name/size/mtime/type) and
                   direction toggle. The dropdown is compact so it doesn't
                   crowd the toolbar on narrow viewports. */}
@@ -1351,7 +1384,7 @@ export function FileList() {
                 <TooltipContent>Refresh listing</TooltipContent>
               </Tooltip>
               {canWrite && (
-                <>
+                <div className="hidden items-center gap-2 lg:flex">
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <Button
@@ -1391,50 +1424,122 @@ export function FileList() {
                     </TooltipTrigger>
                     <TooltipContent>Upload files here</TooltipContent>
                   </Tooltip>
-                </>
+                </div>
               )}
               <ViewToggle mode={viewMode} onChange={setViewMode} />
               {viewMode === 'grid' && (
-                <GridFitToggle fit={gridFit} onChange={setGridFit} />
+                <div className="hidden lg:block">
+                  <GridFitToggle fit={gridFit} onChange={setGridFit} />
+                </div>
               )}
-              <ShareLinkButton />
-              {serverInfo.data?.auth_enabled && !hasToken && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      aria-label="Auth Token"
-                      onClick={() => setShowTokenPrompt(true)}
-                    >
+              <div className="hidden items-center gap-2 lg:flex">
+                <ShareLinkButton />
+                {serverInfo.data?.auth_enabled && !hasToken && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        aria-label="Auth Token"
+                        onClick={() => setShowTokenPrompt(true)}
+                      >
+                        <KeyRound className="size-4" />
+                        Auth Token
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      Enter the bearer token (needed for write operations, e.g. convert)
+                    </TooltipContent>
+                  </Tooltip>
+                )}
+                {hasToken && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        aria-label="Sign out"
+                        onClick={() => {
+                          setStoredToken(null)
+                          queryClient.invalidateQueries()
+                        }}
+                      >
+                        <LogOut className="size-4" />
+                        Sign out
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Clear the stored bearer token</TooltipContent>
+                  </Tooltip>
+                )}
+              </div>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="lg:hidden"
+                    aria-label="More actions"
+                  >
+                    <Ellipsis className="size-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-52 lg:hidden">
+                  {canWrite && (
+                    <>
+                      <DropdownMenuItem onSelect={() => setShowNewFolder(true)}>
+                        <FolderPlus className="size-4" />
+                        New folder
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onSelect={() => setShowNewFile(true)}>
+                        <FilePlus className="size-4" />
+                        New file
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onSelect={() => setShowUpload(true)}>
+                        <Upload className="size-4" />
+                        Upload files
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                    </>
+                  )}
+                  {viewMode === 'grid' && (
+                    <>
+                      <DropdownMenuLabel className="text-xs">
+                        Thumbnail fit
+                      </DropdownMenuLabel>
+                      <DropdownMenuRadioGroup
+                        value={gridFit}
+                        onValueChange={(value) => setGridFit(value as typeof gridFit)}
+                      >
+                        <DropdownMenuRadioItem value="cover">
+                          Fill thumbnails
+                        </DropdownMenuRadioItem>
+                        <DropdownMenuRadioItem value="contain">
+                          Fit thumbnails
+                        </DropdownMenuRadioItem>
+                      </DropdownMenuRadioGroup>
+                      <DropdownMenuSeparator />
+                    </>
+                  )}
+                  <ShareLinkButton menuItem />
+                  {serverInfo.data?.auth_enabled && !hasToken && (
+                    <DropdownMenuItem onSelect={() => setShowTokenPrompt(true)}>
                       <KeyRound className="size-4" />
-                      Auth Token
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    Enter the bearer token (needed for write operations, e.g. convert)
-                  </TooltipContent>
-                </Tooltip>
-              )}
-              {hasToken && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      aria-label="Sign out"
-                      onClick={() => {
+                      Auth token
+                    </DropdownMenuItem>
+                  )}
+                  {hasToken && (
+                    <DropdownMenuItem
+                      onSelect={() => {
                         setStoredToken(null)
                         queryClient.invalidateQueries()
                       }}
                     >
                       <LogOut className="size-4" />
                       Sign out
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>Clear the stored bearer token</TooltipContent>
-                </Tooltip>
-              )}
+                    </DropdownMenuItem>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           </div>
 
@@ -1704,7 +1809,7 @@ export function FileList() {
                 onSelectionToggle={handleSelectionToggle}
               />
             ) : (
-              <Table>
+              <Table aria-label="Files">
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-8">
@@ -1720,9 +1825,9 @@ export function FileList() {
                       />
                     </TableHead>
                     <TableHead className="w-1/2">Name</TableHead>
-                    <TableHead className="w-28">Type</TableHead>
-                    <TableHead className="w-32 text-right">Size</TableHead>
-                    <TableHead>Modified</TableHead>
+                    <TableHead className="hidden w-28 lg:table-cell">Type</TableHead>
+                    <TableHead className="hidden w-32 text-right lg:table-cell">Size</TableHead>
+                    <TableHead className="hidden lg:table-cell">Modified</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -1738,7 +1843,7 @@ export function FileList() {
                       </TableCell>
                     </TableRow>
                   )}
-                  {filteredEntries.map((entry) => (
+                  {filteredEntries.map((entry, index) => (
                     <FileRow
                       key={entry.key}
                       entry={entry}
@@ -1748,6 +1853,7 @@ export function FileList() {
                       onSelect={handleEntry}
                       selectionChecked={selection.isSelected(entry.key)}
                       onSelectionToggle={handleSelectionToggle}
+                      rovingTabIndex={index === 0 ? 0 : -1}
                     />
                   ))}
                 </TableBody>
@@ -1811,7 +1917,7 @@ export function FileList() {
   )
 }
 
-function ShareLinkButton() {
+function ShareLinkButton({ menuItem = false }: { menuItem?: boolean }) {
   const [copied, setCopied] = useState(false)
 
   useEffect(() => {
@@ -1826,12 +1932,22 @@ function ShareLinkButton() {
       if (navigator.clipboard?.writeText) {
         await navigator.clipboard.writeText(url)
         setCopied(true)
+        if (menuItem) toast.success('Link copied')
         return
       }
     } catch {
       // fall through to prompt
     }
     window.prompt('Copy this link:', url)
+  }
+
+  if (menuItem) {
+    return (
+      <DropdownMenuItem onSelect={() => void onClick()}>
+        <Share2 className="size-4" />
+        Copy share link
+      </DropdownMenuItem>
+    )
   }
 
   return (
@@ -1874,6 +1990,7 @@ interface FileRowProps {
   onSelect: (entry: FileEntry) => void
   selectionChecked?: boolean
   onSelectionToggle?: (entry: FileEntry, shiftKey: boolean) => void
+  rovingTabIndex: 0 | -1
 }
 
 function FileRow({
@@ -1884,6 +2001,7 @@ function FileRow({
   onSelect,
   selectionChecked,
   onSelectionToggle,
+  rovingTabIndex,
 }: FileRowProps) {
   const isBucket = entry.is_dir && inBucketRoot
   const dir = dirVisual(isBucket)
@@ -1900,14 +2018,24 @@ function FileRow({
         onClick={() => onSelect(entry)}
         // Roving navigation: make the row focusable and handle Enter so that
         // arrow-key focus works in list view. The <tr> is not a native button,
-        // so Enter activation must be explicit. tabIndex={-1} removes the row
-        // from the natural Tab order (arrow keys are the intended nav path).
-        tabIndex={-1}
+        // so Enter activation must be explicit. Only the first row joins the
+        // natural Tab order; arrow keys move that single roving tab stop.
+        tabIndex={rovingTabIndex}
         data-roving-key={entry.key}
         onKeyDown={(e) => {
-          if (!shouldActivateRovingRow(e.key, e.target, e.currentTarget)) return
+          const action = getRovingEntryAction(
+            e.key,
+            e.target,
+            e.currentTarget,
+            selectable,
+          )
+          if (!action) return
           e.preventDefault()
-          onSelect(entry)
+          if (action === 'select') {
+            onSelectionToggle?.(entry, e.shiftKey)
+          } else {
+            onSelect(entry)
+          }
         }}
       >
         <TableCell
@@ -1921,6 +2049,7 @@ function FileRow({
             <Checkbox
               checked={selectionChecked ?? false}
               aria-label={`Select ${name}`}
+              tabIndex={-1}
             />
           ) : null}
         </TableCell>
@@ -1935,11 +2064,13 @@ function FileRow({
             {name}
           </span>
         </TableCell>
-        <TableCell className="text-muted-foreground">{typeLabel}</TableCell>
-        <TableCell className="text-right tabular-nums text-muted-foreground">
+        <TableCell className="hidden text-muted-foreground lg:table-cell">
+          {typeLabel}
+        </TableCell>
+        <TableCell className="hidden text-right tabular-nums text-muted-foreground lg:table-cell">
           {entry.is_dir ? '—' : formatBytes(entry.size)}
         </TableCell>
-        <TableCell className="text-muted-foreground">
+        <TableCell className="hidden text-muted-foreground lg:table-cell">
           {formatTime(entry.last_modified)}
         </TableCell>
       </TableRow>
@@ -2039,9 +2170,10 @@ function GalleryRow({
         {/* Fixed-width checkbox slot — always rendered (even for dirs) so that
             the icon column starts at the same left offset as in the full-width
             TableRow (w-8 slot + px-2 button padding = 40 px, matching
-            TableHead w-8 + TableCell p-2). */}
+            TableHead w-8 + TableCell p-2). Coarse pointers reserve the full
+            44 px checkbox target plus the leading 8 px. */}
         <div
-          className="flex w-8 shrink-0 items-center pl-2"
+          className="flex w-8 shrink-0 items-center pl-2 pointer-coarse:w-[52px]"
           onClick={(e) => {
             if (!selectable) return
             e.stopPropagation()
@@ -2052,6 +2184,7 @@ function GalleryRow({
             <Checkbox
               checked={selectionChecked ?? false}
               aria-label={`Select ${name}`}
+              tabIndex={-1}
               className={cn(
                 'transition-opacity duration-150',
                 selectionChecked
@@ -2065,6 +2198,20 @@ function GalleryRow({
           ref={ref}
           type="button"
           onClick={() => onSelect(entry)}
+          onKeyDown={(e) => {
+            if (
+              getRovingEntryAction(
+                e.key,
+                e.target,
+                e.currentTarget,
+                selectable,
+              ) !== 'select'
+            ) {
+              return
+            }
+            e.preventDefault()
+            onSelectionToggle?.(entry, e.shiftKey)
+          }}
           title={name}
           className="flex min-w-0 flex-1 items-center gap-2 px-2 py-2 text-left"
         >
@@ -2134,8 +2281,8 @@ function FilterBar({
   totalCount,
 }: FilterBarProps) {
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      <div className="relative min-w-[180px] max-w-xs flex-1">
+    <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+      <div className="relative min-w-0 flex-1 sm:min-w-[180px] sm:max-w-xs">
         <Search className="pointer-events-none absolute left-2 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
         <Input
           type="search"
@@ -2143,14 +2290,14 @@ function FilterBar({
           onChange={(e) => onNameChange(e.target.value)}
           placeholder="Filter by name…"
           aria-label="Filter by name"
-          className="h-8 pl-8"
+          className="pl-8"
         />
       </div>
       <select
         value={typeValue}
         onChange={(e) => onTypeChange(e.target.value)}
         aria-label="Filter by type"
-        className="h-8 rounded-md border border-input bg-background px-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+        className="h-8 rounded-md border border-input bg-background px-2 text-sm pointer-coarse:min-h-[44px] pointer-coarse:min-w-[44px] focus:outline-none focus:ring-2 focus:ring-ring"
       >
         <option value="">All types</option>
         {availableTypes.map((t) => (
@@ -2161,7 +2308,7 @@ function FilterBar({
       </select>
       {filtersActive && (
         <>
-          <Button variant="ghost" size="sm" onClick={onClear} className="h-8">
+          <Button variant="ghost" size="sm" onClick={onClear}>
             <X className="size-4" />
             Clear
           </Button>
@@ -2204,13 +2351,29 @@ function Pager({
   // each keystroke firing a navigation. Synced down from `currentPage`
   // whenever the actual page changes (Prev/Next/Goto/back-forward).
   const [input, setInput] = useState(String(currentPage))
+  const [pendingAction, setPendingAction] = useState<
+    'prev' | 'next' | 'goto' | null
+  >(null)
   useEffect(() => {
     setInput(String(currentPage))
   }, [currentPage])
+  const busy = isFetching || walking
+  useEffect(() => {
+    if (!busy) setPendingAction(null)
+  }, [busy])
 
   if (!hasPrev && !hasNext && currentPage === 1) return null
 
-  const busy = isFetching || walking
+  const prevBusy = busy && pendingAction === 'prev'
+  const nextBusy = busy && pendingAction === 'next'
+  const centerBusy = busy && !prevBusy && !nextBusy
+  const loadingMessage = prevBusy
+    ? 'Loading previous page'
+    : nextBusy
+      ? 'Loading next page'
+      : centerBusy
+        ? 'Loading page'
+        : ''
   const commit = () => {
     const n = Number(input)
     if (!Number.isFinite(n) || n < 1) {
@@ -2232,22 +2395,37 @@ function Pager({
       setInput(String(currentPage))
       return
     }
+    setPendingAction('goto')
     onGoto(target)
   }
 
   return (
-    <div className="flex justify-end gap-2">
+    <div className="flex flex-wrap items-center justify-end gap-2">
+      <span className="sr-only" role="status" aria-live="polite">
+        {loadingMessage}
+      </span>
       <Button
         variant="outline"
         size="sm"
+        aria-label={prevBusy ? loadingMessage : 'Previous page'}
+        aria-busy={prevBusy || undefined}
         disabled={!hasPrev || busy}
-        onClick={onPrev}
+        onClick={() => {
+          setPendingAction('prev')
+          onPrev()
+        }}
       >
-        <ChevronLeft className="size-4" />
-        Prev
+        {prevBusy ? (
+          <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+        ) : (
+          <ChevronLeft className="size-4" />
+        )}
+        <span className={cn(!prevBusy && 'hidden sm:inline')}>
+          {prevBusy ? 'Loading…' : 'Prev'}
+        </span>
       </Button>
       <div className="flex items-center gap-1.5">
-        <span className="text-xs text-muted-foreground">Page</span>
+        <span className="hidden text-xs text-muted-foreground sm:inline">Page</span>
         <Input
           type="number"
           min={1}
@@ -2270,22 +2448,36 @@ function Pager({
           className="h-8 w-16 text-center tabular-nums"
         />
         {totalPages !== null && (
-          <span className="text-xs text-muted-foreground tabular-nums">
+          <span className="hidden text-xs text-muted-foreground tabular-nums sm:inline">
             / {totalPages.toLocaleString()}
           </span>
         )}
-        {walking && (
-          <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
+        {centerBusy && (
+          <span className="flex items-center gap-1 text-xs text-muted-foreground">
+            <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+            <span>Loading…</span>
+          </span>
         )}
       </div>
       <Button
         variant="outline"
         size="sm"
+        aria-label={nextBusy ? loadingMessage : 'Next page'}
+        aria-busy={nextBusy || undefined}
         disabled={!hasNext || busy}
-        onClick={onNext}
+        onClick={() => {
+          setPendingAction('next')
+          onNext()
+        }}
       >
-        Next
-        <ChevronRight className="size-4" />
+        <span className={cn(!nextBusy && 'hidden sm:inline')}>
+          {nextBusy ? 'Loading…' : 'Next'}
+        </span>
+        {nextBusy ? (
+          <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+        ) : (
+          <ChevronRight className="size-4" />
+        )}
       </Button>
     </div>
   )
