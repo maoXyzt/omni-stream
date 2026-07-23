@@ -50,6 +50,7 @@ import {
 import { ApiError, getStoredToken, setStoredToken } from '@/api/client'
 import { listFiles, proxyUrl, statFile } from '@/api/storage'
 import {
+  getBrowseScrollTarget,
   getFileListEmptyState,
   saveScrollPosition,
   type FileListEmptyState as EmptyStateKind,
@@ -1025,31 +1026,54 @@ export function FileList() {
   const mainRef = useRef<HTMLElement>(null)
   const galleryListRef = useRef<HTMLDivElement>(null)
   const directoryKey = `${storageName}\0${prefix}`
-  const previousDirectoryKeyRef = useRef(directoryKey)
+  const pageKey = `${directoryKey}\0${currentPage}`
+  const previousBrowseStateRef = useRef({
+    directoryKey,
+    pageKey,
+    splitView,
+    locationKey: location.key,
+  })
   const scrollPositionsRef = useRef(new Map<string, number>())
   const pendingScrollTopRef = useRef<number | null>(null)
   const [scrolled, setScrolled] = useState(false)
 
   useLayoutEffect(() => {
     const currentLocationKey = location.key
-    const directoryChanged = previousDirectoryKeyRef.current !== directoryKey
+    const previous = previousBrowseStateRef.current
+    const directoryChanged = previous.directoryKey !== directoryKey
+    const pageChanged = previous.pageKey !== pageKey
+    const splitViewChanged = previous.splitView !== splitView
     const container = splitView ? galleryListRef.current : mainRef.current
     const scrollPositions = scrollPositionsRef.current
+    const scrollTop = getBrowseScrollTarget({
+      pageChanged,
+      splitViewChanged,
+      historyNavigation: navigationType === 'POP',
+      savedScrollTop: scrollPositions.get(currentLocationKey),
+      previousScrollTop: scrollPositions.get(previous.locationKey),
+    })
 
-    if (container && !directoryChanged) {
-      saveScrollPosition(scrollPositions, currentLocationKey, container.scrollTop)
-    } else if (directoryChanged) {
-      const scrollTop =
-        navigationType === 'POP'
-          ? (scrollPositions.get(currentLocationKey) ?? 0)
-          : 0
+    if (scrollTop === null) {
+      if (container) {
+        saveScrollPosition(
+          scrollPositions,
+          currentLocationKey,
+          container.scrollTop,
+        )
+      }
+    } else {
       pendingScrollTopRef.current = scrollTop
       if (container) container.scrollTop = scrollTop
       setScrolled(scrollTop > 100)
-      mainRef.current?.focus({ preventScroll: true })
+      if (directoryChanged) mainRef.current?.focus({ preventScroll: true })
     }
-    previousDirectoryKeyRef.current = directoryKey
-  }, [directoryKey, location.key, navigationType, splitView])
+    previousBrowseStateRef.current = {
+      directoryKey,
+      pageKey,
+      splitView,
+      locationKey: currentLocationKey,
+    }
+  }, [directoryKey, location.key, navigationType, pageKey, splitView])
 
   useLayoutEffect(() => {
     if (showListSkeleton) return
@@ -1058,7 +1082,7 @@ export function FileList() {
     if (scrollTop === null || !container) return
     container.scrollTop = scrollTop
     pendingScrollTopRef.current = null
-  }, [directoryKey, showListSkeleton, splitView])
+  }, [pageKey, showListSkeleton, splitView])
 
   useLayoutEffect(() => {
     const container = mainRef.current

@@ -2,6 +2,26 @@ export type FileListEmptyState = 'empty-directory' | 'no-matches' | null
 
 const MAX_SCROLL_POSITIONS = 50
 
+interface BrowseScrollTransition {
+  pageChanged: boolean
+  splitViewChanged: boolean
+  historyNavigation: boolean
+  savedScrollTop?: number
+  previousScrollTop?: number
+}
+
+export function getBrowseScrollTarget({
+  pageChanged,
+  splitViewChanged,
+  historyNavigation,
+  savedScrollTop,
+  previousScrollTop,
+}: BrowseScrollTransition): number | null {
+  if (pageChanged) return historyNavigation ? (savedScrollTop ?? 0) : 0
+  if (!splitViewChanged) return null
+  return historyNavigation ? (savedScrollTop ?? 0) : (previousScrollTop ?? 0)
+}
+
 export function saveScrollPosition(
   positions: Map<string, number>,
   key: string,
