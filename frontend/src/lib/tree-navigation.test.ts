@@ -70,7 +70,7 @@ describe('reconcileTreeFocus', () => {
     ).toBe('documents')
   })
 
-  it('keeps focus in visible, unrelated, or not-yet-loaded branches', () => {
+  it('keeps focus in visible or unrelated branches', () => {
     expect(
       reconcileTreeFocus(
         'archive/kept/report',
@@ -82,9 +82,12 @@ describe('reconcileTreeFocus', () => {
     expect(
       reconcileTreeFocus('photos/2026', 'archive', ['archive/kept'], false),
     ).toBe('photos/2026')
+  })
+
+  it('restores a visible tab stop even when more folders can load', () => {
     expect(
       reconcileTreeFocus('archive/later', 'archive', ['archive/kept'], true),
-    ).toBe('archive/later')
+    ).toBe('archive')
   })
 
   it('moves focus off a load-more item after the final page loads', () => {

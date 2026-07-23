@@ -66,10 +66,7 @@ export function reconcileTreeFocus(
   if (parent && !isSameOrDescendant(focusedKey, parent)) {
     return focusedKey
   }
-  if (
-    visibleFolderKeys.some((key) => isSameOrDescendant(focusedKey, key)) ||
-    hasNextPage
-  ) {
+  if (visibleFolderKeys.some((key) => isSameOrDescendant(focusedKey, key))) {
     return focusedKey
   }
   return parent || visibleFolderKeys[0] || null
