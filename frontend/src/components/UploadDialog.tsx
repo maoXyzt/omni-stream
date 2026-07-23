@@ -317,7 +317,7 @@ export function UploadDialog({ storage, prefix, onClose }: UploadDialogProps) {
                         className="mt-1 h-1 w-full overflow-hidden rounded-full bg-muted"
                       >
                         <div
-                          className="h-full rounded-full bg-primary transition-all duration-150"
+                          className="h-full rounded-full bg-primary transition-[width] duration-150"
                           style={{ width: `${item.progress}%` }}
                         />
                       </div>

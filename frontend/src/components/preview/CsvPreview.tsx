@@ -551,7 +551,7 @@ function CellValueDialog({ cell, onClose }: CellValueDialogProps) {
           {cell?.text}
         </pre>
         <DialogFooter showCloseButton>
-          <Button variant="outline" onClick={handleCopy}>
+          <Button variant="outline" onClick={handleCopy} aria-live="polite">
             {copied ? (
               <>
                 <Check className="size-4" />

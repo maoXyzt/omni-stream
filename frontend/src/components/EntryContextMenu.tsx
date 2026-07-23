@@ -159,8 +159,10 @@ export function EntryContextMenu({
     }
   }, [storageName, entry.key, name, dir, queryClient])
 
-  function copyText(text: string) {
+  function copyText(text: string, label: string) {
     void navigator.clipboard?.writeText(text)
+      .then(() => toast.success(`Copied ${label}`))
+      .catch(() => toast.error(`Couldn't copy ${label}`))
   }
 
   function entryUrl(): string {
@@ -209,18 +211,18 @@ export function EntryContextMenu({
       <ContextMenu>
         <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
         <ContextMenuContent>
-          <ContextMenuItem onClick={() => copyText(name)}>
+          <ContextMenuItem onClick={() => copyText(name, 'name')}>
             <Copy />
             Copy name
           </ContextMenuItem>
           {absPath && (
-            <ContextMenuItem onClick={() => copyText(absPath)}>
+            <ContextMenuItem onClick={() => copyText(absPath, 'path')}>
               <FolderTree />
               Copy path
             </ContextMenuItem>
           )}
           <ContextMenuSeparator />
-          <ContextMenuItem onClick={() => copyText(entryUrl())}>
+          <ContextMenuItem onClick={() => copyText(entryUrl(), 'URL')}>
             <LinkIcon />
             Copy URL
           </ContextMenuItem>

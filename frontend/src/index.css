@@ -127,6 +127,9 @@
   html {
     @apply font-sans;
     }
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-ring;
+    }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -137,5 +140,6 @@
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
   }
 }

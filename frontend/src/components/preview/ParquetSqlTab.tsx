@@ -256,13 +256,18 @@ export function ParquetSqlTab({ fileKey, storage }: Props) {
                     // Clipboard API unavailable in insecure contexts; silent no-op.
                   }
                 }}
-                aria-label="Copy error message"
+                aria-live="polite"
               >
                 {queryErrMsgCopied ? (
                   <Check className="size-3.5" />
                 ) : (
                   <Copy className="size-3.5" />
                 )}
+                <span className="sr-only">
+                  {queryErrMsgCopied
+                    ? 'Error message copied'
+                    : 'Copy error message'}
+                </span>
               </Button>
             </div>
             {/* Actionable hint — only present when the server classified

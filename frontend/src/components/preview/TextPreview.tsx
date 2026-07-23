@@ -730,11 +730,18 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
                 type="button"
                 size="icon-sm"
                 variant="outline"
-                aria-label="Copy text"
+                aria-live="polite"
                 disabled={lines.length === 0}
                 onClick={handleCopy}
               >
                 {copied ? <Check /> : <Copy />}
+                <span className="sr-only">
+                  {copied
+                    ? 'Text copied'
+                    : state.done
+                      ? 'Copy text'
+                      : 'Copy loaded text'}
+                </span>
               </Button>
             </TooltipTrigger>
             <TooltipContent>
@@ -1313,6 +1320,7 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
                   variant="ghost"
                   size="icon"
                   className="size-6"
+                  aria-live="polite"
                   onClick={async () => {
                     try {
                       await navigator.clipboard.writeText(convertError.raw ?? '')
@@ -1323,13 +1331,17 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
                       // Clipboard API unavailable in insecure contexts; silent no-op.
                     }
                   }}
-                  aria-label="Copy DuckDB error"
                 >
                   {convertErrRawCopied ? (
                     <Check className="size-3.5" />
                   ) : (
                     <Copy className="size-3.5" />
                   )}
+                  <span className="sr-only">
+                    {convertErrRawCopied
+                      ? 'DuckDB error copied'
+                      : 'Copy DuckDB error'}
+                  </span>
                 </Button>
               </div>
               <pre className="max-h-40 overflow-auto rounded-md border bg-muted/50 px-3 py-2 text-xs whitespace-pre-wrap break-words">

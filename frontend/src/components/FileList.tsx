@@ -1192,12 +1192,6 @@ export function FileList() {
 
   return (
     <div className="flex h-dvh w-full flex-col">
-      <a
-        href="#main-content"
-        className="sr-only focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-[100] focus:rounded-md focus:bg-background focus:px-3 focus:py-2 focus:text-sm focus:font-medium focus:shadow-lg focus:ring-2 focus:ring-ring"
-      >
-        Skip to file list
-      </a>
       <header className="flex shrink-0 flex-wrap items-center gap-3 border-b border-border bg-background px-3 py-3 sm:px-6">
         <h1 className="min-w-0 text-2xl font-semibold">
           OmniStream
@@ -1931,7 +1925,12 @@ function ShareLinkButton({ menuItem = false }: { menuItem?: boolean }) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Button variant="outline" size="sm" onClick={onClick}>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={onClick}
+          aria-live="polite"
+        >
           {copied ? (
             <>
               <Check className="size-4" />
