@@ -131,8 +131,8 @@ function DetailRow({ label, value, copyable, copyValue }: DetailRowProps) {
         <Button
           variant="ghost"
           size="icon-xs"
-          className="size-5 shrink-0 opacity-0 group-hover:opacity-100"
-          aria-label={`Copy ${label}`}
+          className="size-5 shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+          aria-live="polite"
           onClick={handleCopy}
         >
           {copied ? (
@@ -140,6 +140,9 @@ function DetailRow({ label, value, copyable, copyValue }: DetailRowProps) {
           ) : (
             <Copy className="size-3" />
           )}
+          <span className="sr-only">
+            {copied ? `${label} copied` : `Copy ${label}`}
+          </span>
         </Button>
       )}
     </div>
