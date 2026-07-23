@@ -62,7 +62,11 @@ export function TokenPrompt({ onSubmit, onCancel }: Props) {
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+          <label htmlFor="auth-token" className="text-sm font-medium">
+            Bearer token
+          </label>
           <Input
+            id="auth-token"
             type="password"
             autoFocus
             placeholder="Bearer token"

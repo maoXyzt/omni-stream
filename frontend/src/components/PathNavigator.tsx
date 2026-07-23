@@ -106,7 +106,11 @@ export function PathNavigator({ prefix, onNavigate, activeStorage }: PathNavigat
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+          <label htmlFor="path-navigator-input" className="text-sm font-medium">
+            Storage path
+          </label>
           <textarea
+            id="path-navigator-input"
             value={value}
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={handleKeyDown}
@@ -115,6 +119,8 @@ export function PathNavigator({ prefix, onNavigate, activeStorage }: PathNavigat
             spellCheck={false}
             autoComplete="off"
             rows={3}
+            aria-invalid={cleaned ? !resolved.ok : undefined}
+            aria-describedby={cleaned ? 'path-navigator-result' : undefined}
             className={cn(
               'w-full min-w-0 resize-y rounded-lg border border-input bg-transparent px-2.5 py-1.5',
               'font-mono text-sm leading-relaxed transition-colors outline-none',
@@ -124,6 +130,8 @@ export function PathNavigator({ prefix, onNavigate, activeStorage }: PathNavigat
           />
           {cleaned && (
             <div
+              id="path-navigator-result"
+              aria-live="polite"
               className={cn(
                 'flex items-start gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-mono',
                 resolved.ok

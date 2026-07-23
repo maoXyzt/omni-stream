@@ -137,10 +137,16 @@ export function NewFileDialog({ storage, prefix, onClose }: Props) {
           </DialogHeader>
           <div className="space-y-3">
             <div className="space-y-1">
+              <label htmlFor="new-file-name" className="text-sm font-medium">
+                File name
+              </label>
               <Input
+                id="new-file-name"
                 autoFocus
                 placeholder="example.txt"
                 value={name}
+                aria-invalid={Boolean(nameError)}
+                aria-describedby={nameError ? 'new-file-name-error' : undefined}
                 onChange={(e) => setName(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && canSubmit) {
@@ -150,19 +156,31 @@ export function NewFileDialog({ storage, prefix, onClose }: Props) {
                 }}
               />
               {nameError && (
-                <p className="text-xs text-destructive">{nameError}</p>
+                <p
+                  id="new-file-name-error"
+                  role="alert"
+                  className="text-xs text-destructive"
+                >
+                  {nameError}
+                </p>
               )}
             </div>
-            <div className="hljs max-h-[40vh] min-h-[8rem] overflow-auto rounded-md border border-border bg-muted/20 font-mono text-xs">
-              <Editor
-                value={content}
-                onValueChange={setContent}
-                highlight={(code) => highlight(code, ready ? lang : 'plaintext')}
-                padding={12}
-                placeholder="File contents…"
-                textareaClassName="focus:outline-none"
-                style={{ minHeight: '8rem' }}
-              />
+            <div className="space-y-1">
+              <label htmlFor="new-file-content" className="text-sm font-medium">
+                File contents
+              </label>
+              <div className="hljs max-h-[40vh] min-h-[8rem] overflow-auto rounded-md border border-border bg-muted/20 font-mono text-xs">
+                <Editor
+                  value={content}
+                  onValueChange={setContent}
+                  highlight={(code) => highlight(code, ready ? lang : 'plaintext')}
+                  padding={12}
+                  placeholder="File contents…"
+                  textareaId="new-file-content"
+                  textareaClassName="focus:outline-none"
+                  style={{ minHeight: '8rem' }}
+                />
+              </div>
             </div>
           </div>
           <DialogFooter>

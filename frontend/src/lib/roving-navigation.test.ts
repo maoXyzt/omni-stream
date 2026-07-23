@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest'
 
 import {
   getRovingStep,
+  getRovingEntryAction,
   isRovingEntryTarget,
-  shouldActivateRovingRow,
   shouldEnterRovingRing,
 } from '@/lib/roving-navigation'
 
@@ -53,14 +53,15 @@ describe('roving navigation guards', () => {
     expect(getRovingStep('grid', 'up', 1)).toBe(-1)
   })
 
-  it('activates rows with Enter or Space only when the row itself has focus', () => {
+  it('opens with Enter, selects files with Space, and ignores child controls', () => {
     const row = { id: 'row' }
     const checkbox = { id: 'checkbox' }
 
-    expect(shouldActivateRovingRow('Enter', row, row)).toBe(true)
-    expect(shouldActivateRovingRow(' ', row, row)).toBe(true)
-    expect(shouldActivateRovingRow('Enter', checkbox, row)).toBe(false)
-    expect(shouldActivateRovingRow(' ', checkbox, row)).toBe(false)
-    expect(shouldActivateRovingRow('ArrowDown', row, row)).toBe(false)
+    expect(getRovingEntryAction('Enter', row, row, true)).toBe('activate')
+    expect(getRovingEntryAction(' ', row, row, true)).toBe('select')
+    expect(getRovingEntryAction(' ', row, row, false)).toBe('activate')
+    expect(getRovingEntryAction('Enter', checkbox, row, true)).toBeNull()
+    expect(getRovingEntryAction(' ', checkbox, row, true)).toBeNull()
+    expect(getRovingEntryAction('ArrowDown', row, row, true)).toBeNull()
   })
 })

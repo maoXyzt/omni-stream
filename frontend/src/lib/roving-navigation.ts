@@ -44,10 +44,14 @@ export function getRovingStep(
   return dir === 'down' ? columns : -columns
 }
 
-export function shouldActivateRovingRow(
+export function getRovingEntryAction(
   key: string,
   target: unknown,
   currentTarget: unknown,
-): boolean {
-  return target === currentTarget && (key === 'Enter' || key === ' ')
+  selectable: boolean,
+): 'activate' | 'select' | null {
+  if (target !== currentTarget) return null
+  if (key === 'Enter') return 'activate'
+  if (key === ' ') return selectable ? 'select' : 'activate'
+  return null
 }

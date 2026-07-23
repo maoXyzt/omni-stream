@@ -308,7 +308,11 @@ export function EntryContextMenu({
               {name}
             </DialogDescription>
           </DialogHeader>
+          <label htmlFor="rename-file-name" className="text-sm font-medium">
+            New file name
+          </label>
           <Input
+            id="rename-file-name"
             autoFocus
             value={renameValue}
             onChange={(e) => setRenameValue(e.target.value)}
@@ -394,4 +398,3 @@ export function EntryContextMenu({
     </>
   )
 }
-
