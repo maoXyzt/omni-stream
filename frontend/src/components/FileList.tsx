@@ -13,7 +13,9 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
   Navigate,
+  useLocation,
   useNavigate,
+  useNavigationType,
   useParams,
   useSearchParams,
 } from 'react-router-dom'
@@ -44,6 +46,11 @@ import {
 
 import { ApiError, getStoredToken, setStoredToken } from '@/api/client'
 import { listFiles, proxyUrl, statFile } from '@/api/storage'
+import {
+  getDirectoryScrollTop,
+  getFileListEmptyState,
+  type FileListEmptyState as EmptyStateKind,
+} from '@/lib/file-list-ux'
 import { basenameOf } from '@/lib/path'
 import {
   getRovingKey,
@@ -160,7 +167,9 @@ function GithubIcon({ className }: { className?: string }) {
 
 export function FileList() {
   const queryClient = useQueryClient()
+  const location = useLocation()
   const navigate = useNavigate()
+  const navigationType = useNavigationType()
   const params = useParams()
   const [searchParams, setSearchParams] = useSearchParams()
 
@@ -509,7 +518,7 @@ export function FileList() {
         const fallbackPage = Math.max(1, tokenStack.length)
         if (err instanceof ApiError && err.status === 408) {
           toast.error(
-            `Couldn't load page ${stuckPage.toLocaleString()} — the directory listing timed out. Try a smaller jump or use the filter.`,
+            `Couldn't load page ${stuckPage.toLocaleString()} — the directory listing timed out. Try a smaller jump or open a narrower folder.`,
           )
         } else {
           const msg = err instanceof Error ? err.message : 'unknown error'
@@ -768,6 +777,10 @@ export function FileList() {
       return true
     })
   }, [sortedEntries, nameFilter, typeFilter, prefix, inBucketRoot])
+  const emptyState = getFileListEmptyState(
+    sortedEntries.length,
+    filteredEntries.length,
+  )
 
   // ── Multi-select ──────────────────────────────────────────────────────────
   const selection = useSelection()
@@ -1007,7 +1020,44 @@ export function FileList() {
   // and main scroll independently), so we listen on the ref rather than on
   // window. Threshold 100px = roughly "user has scrolled past the toolbar".
   const mainRef = useRef<HTMLElement>(null)
+  const directoryKey = `${storageName}\0${prefix}`
+  const previousDirectoryKeyRef = useRef(directoryKey)
+  const scrollPositionsRef = useRef(new Map<string, number>())
+  const pendingScrollTopRef = useRef<number | null>(null)
   const [scrolled, setScrolled] = useState(false)
+
+  useLayoutEffect(() => {
+    const currentLocationKey = location.key
+    const directoryChanged = previousDirectoryKeyRef.current !== directoryKey
+    const container = mainRef.current
+    const scrollPositions = scrollPositionsRef.current
+
+    if (directoryChanged && container) {
+      const scrollTop = getDirectoryScrollTop(
+        navigationType === 'POP',
+        scrollPositions.get(currentLocationKey),
+      )
+      pendingScrollTopRef.current = scrollTop
+      container.scrollTop = scrollTop
+      container.focus({ preventScroll: true })
+    }
+    previousDirectoryKeyRef.current = directoryKey
+
+    return () => {
+      if (container) {
+        scrollPositions.set(currentLocationKey, container.scrollTop)
+      }
+    }
+  }, [directoryKey, location.key, navigationType])
+
+  useLayoutEffect(() => {
+    if (showListSkeleton) return
+    const scrollTop = pendingScrollTopRef.current
+    const container = mainRef.current
+    if (scrollTop === null || !container) return
+    container.scrollTop = scrollTop
+    pendingScrollTopRef.current = null
+  }, [directoryKey, showListSkeleton])
 
   useLayoutEffect(() => {
     const container = mainRef.current
@@ -1308,6 +1358,9 @@ export function FileList() {
           onScroll={handleMainScroll}
           className="flex w-full min-w-0 flex-col gap-4 overflow-y-auto px-3 py-4 sm:px-6"
         >
+          <span className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+            Opened {prefix || '/'} in {storageName}
+          </span>
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex min-w-0 flex-1 items-center gap-1">
               {storageName && (
@@ -1690,11 +1743,13 @@ export function FileList() {
                 className="flex min-h-0 flex-1 flex-col overflow-y-auto"
               >
                 {filteredEntries.length === 0 ? (
-                  <div className="py-10 text-center text-sm text-muted-foreground">
-                    {sortedEntries.length === 0
-                      ? 'Empty directory.'
-                      : 'No items match the current filter.'}
-                  </div>
+                  <FileListEmptyState
+                    state={emptyState}
+                    canWrite={canWrite}
+                    onClearFilters={clearFilters}
+                    onNewFolder={() => setShowNewFolder(true)}
+                    onUpload={() => setShowUpload(true)}
+                  />
                 ) : (
                   filteredEntries.map((entry) => (
                     <GalleryRow
@@ -1827,7 +1882,15 @@ export function FileList() {
               </div>
             </div>
 
-            {viewMode === 'grid' ? (
+            {emptyState ? (
+              <FileListEmptyState
+                state={emptyState}
+                canWrite={canWrite}
+                onClearFilters={clearFilters}
+                onNewFolder={() => setShowNewFolder(true)}
+                onUpload={() => setShowUpload(true)}
+              />
+            ) : viewMode === 'grid' ? (
               <FileGrid
                 entries={filteredEntries}
                 prefix={prefix}
@@ -1861,18 +1924,6 @@ export function FileList() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredEntries.length === 0 && (
-                    <TableRow>
-                      <TableCell
-                        colSpan={5}
-                        className="text-center text-muted-foreground py-10"
-                      >
-                        {sortedEntries.length === 0
-                          ? 'Empty directory.'
-                          : 'No items match the current filter.'}
-                      </TableCell>
-                    </TableRow>
-                  )}
                   {filteredEntries.map((entry, index) => (
                     <FileRow
                       key={entry.key}
@@ -2342,15 +2393,15 @@ function FilterBar({
           type="search"
           value={nameValue}
           onChange={(e) => onNameChange(e.target.value)}
-          placeholder="Filter by name…"
-          aria-label="Filter by name"
+          placeholder="Filter this page by name…"
+          aria-label="Filter this page by name"
           className="pl-8"
         />
       </div>
       <select
         value={typeValue}
         onChange={(e) => onTypeChange(e.target.value)}
-        aria-label="Filter by type"
+        aria-label="Filter this page by type"
         className="h-8 rounded-md border border-input bg-background px-2 text-sm pointer-coarse:min-h-[44px] pointer-coarse:min-w-[44px] focus:outline-none focus:ring-2 focus:ring-ring"
       >
         <option value="">All types</option>
@@ -2367,10 +2418,64 @@ function FilterBar({
             Clear
           </Button>
           <span className="text-xs text-muted-foreground tabular-nums">
-            {shownCount} of {totalCount}
+            {shownCount} of {totalCount} on this page
           </span>
         </>
       )}
+    </div>
+  )
+}
+
+interface FileListEmptyStateProps {
+  state: EmptyStateKind
+  canWrite: boolean
+  onClearFilters: () => void
+  onNewFolder: () => void
+  onUpload: () => void
+}
+
+function FileListEmptyState({
+  state,
+  canWrite,
+  onClearFilters,
+  onNewFolder,
+  onUpload,
+}: FileListEmptyStateProps) {
+  const noMatches = state === 'no-matches'
+
+  return (
+    <div className="flex flex-col items-center gap-3 py-10 text-center">
+      {noMatches ? (
+        <Search className="size-8 text-muted-foreground" aria-hidden />
+      ) : (
+        <FolderPlus className="size-8 text-muted-foreground" aria-hidden />
+      )}
+      <p
+        className="text-sm text-muted-foreground"
+        role="status"
+        aria-live="polite"
+      >
+        {noMatches
+          ? 'No items match filters on this page.'
+          : 'This directory is empty.'}
+      </p>
+      {noMatches ? (
+        <Button variant="outline" size="sm" onClick={onClearFilters}>
+          <X className="size-4" />
+          Clear filters
+        </Button>
+      ) : canWrite ? (
+        <div className="flex flex-wrap justify-center gap-2">
+          <Button variant="outline" size="sm" onClick={onNewFolder}>
+            <FolderPlus className="size-4" />
+            New folder
+          </Button>
+          <Button size="sm" onClick={onUpload}>
+            <Upload className="size-4" />
+            Upload files
+          </Button>
+        </div>
+      ) : null}
     </div>
   )
 }
