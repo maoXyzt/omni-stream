@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 
-import { getTreeKeyboardAction, type VisibleTreeItem } from '@/lib/tree-navigation'
+import {
+  getTreeKeyboardAction,
+  reconcileTreeFocus,
+  type VisibleTreeItem,
+} from '@/lib/tree-navigation'
 
 const items: VisibleTreeItem[] = [
   { depth: 0, expanded: true },
@@ -53,5 +57,44 @@ describe('getTreeKeyboardAction', () => {
     expect(getTreeKeyboardAction('ArrowUp', items, 0)).toBeNull()
     expect(getTreeKeyboardAction('ArrowRight', items, 2)).toBeNull()
     expect(getTreeKeyboardAction('Enter', items, 1)).toBeNull()
+  })
+})
+
+describe('reconcileTreeFocus', () => {
+  it('falls back when a focused folder disappears', () => {
+    expect(
+      reconcileTreeFocus('archive/removed', 'archive', ['archive/kept'], false),
+    ).toBe('archive')
+    expect(
+      reconcileTreeFocus('removed', '', ['documents', 'photos'], false),
+    ).toBe('documents')
+  })
+
+  it('keeps focus in visible, unrelated, or not-yet-loaded branches', () => {
+    expect(
+      reconcileTreeFocus(
+        'archive/kept/report',
+        'archive',
+        ['archive/kept'],
+        false,
+      ),
+    ).toBe('archive/kept/report')
+    expect(
+      reconcileTreeFocus('photos/2026', 'archive', ['archive/kept'], false),
+    ).toBe('photos/2026')
+    expect(
+      reconcileTreeFocus('archive/later', 'archive', ['archive/kept'], true),
+    ).toBe('archive/later')
+  })
+
+  it('moves focus off a load-more item after the final page loads', () => {
+    expect(
+      reconcileTreeFocus(
+        'load-more:archive',
+        'archive',
+        ['archive/a', 'archive/z'],
+        false,
+      ),
+    ).toBe('archive/z')
   })
 })

@@ -1,3 +1,5 @@
+import type { StorageEntryRef } from '@/types/storage'
+
 /// Percent-encode each path segment for use in a React Router `pathname`,
 /// keeping the `/` separators (and any trailing slash) literal. Without this,
 /// a key containing `#`, `?`, or spaces breaks routing — `#` would start the
@@ -9,11 +11,10 @@ export function encodePathSegments(path: string): string {
 }
 
 export function getSidebarEntryRoute(
-  storage: string,
-  key: string,
-  type: 'folder' | 'file',
+  entry: StorageEntryRef,
   view?: string,
 ): { pathname: string; search: string; cleanKey: string } {
+  const { storage, key, type } = entry
   const cleanKey = key.replace(/^\/+/, '')
   const params = new URLSearchParams()
   if (view) params.set('view', view)

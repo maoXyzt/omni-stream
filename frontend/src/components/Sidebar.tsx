@@ -31,9 +31,12 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { basenameOf } from '@/lib/path'
 import { sortEntries } from '@/lib/sort'
-import { getTreeKeyboardAction } from '@/lib/tree-navigation'
+import {
+  getTreeKeyboardAction,
+  reconcileTreeFocus,
+} from '@/lib/tree-navigation'
 import { cn } from '@/lib/utils'
-import type { FileEntry } from '@/types/storage'
+import type { FileEntry, StorageEntryRef } from '@/types/storage'
 
 interface SidebarProps {
   /// The current path the user is viewing (URL-driven). The tree highlights
@@ -45,11 +48,7 @@ interface SidebarProps {
   /// themselves) get the bucket visual instead of the folder one.
   multiBucket: boolean
   onNavigate: (prefix: string) => void
-  onNavigateEntry: (
-    storage: string,
-    key: string,
-    type: 'folder' | 'file',
-  ) => void
+  onNavigateEntry: (entry: StorageEntryRef) => void
 }
 
 export function Sidebar({
@@ -190,7 +189,7 @@ export function Sidebar({
                             : undefined
                         }
                         onClick={() =>
-                          onNavigateEntry(f.storage, f.key, f.type)
+                          onNavigateEntry(f)
                         }
                       >
                         {f.type === 'folder' ? (
@@ -256,7 +255,7 @@ export function Sidebar({
                       className="flex w-full items-center gap-1.5 rounded-sm px-2 py-1 text-left text-xs text-muted-foreground hover:bg-accent hover:text-foreground pointer-coarse:min-h-11"
                       aria-label={`Open ${label}, ${location}`}
                       onClick={() =>
-                        onNavigateEntry(r.storage, r.key, r.type)
+                        onNavigateEntry(r)
                       }
                     >
                       {r.type === 'folder' ? (
@@ -341,7 +340,7 @@ interface TreeLevelProps {
   expand: TreeExpandedApi
   onNavigate: (prefix: string) => void
   focusedKey: string | null
-  onFocusKey: (key: string) => void
+  onFocusKey: (key: string | null) => void
 }
 
 function TreeLevel({
@@ -357,6 +356,7 @@ function TreeLevel({
   onFocusKey,
 }: TreeLevelProps) {
   const query = useInfiniteListFiles(parent, storageName)
+  const loadMoreKey = `load-more:${parent}`
 
   const folders = useMemo(() => {
     const dirs =
@@ -365,6 +365,24 @@ function TreeLevel({
       ) ?? []
     return sortEntries(dirs, sortDir)
   }, [query.data?.pages, sortDir])
+
+  useEffect(() => {
+    if (query.isPending) return
+    const nextFocus = reconcileTreeFocus(
+      focusedKey,
+      parent,
+      folders.map((folder) => folder.key),
+      query.hasNextPage,
+    )
+    if (nextFocus !== focusedKey) onFocusKey(nextFocus)
+  }, [
+    folders,
+    focusedKey,
+    onFocusKey,
+    parent,
+    query.hasNextPage,
+    query.isPending,
+  ])
 
   if (query.isPending) {
     return <LevelSkeleton depth={depth} />
@@ -386,7 +404,11 @@ function TreeLevel({
   }
 
   return (
-    <ul role="group" className="flex flex-col gap-0.5">
+    <ul
+      role="group"
+      aria-busy={query.isFetching}
+      className="flex flex-col gap-0.5"
+    >
       {folders.map((entry, index) => (
         <TreeNode
           key={entry.key}
@@ -409,11 +431,24 @@ function TreeLevel({
       {query.hasNextPage && (
         <li role="none">
           <Button
+            role="treeitem"
+            data-tree-key={loadMoreKey}
+            data-tree-depth={depth}
+            tabIndex={
+              focusedKey === loadMoreKey ||
+              (focusedKey === null && depth === 0 && folders.length === 0)
+                ? 0
+                : -1
+            }
             variant="ghost"
             size="sm"
-            disabled={query.isFetchingNextPage}
-            onClick={() => void query.fetchNextPage()}
-            className="h-7 max-w-full justify-start text-xs text-muted-foreground"
+            aria-level={depth + 1}
+            aria-disabled={query.isFetchingNextPage}
+            onClick={() => {
+              if (!query.isFetchingNextPage) void query.fetchNextPage()
+            }}
+            onFocus={() => onFocusKey(loadMoreKey)}
+            className="h-7 max-w-full justify-start text-xs text-muted-foreground aria-disabled:pointer-events-none aria-disabled:opacity-50"
             style={{ marginLeft: depth * 12 + 24 }}
           >
             {query.isFetchingNextPage ? (
@@ -421,8 +456,18 @@ function TreeLevel({
             ) : (
               <ChevronDown className="size-3.5" />
             )}
-            {query.isFetchNextPageError ? 'Retry loading folders' : 'Load more folders'}
+            {query.isFetchingNextPage
+              ? 'Loading folders…'
+              : query.isFetchNextPageError
+                ? 'Retry loading folders'
+                : 'Load more folders'}
           </Button>
+        </li>
+      )}
+      {query.isFetching && !query.isFetchingNextPage && (
+        <li role="status" className="flex items-center gap-1 px-2 py-1 text-xs text-muted-foreground">
+          <Loader2 className="size-3 animate-spin" />
+          Refreshing folders…
         </li>
       )}
     </ul>
@@ -440,7 +485,7 @@ interface TreeNodeProps {
   onNavigate: (prefix: string) => void
   focusedKey: string | null
   tabStop: boolean
-  onFocusKey: (key: string) => void
+  onFocusKey: (key: string | null) => void
 }
 
 function TreeNode({

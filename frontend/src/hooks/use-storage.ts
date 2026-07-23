@@ -63,6 +63,7 @@ export function useInfiniteListFiles(
     queryFn: ({ pageParam }) => listFiles(prefix, pageParam, storage),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (lastPage) => lastPage.next_token ?? undefined,
+    placeholderData: keepPreviousData,
     staleTime: 5 * 60_000,
     refetchOnWindowFocus: true,
     enabled: storage !== undefined,

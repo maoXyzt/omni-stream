@@ -16,15 +16,17 @@
 
 import { useCallback, useEffect, useState } from 'react'
 
+import type {
+  StorageEntryRef,
+  StorageEntryType,
+} from '@/types/storage'
+
 const STORAGE_KEY = 'omni-stream:recents:v1'
 const MAX_RECENTS = 30
 
-export type RecentType = 'folder' | 'file'
+export type RecentType = StorageEntryType
 
-export interface RecentEntry {
-  storage: string
-  key: string
-  type: RecentType
+export interface RecentEntry extends StorageEntryRef {
   visitedAt: number
 }
 

@@ -4,6 +4,13 @@ export type ResolvedUri =
   | { ok: true; path: string }
   | { ok: false; reason: string }
 
+export function canSubmitResolvedPath(
+  resolved: ResolvedUri,
+  submitting: boolean,
+): boolean {
+  return resolved.ok && !submitting
+}
+
 export function cleanPathInput(input: string): string {
   return input.replace(/[\r\n]+/g, '').trim()
 }

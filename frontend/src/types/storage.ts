@@ -9,6 +9,14 @@ export interface FileEntry {
   is_symlink: boolean
 }
 
+export type StorageEntryType = 'folder' | 'file'
+
+export interface StorageEntryRef {
+  storage: string
+  key: string
+  type: StorageEntryType
+}
+
 export interface ListResult {
   entries: FileEntry[]
   next_token: string | null

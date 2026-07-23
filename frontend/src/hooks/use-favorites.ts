@@ -11,14 +11,16 @@
 
 import { useCallback, useEffect, useState } from 'react'
 
+import type {
+  StorageEntryRef,
+  StorageEntryType,
+} from '@/types/storage'
+
 const STORAGE_KEY = 'omni-stream:favorites:v1'
 
-export type FavoriteType = 'folder' | 'file'
+export type FavoriteType = StorageEntryType
 
-export interface FavoriteEntry {
-  storage: string
-  key: string
-  type: FavoriteType
+export interface FavoriteEntry extends StorageEntryRef {
   pinnedAt: number
 }
 

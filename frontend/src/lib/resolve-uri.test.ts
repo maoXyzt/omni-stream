@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 
-import { cleanPathInput, resolveStorageUri } from '@/lib/resolve-uri'
+import {
+  canSubmitResolvedPath,
+  cleanPathInput,
+  resolveStorageUri,
+} from '@/lib/resolve-uri'
 import type { StorageDescriptor } from '@/types/storage'
 
 const singleBucket = (bucket: string): StorageDescriptor => ({
@@ -38,6 +42,16 @@ describe('cleanPathInput', () => {
     expect(cleanPathInput('  s3://bucket/\r\npath/file.txt \n')).toBe(
       's3://bucket/path/file.txt',
     )
+  })
+})
+
+describe('canSubmitResolvedPath', () => {
+  it('allows only valid, idle submissions', () => {
+    expect(canSubmitResolvedPath({ ok: true, path: '' }, false)).toBe(true)
+    expect(canSubmitResolvedPath({ ok: true, path: '' }, true)).toBe(false)
+    expect(
+      canSubmitResolvedPath({ ok: false, reason: 'Invalid path' }, false),
+    ).toBe(false)
   })
 })
 

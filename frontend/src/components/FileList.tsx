@@ -132,7 +132,7 @@ import { useRecents } from '@/hooks/use-recents'
 import { useSelection } from '@/hooks/use-selection'
 import { useCommandItems } from '@/hooks/use-command-items'
 import { CommandPalette } from '@/components/CommandPalette'
-import type { FileEntry } from '@/types/storage'
+import type { FileEntry, StorageEntryRef } from '@/types/storage'
 
 const PREVIEW_PARAM = 'preview'
 const PAGE_PARAM = 'page'
@@ -684,19 +684,15 @@ export function FileList() {
   )
 
   const goToSidebarEntry = useCallback(
-    (
-      targetStorage: string,
-      key: string,
-      type: 'folder' | 'file',
-    ) => {
+    (entry: StorageEntryRef) => {
       const view = isValidViewMode(urlViewParamRef.current)
         ? urlViewParamRef.current
         : undefined
-      const target = getSidebarEntryRoute(targetStorage, key, type, view)
+      const target = getSidebarEntryRoute(entry, view)
 
       setTokenStack([undefined])
       navigate({ pathname: target.pathname, search: target.search })
-      recordRecent(targetStorage, target.cleanKey, type)
+      recordRecent(entry.storage, target.cleanKey, entry.type)
     },
     [navigate, recordRecent],
   )

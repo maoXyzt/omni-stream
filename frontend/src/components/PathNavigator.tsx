@@ -2,7 +2,11 @@ import { useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 import { ArrowRight, CircleX, FolderInput, Loader2, X } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
-import { cleanPathInput, resolveStorageUri } from '@/lib/resolve-uri'
+import {
+  canSubmitResolvedPath,
+  cleanPathInput,
+  resolveStorageUri,
+} from '@/lib/resolve-uri'
 import type { StorageDescriptor } from '@/types/storage'
 import { Button } from '@/components/ui/button'
 import {
@@ -31,6 +35,7 @@ interface PathNavigatorProps {
 
 export function PathNavigator({ prefix, onNavigate, activeStorage }: PathNavigatorProps) {
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const submittingRef = useRef(false)
   const [open, setOpen] = useState(false)
   const [value, setValue] = useState(prefix)
   const [submitting, setSubmitting] = useState(false)
@@ -46,6 +51,8 @@ export function PathNavigator({ prefix, onNavigate, activeStorage }: PathNavigat
   // Strip stray newlines (from paste) and whitespace. Computed once and reused
   // in both the preview and handleSubmit so the two are always in sync.
   const cleaned = cleanPathInput(value)
+  const resolved = resolveStorageUri(cleaned, activeStorage)
+  const resolvedKey = resolved.ok ? resolved.path.replace(/^\/+/, '') : null
 
   function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
     // e.isComposing guards against IME Enter (e.g. Chinese/Japanese candidate
@@ -58,6 +65,8 @@ export function PathNavigator({ prefix, onNavigate, activeStorage }: PathNavigat
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
+    if (!canSubmitResolvedPath(resolved, submittingRef.current)) return
+    submittingRef.current = true
     setSubmitting(true)
     try {
       // Keep the dialog open on an explicit `false` (bad/foreign path) so the
@@ -65,15 +74,10 @@ export function PathNavigator({ prefix, onNavigate, activeStorage }: PathNavigat
       const result = await onNavigate(cleaned)
       if (result !== false) setOpen(false)
     } finally {
+      submittingRef.current = false
       setSubmitting(false)
     }
   }
-
-  // Resolved path preview — mirrors what goToPathOrFile will derive from the
-  // input. Updated on every keystroke so the user sees the final key before
-  // hitting Go.
-  const resolved = resolveStorageUri(cleaned, activeStorage)
-  const resolvedKey = resolved.ok ? resolved.path.replace(/^\/+/, '') : null
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -130,7 +134,7 @@ export function PathNavigator({ prefix, onNavigate, activeStorage }: PathNavigat
               rows={3}
               disabled={submitting}
               aria-invalid={cleaned ? !resolved.ok : undefined}
-              aria-describedby={cleaned ? 'path-navigator-result' : undefined}
+              aria-describedby="path-navigator-result"
               className={cn(
                 'w-full min-w-0 resize-y rounded-lg border border-input bg-transparent py-1.5 pl-2.5 pr-12',
                 'font-mono text-sm leading-relaxed transition-colors outline-none',
@@ -145,7 +149,7 @@ export function PathNavigator({ prefix, onNavigate, activeStorage }: PathNavigat
                 variant="ghost"
                 size="icon-sm"
                 className="absolute right-1.5 top-1.5 text-muted-foreground"
-                aria-label="Clear path and jump to root"
+                aria-label="Clear path"
                 title="Clear path"
                 disabled={submitting}
                 onClick={() => {
@@ -157,31 +161,29 @@ export function PathNavigator({ prefix, onNavigate, activeStorage }: PathNavigat
               </Button>
             )}
           </div>
-          {cleaned && (
-            <div
-              id="path-navigator-result"
-              aria-live="polite"
-              className={cn(
-                'flex items-start gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-mono',
-                resolved.ok
-                  ? 'bg-muted text-muted-foreground'
-                  : 'bg-destructive/10 text-destructive dark:bg-destructive/20',
-              )}
-            >
-              {resolved.ok ? (
-                <ArrowRight className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
-              ) : (
-                <CircleX className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
-              )}
-              <span className="break-all">
-                {resolved.ok
-                  ? resolvedKey === ''
-                    ? '(root)'
-                    : resolvedKey
-                  : resolved.reason}
-              </span>
-            </div>
-          )}
+          <div
+            id="path-navigator-result"
+            aria-live="polite"
+            className={cn(
+              'flex items-start gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-mono',
+              resolved.ok
+                ? 'bg-muted text-muted-foreground'
+                : 'bg-destructive/10 text-destructive dark:bg-destructive/20',
+            )}
+          >
+            {resolved.ok ? (
+              <ArrowRight className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+            ) : (
+              <CircleX className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+            )}
+            <span className="break-all">
+              {resolved.ok
+                ? resolvedKey === ''
+                  ? '(root)'
+                  : resolvedKey
+                : resolved.reason}
+            </span>
+          </div>
           <DialogFooter>
             <Button
               type="button"
@@ -191,7 +193,10 @@ export function PathNavigator({ prefix, onNavigate, activeStorage }: PathNavigat
             >
               Cancel
             </Button>
-            <Button type="submit" disabled={submitting || !resolved.ok}>
+            <Button
+              type="submit"
+              disabled={!canSubmitResolvedPath(resolved, submitting)}
+            >
               {submitting && <Loader2 className="size-4 animate-spin" />}
               Go
             </Button>
