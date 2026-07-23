@@ -21,18 +21,17 @@ use crate::error::AppError;
 const LIST_PAGE_SIZE: i32 = 100;
 const CREDENTIAL_PROVIDER_NAME: &str = "omni-stream-config";
 
-// Prefix marking a v1 `ListObjects` Marker cursor in `next_token`. Once the
-// fallback fires (because the v2 endpoint failed to issue a working
-// ContinuationToken for this gateway — observed on SenseTime ADS), the
-// listing session stays on v1 for the duration; v1 is a different
-// server-side code path and accepts a simple last-key marker.
+// Prefix marking a v1 `ListObjects` Marker cursor in `next_token`. When a v2
+// endpoint fails to issue a ContinuationToken (observed on SenseTime ADS),
+// the first page is retried internally through v1 to obtain its server-issued
+// marker. The rest of that listing session then stays on v1.
 const V1_MARKER_PREFIX: &str = "m:";
 
 /// Compute `next_token` for a v2 `ListObjectsV2` response.
 ///
 /// Honors the server-issued ContinuationToken when present. Otherwise — when
-/// the response looks truncated (flag set or page is full) — emits a v1
-/// Marker cursor to switch the rest of the listing onto `ListObjects` v1.
+/// the response looks truncated — emits a v1 Marker cursor; `list_v2` treats
+/// it as a signal to bootstrap the listing through `ListObjects` v1.
 fn compute_next_token_v2(
   server_token: Option<&str>,
   is_truncated: Option<bool>,
@@ -42,13 +41,12 @@ fn compute_next_token_v2(
     return Some(t.to_string());
   }
 
-  let truncated = is_truncated.unwrap_or(false);
-  let full_page = entries.len() >= LIST_PAGE_SIZE as usize;
-  if !truncated && !full_page {
+  let truncated = is_truncated.unwrap_or(entries.len() >= LIST_PAGE_SIZE as usize);
+  if !truncated {
     return None;
   }
 
-  synthesize_v1_marker_from_entries(entries)
+  synthesize_v1_marker_from_entries(entries, None)
 }
 
 /// Compute `next_token` for a v1 `ListObjects` response.
@@ -60,31 +58,37 @@ fn compute_next_token_v1(
   server_next_marker: Option<&str>,
   is_truncated: Option<bool>,
   entries: &[FileEntry],
+  bucket_prefix: Option<&str>,
 ) -> Option<String> {
   if let Some(m) = server_next_marker {
     return Some(format!("{V1_MARKER_PREFIX}{m}"));
   }
 
-  let truncated = is_truncated.unwrap_or(false);
-  let full_page = entries.len() >= LIST_PAGE_SIZE as usize;
-  if !truncated && !full_page {
+  let truncated = is_truncated.unwrap_or(entries.len() >= LIST_PAGE_SIZE as usize);
+  if !truncated {
     return None;
   }
 
-  synthesize_v1_marker_from_entries(entries)
+  synthesize_v1_marker_from_entries(entries, bucket_prefix)
 }
 
-fn synthesize_v1_marker_from_entries(entries: &[FileEntry]) -> Option<String> {
+fn synthesize_v1_marker_from_entries(
+  entries: &[FileEntry],
+  bucket_prefix: Option<&str>,
+) -> Option<String> {
   let last_entry = entries.iter().max_by(|a, b| a.key.cmp(&b.key))?;
+  let key = bucket_prefix
+    .and_then(|prefix| last_entry.key.strip_prefix(prefix))
+    .unwrap_or(&last_entry.key);
 
   // If the boundary lands on a CommonPrefix ("dir/"), a marker of "dir/"
   // would still match keys inside it (since "dir/" < "dir/foo"), causing
   // the same directory to re-emit. Append max-codepoint to step past the
   // entire subtree.
   let cursor = if last_entry.is_dir {
-    format!("{}\u{10FFFF}", last_entry.key)
+    format!("{key}\u{10FFFF}")
   } else {
-    last_entry.key.clone()
+    key.to_string()
   };
   Some(format!("{V1_MARKER_PREFIX}{cursor}"))
 }
@@ -333,6 +337,17 @@ impl S3Backend {
       &entries,
     );
 
+    // Some gateways advertise truncation but omit the v2 continuation token,
+    // then ignore a key-derived v1 Marker on the next request. Bootstrap v1
+    // from its first page here so the client receives the gateway's own
+    // working NextMarker and one click advances exactly one page.
+    if next_token
+      .as_deref()
+      .is_some_and(|t| t.starts_with(V1_MARKER_PREFIX))
+    {
+      return self.list_v1(bucket, sub_prefix, None, bucket_prefix).await;
+    }
+
     Ok(ListResult {
       entries,
       next_token,
@@ -349,7 +364,7 @@ impl S3Backend {
     &self,
     bucket: &str,
     sub_prefix: &str,
-    marker: &str,
+    marker: Option<&str>,
     bucket_prefix: Option<&str>,
   ) -> Result<ListResult, AppError> {
     let mut req = self
@@ -357,11 +372,13 @@ impl S3Backend {
       .list_objects()
       .bucket(bucket)
       .delimiter("/")
-      .max_keys(LIST_PAGE_SIZE)
-      .marker(marker);
+      .max_keys(LIST_PAGE_SIZE);
 
     if !sub_prefix.is_empty() {
       req = req.prefix(sub_prefix);
+    }
+    if let Some(marker) = marker {
+      req = req.marker(marker);
     }
 
     let resp = req.send().await.map_err(Self::map_list_v1_err)?;
@@ -391,7 +408,12 @@ impl S3Backend {
       });
     }
 
-    let next_token = compute_next_token_v1(resp.next_marker(), resp.is_truncated(), &entries);
+    let next_token = compute_next_token_v1(
+      resp.next_marker(),
+      resp.is_truncated(),
+      &entries,
+      bucket_prefix,
+    );
 
     Ok(ListResult {
       entries,
@@ -567,15 +589,13 @@ impl StorageBackend for S3Backend {
       Some(bucket_prefix_owned.as_str())
     };
 
-    // Tokens prefixed with "m:" mean a previous v2 page failed to issue a
-    // working ContinuationToken — the rest of this listing rides on v1
-    // Marker semantics, which uses a different server code path that holds
-    // up on broken-v2 gateways (e.g. SenseTime ADS).
+    // Tokens prefixed with "m:" carry the server-issued v1 Marker obtained
+    // when list_v2 bootstrapped the first page through ListObjects v1.
     if let Some(t) = token.as_deref()
       && let Some(marker) = t.strip_prefix(V1_MARKER_PREFIX)
     {
       return self
-        .list_v1(&bucket, sub_prefix, marker, bucket_prefix)
+        .list_v1(&bucket, sub_prefix, Some(marker), bucket_prefix)
         .await;
     }
     self
@@ -891,6 +911,12 @@ mod tests {
   }
 
   #[test]
+  fn v2_full_page_explicitly_not_truncated_is_eof() {
+    let entries = n_files(LIST_PAGE_SIZE as usize);
+    assert_eq!(compute_next_token_v2(None, Some(false), &entries), None);
+  }
+
+  #[test]
   fn v2_truncated_flag_without_token_switches_to_v1_even_on_short_page() {
     let entries = n_files(30);
     let got = compute_next_token_v2(None, Some(true), &entries).expect("expected fallback token");
@@ -926,31 +952,57 @@ mod tests {
   // --- v1 path -----------------------------------------------------------
 
   #[test]
-  fn v1_server_next_marker_wins() {
+  fn v1_server_next_marker_is_opaque_in_multi_bucket_mode() {
     let entries = n_files(LIST_PAGE_SIZE as usize);
-    let got = compute_next_token_v1(Some("dir/last-key"), Some(true), &entries);
-    assert_eq!(got, Some(format!("{V1_MARKER_PREFIX}dir/last-key")));
+    let got = compute_next_token_v1(
+      Some("bucket/server-marker"),
+      Some(true),
+      &entries,
+      Some("bucket/"),
+    );
+    assert_eq!(got, Some(format!("{V1_MARKER_PREFIX}bucket/server-marker")));
   }
 
   #[test]
   fn v1_short_page_without_truncated_returns_none() {
     let entries = n_files(30);
-    assert_eq!(compute_next_token_v1(None, Some(false), &entries), None);
-    assert_eq!(compute_next_token_v1(None, None, &entries), None);
+    assert_eq!(
+      compute_next_token_v1(None, Some(false), &entries, None),
+      None
+    );
+    assert_eq!(compute_next_token_v1(None, None, &entries, None), None);
+  }
+
+  #[test]
+  fn v1_full_page_explicitly_not_truncated_is_eof() {
+    let entries = n_files(LIST_PAGE_SIZE as usize);
+    assert_eq!(
+      compute_next_token_v1(None, Some(false), &entries, None),
+      None
+    );
   }
 
   #[test]
   fn v1_full_page_without_next_marker_falls_back_to_last_key() {
     let entries = n_files(LIST_PAGE_SIZE as usize);
-    let got = compute_next_token_v1(None, None, &entries).expect("expected fallback token");
+    let got = compute_next_token_v1(None, None, &entries, None).expect("expected fallback token");
     assert_eq!(got, format!("{V1_MARKER_PREFIX}k0099.bin"));
   }
 
   #[test]
   fn v1_boundary_on_common_prefix_appends_sentinel() {
     let entries = vec![dir("dir1/"), dir("dir2/"), dir("dir3/")];
-    let got = compute_next_token_v1(None, Some(true), &entries).expect("expected fallback token");
+    let got =
+      compute_next_token_v1(None, Some(true), &entries, None).expect("expected fallback token");
     assert_eq!(got, format!("{V1_MARKER_PREFIX}dir3/\u{10FFFF}"));
+  }
+
+  #[test]
+  fn v1_synthesized_marker_strips_multi_bucket_display_prefix() {
+    let entries = vec![file("bucket/dir/key")];
+    let got = compute_next_token_v1(None, Some(true), &entries, Some("bucket/"))
+      .expect("expected fallback token");
+    assert_eq!(got, format!("{V1_MARKER_PREFIX}dir/key"));
   }
 
   // --- multi-bucket path routing ----------------------------------------
