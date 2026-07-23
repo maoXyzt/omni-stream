@@ -1,15 +1,20 @@
 import { describe, expect, it } from 'vitest'
 
 import {
-  getDirectoryScrollTop,
   getFileListEmptyState,
+  saveScrollPosition,
 } from '@/lib/file-list-ux'
 
-describe('getDirectoryScrollTop', () => {
-  it('restores history navigation and starts new navigation at the top', () => {
-    expect(getDirectoryScrollTop(true, 320)).toBe(320)
-    expect(getDirectoryScrollTop(true)).toBe(0)
-    expect(getDirectoryScrollTop(false, 320)).toBe(0)
+describe('saveScrollPosition', () => {
+  it('keeps only the 50 most recent history entries', () => {
+    const positions = new Map<string, number>()
+    for (let index = 0; index <= 50; index += 1) {
+      saveScrollPosition(positions, `route-${index}`, index)
+    }
+
+    expect(positions.size).toBe(50)
+    expect(positions.has('route-0')).toBe(false)
+    expect(positions.get('route-50')).toBe(50)
   })
 })
 

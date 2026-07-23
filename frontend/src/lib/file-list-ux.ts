@@ -1,10 +1,17 @@
 export type FileListEmptyState = 'empty-directory' | 'no-matches' | null
 
-export function getDirectoryScrollTop(
-  isHistoryNavigation: boolean,
-  savedScrollTop?: number,
-): number {
-  return isHistoryNavigation ? (savedScrollTop ?? 0) : 0
+const MAX_SCROLL_POSITIONS = 50
+
+export function saveScrollPosition(
+  positions: Map<string, number>,
+  key: string,
+  scrollTop: number,
+): void {
+  positions.delete(key)
+  positions.set(key, scrollTop)
+  if (positions.size <= MAX_SCROLL_POSITIONS) return
+  const oldestKey = positions.keys().next().value
+  if (oldestKey !== undefined) positions.delete(oldestKey)
 }
 
 export function getFileListEmptyState(

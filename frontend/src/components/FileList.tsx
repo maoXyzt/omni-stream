@@ -8,7 +8,10 @@ import {
   useRef,
   useState,
 } from 'react'
-import type { PointerEvent as ReactPointerEvent } from 'react'
+import type {
+  PointerEvent as ReactPointerEvent,
+  UIEvent as ReactUIEvent,
+} from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
@@ -47,8 +50,8 @@ import {
 import { ApiError, getStoredToken, setStoredToken } from '@/api/client'
 import { listFiles, proxyUrl, statFile } from '@/api/storage'
 import {
-  getDirectoryScrollTop,
   getFileListEmptyState,
+  saveScrollPosition,
   type FileListEmptyState as EmptyStateKind,
 } from '@/lib/file-list-ux'
 import { basenameOf } from '@/lib/path'
@@ -1020,6 +1023,7 @@ export function FileList() {
   // and main scroll independently), so we listen on the ref rather than on
   // window. Threshold 100px = roughly "user has scrolled past the toolbar".
   const mainRef = useRef<HTMLElement>(null)
+  const galleryListRef = useRef<HTMLDivElement>(null)
   const directoryKey = `${storageName}\0${prefix}`
   const previousDirectoryKeyRef = useRef(directoryKey)
   const scrollPositionsRef = useRef(new Map<string, number>())
@@ -1029,35 +1033,32 @@ export function FileList() {
   useLayoutEffect(() => {
     const currentLocationKey = location.key
     const directoryChanged = previousDirectoryKeyRef.current !== directoryKey
-    const container = mainRef.current
+    const container = splitView ? galleryListRef.current : mainRef.current
     const scrollPositions = scrollPositionsRef.current
 
-    if (directoryChanged && container) {
-      const scrollTop = getDirectoryScrollTop(
-        navigationType === 'POP',
-        scrollPositions.get(currentLocationKey),
-      )
+    if (container && !directoryChanged) {
+      saveScrollPosition(scrollPositions, currentLocationKey, container.scrollTop)
+    } else if (directoryChanged) {
+      const scrollTop =
+        navigationType === 'POP'
+          ? (scrollPositions.get(currentLocationKey) ?? 0)
+          : 0
       pendingScrollTopRef.current = scrollTop
-      container.scrollTop = scrollTop
-      container.focus({ preventScroll: true })
+      if (container) container.scrollTop = scrollTop
+      setScrolled(scrollTop > 100)
+      mainRef.current?.focus({ preventScroll: true })
     }
     previousDirectoryKeyRef.current = directoryKey
-
-    return () => {
-      if (container) {
-        scrollPositions.set(currentLocationKey, container.scrollTop)
-      }
-    }
-  }, [directoryKey, location.key, navigationType])
+  }, [directoryKey, location.key, navigationType, splitView])
 
   useLayoutEffect(() => {
     if (showListSkeleton) return
     const scrollTop = pendingScrollTopRef.current
-    const container = mainRef.current
+    const container = splitView ? galleryListRef.current : mainRef.current
     if (scrollTop === null || !container) return
     container.scrollTop = scrollTop
     pendingScrollTopRef.current = null
-  }, [directoryKey, showListSkeleton])
+  }, [directoryKey, showListSkeleton, splitView])
 
   useLayoutEffect(() => {
     const container = mainRef.current
@@ -1071,19 +1072,20 @@ export function FileList() {
     })
   }, [filteredEntries, viewMode])
 
-  const handleMainScroll = useCallback(() => {
-    const el = mainRef.current
-    if (!el) return
-    setScrolled(el.scrollTop > 100)
-  }, [])
+  const handleBrowseScroll = useCallback((event: ReactUIEvent<HTMLElement>) => {
+    const { scrollTop } = event.currentTarget
+    setScrolled(scrollTop > 100)
+    saveScrollPosition(scrollPositionsRef.current, location.key, scrollTop)
+  }, [location.key])
   const scrollToTop = useCallback(() => {
-    mainRef.current?.scrollTo({
+    const container = splitView ? galleryListRef.current : mainRef.current
+    container?.scrollTo({
       top: 0,
       behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches
         ? 'auto'
         : 'smooth',
     })
-  }, [])
+  }, [splitView])
 
   // ---------------------------------------------------------------------------
   // Browsing-state arrow-key roving navigation (B3).
@@ -1355,7 +1357,7 @@ export function FileList() {
           id="main-content"
           ref={mainRef}
           tabIndex={-1}
-          onScroll={handleMainScroll}
+          onScroll={handleBrowseScroll}
           className="flex w-full min-w-0 flex-col gap-4 overflow-y-auto px-3 py-4 sm:px-6"
         >
           <span className="sr-only" role="status" aria-live="polite" aria-atomic="true">
@@ -1737,6 +1739,8 @@ export function FileList() {
                   bubble up but `e.target !== currentTarget` so they don't
                   trigger the close. */}
               <div
+                ref={galleryListRef}
+                onScroll={handleBrowseScroll}
                 onClick={(e) => {
                   if (e.target === e.currentTarget) closePreview()
                 }}
