@@ -154,7 +154,7 @@ export const FileTile = memo(function FileTile({
               checked={selectionChecked ?? false}
               aria-label={`Select ${name}`}
               tabIndex={-1}
-              className="before:bg-background/90 before:shadow-sm pointer-coarse:bg-background/90 pointer-coarse:shadow-sm"
+              className="before:bg-background/90 before:shadow-sm"
             />
           </div>
         )}

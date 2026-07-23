@@ -2147,9 +2147,10 @@ function GalleryRow({
         {/* Fixed-width checkbox slot — always rendered (even for dirs) so that
             the icon column starts at the same left offset as in the full-width
             TableRow (w-8 slot + px-2 button padding = 40 px, matching
-            TableHead w-8 + TableCell p-2). */}
+            TableHead w-8 + TableCell p-2). Coarse pointers reserve the full
+            44 px checkbox target plus the leading 8 px. */}
         <div
-          className="flex w-8 shrink-0 items-center pl-2"
+          className="flex w-8 shrink-0 items-center pl-2 pointer-coarse:w-[52px]"
           onClick={(e) => {
             if (!selectable) return
             e.stopPropagation()
