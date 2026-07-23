@@ -13,10 +13,26 @@ interface Options {
 
 interface Result {
   width: number
+  minWidth: number
+  maxWidth: number
   /// Attach to the drag-handle's `onPointerDown`. Pointer-move listeners are
   /// attached to `window` for the duration of the drag so the cursor can
   /// leave the handle without dropping the gesture.
   startResize: (e: ReactPointerEvent) => void
+  resizeTo: (width: number) => void
+}
+
+export function getKeyboardResizeWidth(
+  key: string,
+  value: number,
+  min: number,
+  max: number,
+): number | null {
+  if (key === 'ArrowLeft') return Math.max(min, value - 16)
+  if (key === 'ArrowRight') return Math.min(max, value + 16)
+  if (key === 'Home') return min
+  if (key === 'End') return max
+  return null
 }
 
 /// Draggable width with localStorage persistence. The drag deltas are applied
@@ -58,6 +74,11 @@ export function useResizableWidth({
   // re-renders that each setWidth triggers.
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null)
 
+  const resizeTo = useCallback(
+    (next: number) => setWidth(Math.min(Math.max(next, minPx), maxPx)),
+    [minPx, maxPx],
+  )
+
   const startResize = useCallback(
     (e: ReactPointerEvent) => {
       // Skip secondary buttons — only left mouse / primary touch should drag.
@@ -94,5 +115,11 @@ export function useResizableWidth({
     [width, minPx, maxPx],
   )
 
-  return { width, startResize }
+  return {
+    width,
+    minWidth: minPx,
+    maxWidth: maxPx,
+    startResize,
+    resizeTo,
+  }
 }

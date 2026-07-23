@@ -4,6 +4,17 @@ export type ResolvedUri =
   | { ok: true; path: string }
   | { ok: false; reason: string }
 
+export function canSubmitResolvedPath(
+  resolved: ResolvedUri,
+  submitting: boolean,
+): boolean {
+  return resolved.ok && !submitting
+}
+
+export function cleanPathInput(input: string): string {
+  return input.replace(/[\r\n]+/g, '').trim()
+}
+
 // S3 URI schemes we accept. `s3a` / `s3n` are the Hadoop/EMR variants of
 // `s3://` that users routinely copy out of Spark configs and pipeline logs.
 const S3_SCHEMES = new Set(['s3', 's3a', 's3n'])
@@ -63,7 +74,7 @@ export function resolveStorageUri(
   input: string,
   storage: StorageDescriptor | undefined,
 ): ResolvedUri {
-  const trimmed = input.trim()
+  const trimmed = cleanPathInput(input)
   const m = SCHEME_RE.exec(trimmed)
   if (!m) {
     // Local storage + absolute input: strip the root prefix so the caller

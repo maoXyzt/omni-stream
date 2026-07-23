@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { encodePathSegments } from '@/lib/route-path'
+import { encodePathSegments, getSidebarEntryRoute } from '@/lib/route-path'
 
 describe('encodePathSegments', () => {
   it('is a no-op for plain alphanumeric keys', () => {
@@ -38,5 +38,38 @@ describe('encodePathSegments', () => {
       .map(decodeURIComponent)
       .join('/')
     expect(decoded).toBe(original)
+  })
+})
+
+describe('getSidebarEntryRoute', () => {
+  it('builds a cross-storage folder route', () => {
+    expect(
+      getSidebarEntryRoute({
+        storage: 'archive store',
+        key: 'reports/2026',
+        type: 'folder',
+      }),
+    ).toEqual({
+      pathname: '/s/archive%20store/reports/2026/',
+      search: '',
+      cleanKey: 'reports/2026',
+    })
+  })
+
+  it('opens a file preview in its parent directory and preserves the view', () => {
+    expect(
+      getSidebarEntryRoute(
+        {
+          storage: 'archive',
+          key: 'reports/a #1.csv',
+          type: 'file',
+        },
+        'grid',
+      ),
+    ).toEqual({
+      pathname: '/s/archive/reports/',
+      search: '?view=grid&preview=a+%231.csv',
+      cleanKey: 'reports/a #1.csv',
+    })
   })
 })

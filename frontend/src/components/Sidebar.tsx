@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+} from 'react'
 import {
   AlertCircle,
   ArrowDownAZ,
@@ -8,11 +14,12 @@ import {
   Clock,
   File,
   Folder,
+  Loader2,
   RotateCw,
   Star,
 } from 'lucide-react'
 
-import { useListFiles, useStorages } from '@/hooks/use-storage'
+import { useInfiniteListFiles, useStorages } from '@/hooks/use-storage'
 import { SIDEBAR_SORT_KEY, useSortDir, type SortDir } from '@/hooks/use-sort-dir'
 import { useTreeExpanded, type TreeExpandedApi } from '@/hooks/use-tree-expanded'
 import { useFavorites } from '@/hooks/use-favorites'
@@ -24,8 +31,12 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { basenameOf } from '@/lib/path'
 import { sortEntries } from '@/lib/sort'
+import {
+  getTreeKeyboardAction,
+  reconcileTreeFocus,
+} from '@/lib/tree-navigation'
 import { cn } from '@/lib/utils'
-import type { FileEntry } from '@/types/storage'
+import type { FileEntry, StorageEntryRef } from '@/types/storage'
 
 interface SidebarProps {
   /// The current path the user is viewing (URL-driven). The tree highlights
@@ -37,6 +48,7 @@ interface SidebarProps {
   /// themselves) get the bucket visual instead of the folder one.
   multiBucket: boolean
   onNavigate: (prefix: string) => void
+  onNavigateEntry: (entry: StorageEntryRef) => void
 }
 
 export function Sidebar({
@@ -44,6 +56,7 @@ export function Sidebar({
   storageName,
   multiBucket,
   onNavigate,
+  onNavigateEntry,
 }: SidebarProps) {
   // Sidebar owns its sort axis — independent from the main view so users can
   // browse the tree A→Z while keeping the main panel reverse-sorted.
@@ -52,12 +65,20 @@ export function Sidebar({
 
   const expand = useTreeExpanded(storageName)
   const { expandPath } = expand
+  const [favoritesOpen, setFavoritesOpen] = useState(true)
+  const [recentsOpen, setRecentsOpen] = useState(true)
+  const [focusedKey, setFocusedKey] = useState<string | null>(null)
+  const treeRef = useRef<HTMLDivElement>(null)
 
   // Auto-expand every ancestor of the current path on navigation. The active
   // folder itself stays closed — highlighted, not auto-revealed.
   useEffect(() => {
     expandPath(prefix)
   }, [prefix, expandPath])
+
+  useEffect(() => {
+    setFocusedKey(null)
+  }, [storageName])
 
   const { favorites, remove: removeFavorite } = useFavorites()
   const { recents } = useRecents()
@@ -77,63 +98,127 @@ export function Sidebar({
     [recents, knownStorages],
   )
 
+  function handleTreeKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    const tree = treeRef.current
+    const target = (event.target as HTMLElement).closest<HTMLButtonElement>(
+      '[data-tree-key]',
+    )
+    if (!tree || !target || !tree.contains(target)) return
+
+    const elements = Array.from(
+      tree.querySelectorAll<HTMLButtonElement>('[data-tree-key]'),
+    )
+    const index = elements.indexOf(target)
+    const action = getTreeKeyboardAction(
+      event.key,
+      elements.map((element) => ({
+        depth: Number(element.dataset.treeDepth),
+        expanded:
+          element.getAttribute('aria-expanded') === null
+            ? null
+            : element.getAttribute('aria-expanded') === 'true',
+      })),
+      index,
+    )
+    if (!action) return
+
+    event.preventDefault()
+    if (action.type === 'focus') {
+      const next = elements[action.index]
+      if (!next) return
+      setFocusedKey(next.dataset.treeKey ?? null)
+      next.focus()
+      return
+    }
+
+    setFocusedKey(target.dataset.treeKey ?? null)
+    target
+      .closest('[data-tree-row]')
+      ?.querySelector<HTMLButtonElement>('[data-tree-toggle]')
+      ?.click()
+  }
+
   return (
     <div className="flex h-full flex-col gap-1 py-2">
       {/* Favorites section */}
       {validFavorites.length > 0 && (
         <section className="shrink-0">
-          <div className="mx-2 flex items-center gap-1 px-2 py-1.5">
+          <button
+            type="button"
+            className="mx-2 flex items-center gap-1 rounded-sm px-2 py-1.5 text-left outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring pointer-coarse:min-h-11"
+            aria-expanded={favoritesOpen}
+            onClick={() => setFavoritesOpen((open) => !open)}
+          >
             <Star className="size-3.5 text-muted-foreground" />
             <span className="flex-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
               Favorites
             </span>
-          </div>
-          <ul className="px-2 pb-1">
-            {validFavorites.map((f) => {
-              const label = basenameOf(f.key) || f.storage
-              const isActive = f.storage === storageName && (
-                f.type === 'folder' ? prefix === f.key || prefix.startsWith(f.key) : false
-              )
-              return (
-                <li key={`${f.storage}::${f.key}`}>
-                  <div className="group flex items-center gap-1 rounded-sm px-2 py-1 text-xs hover:bg-accent">
-                    <button
-                      type="button"
-                      className={cn(
-                        'flex flex-1 items-center gap-1.5 truncate text-left',
-                        isActive ? 'text-foreground font-medium' : 'text-muted-foreground hover:text-foreground',
-                      )}
-                      onClick={() => {
-                        if (f.type === 'folder') {
-                          onNavigate(f.key)
-                        } else {
-                          // Navigate to the file's parent directory
-                          const parentKey = f.key.replace(/[^/]*$/, '')
-                          onNavigate(parentKey)
+            <ChevronDown
+              className={cn(
+                'size-3.5 text-muted-foreground transition-transform motion-reduce:transition-none',
+                !favoritesOpen && '-rotate-90',
+              )}
+            />
+          </button>
+          {favoritesOpen && (
+            <ul className="px-2 pb-1">
+              {validFavorites.map((f) => {
+                const label = basenameOf(f.key) || f.storage
+                const location = `${f.storage} · ${f.key || '/'}`
+                const isActive =
+                  f.storage === storageName &&
+                  f.type === 'folder' &&
+                  (prefix === f.key || prefix.startsWith(f.key))
+                return (
+                  <li key={`${f.storage}::${f.key}`}>
+                    <div className="group flex items-center gap-1 rounded-sm px-2 py-1 text-xs hover:bg-accent">
+                      <button
+                        type="button"
+                        className={cn(
+                          'flex min-w-0 flex-1 items-center gap-1.5 text-left pointer-coarse:min-h-11',
+                          isActive
+                            ? 'font-medium text-foreground'
+                            : 'text-muted-foreground hover:text-foreground',
+                        )}
+                        aria-label={`Open ${label}, ${location}`}
+                        aria-current={
+                          f.storage === storageName &&
+                          f.type === 'folder' &&
+                          prefix === f.key
+                            ? 'page'
+                            : undefined
                         }
-                      }}
-                    >
-                      {f.type === 'folder' ? (
-                        <Folder className="size-3.5 shrink-0" />
-                      ) : (
-                        <File className="size-3.5 shrink-0" />
-                      )}
-                      <span className="truncate">{label}</span>
-                    </button>
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      className="size-5 shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
-                      aria-label={`Remove ${label} from favorites`}
-                      onClick={() => removeFavorite(f.storage, f.key)}
-                    >
-                      <Star className="size-3 fill-current" />
-                    </Button>
-                  </div>
-                </li>
-              )
-            })}
-          </ul>
+                        onClick={() =>
+                          onNavigateEntry(f)
+                        }
+                      >
+                        {f.type === 'folder' ? (
+                          <Folder className="size-3.5 shrink-0" />
+                        ) : (
+                          <File className="size-3.5 shrink-0" />
+                        )}
+                        <span className="flex min-w-0 flex-col">
+                          <span className="truncate">{label}</span>
+                          <span className="truncate text-xs font-normal text-muted-foreground">
+                            {location}
+                          </span>
+                        </span>
+                      </button>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        className="size-5 shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+                        aria-label={`Remove ${label} from favorites`}
+                        onClick={() => removeFavorite(f.storage, f.key)}
+                      >
+                        <Star className="size-3 fill-current" />
+                      </Button>
+                    </div>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
           <div className="mx-4 mb-1 h-px bg-border" />
         </section>
       )}
@@ -141,40 +226,55 @@ export function Sidebar({
       {/* Recent section */}
       {validRecents.length > 0 && (
         <section className="shrink-0">
-          <div className="mx-2 flex items-center gap-1 px-2 py-1.5">
+          <button
+            type="button"
+            className="mx-2 flex items-center gap-1 rounded-sm px-2 py-1.5 text-left outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring pointer-coarse:min-h-11"
+            aria-expanded={recentsOpen}
+            onClick={() => setRecentsOpen((open) => !open)}
+          >
             <Clock className="size-3.5 text-muted-foreground" />
             <span className="flex-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
               Recent
             </span>
-          </div>
-          <ul className="px-2 pb-1">
-            {validRecents.map((r) => {
-              const label = basenameOf(r.key) || r.storage
-              return (
-                <li key={`${r.storage}::${r.key}::${r.visitedAt}`}>
-                  <button
-                    type="button"
-                    className="flex w-full items-center gap-1.5 truncate rounded-sm px-2 py-1 text-left text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
-                    onClick={() => {
-                      if (r.type === 'folder') {
-                        onNavigate(r.key)
-                      } else {
-                        const parentKey = r.key.replace(/[^/]*$/, '')
-                        onNavigate(parentKey)
+            <ChevronDown
+              className={cn(
+                'size-3.5 text-muted-foreground transition-transform motion-reduce:transition-none',
+                !recentsOpen && '-rotate-90',
+              )}
+            />
+          </button>
+          {recentsOpen && (
+            <ul className="px-2 pb-1">
+              {validRecents.map((r) => {
+                const label = basenameOf(r.key) || r.storage
+                const location = `${r.storage} · ${r.key || '/'}`
+                return (
+                  <li key={`${r.storage}::${r.key}::${r.visitedAt}`}>
+                    <button
+                      type="button"
+                      className="flex w-full items-center gap-1.5 rounded-sm px-2 py-1 text-left text-xs text-muted-foreground hover:bg-accent hover:text-foreground pointer-coarse:min-h-11"
+                      aria-label={`Open ${label}, ${location}`}
+                      onClick={() =>
+                        onNavigateEntry(r)
                       }
-                    }}
-                  >
-                    {r.type === 'folder' ? (
-                      <Folder className="size-3.5 shrink-0" />
-                    ) : (
-                      <File className="size-3.5 shrink-0" />
-                    )}
-                    <span className="truncate">{label}</span>
-                  </button>
-                </li>
-              )
-            })}
-          </ul>
+                    >
+                      {r.type === 'folder' ? (
+                        <Folder className="size-3.5 shrink-0" />
+                      ) : (
+                        <File className="size-3.5 shrink-0" />
+                      )}
+                      <span className="flex min-w-0 flex-col">
+                        <span className="truncate">{label}</span>
+                        <span className="truncate text-xs text-muted-foreground">
+                          {location}
+                        </span>
+                      </span>
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
           <div className="mx-4 mb-1 h-px bg-border" />
         </section>
       )}
@@ -205,7 +305,13 @@ export function Sidebar({
         </Button>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-2">
+      <div
+        ref={treeRef}
+        role="tree"
+        aria-label="Folders"
+        onKeyDown={handleTreeKeyDown}
+        className="min-h-24 flex-1 overflow-y-auto px-2"
+      >
         <TreeLevel
           parent=""
           depth={0}
@@ -215,6 +321,8 @@ export function Sidebar({
           sortDir={sortDir}
           expand={expand}
           onNavigate={onNavigate}
+          focusedKey={focusedKey}
+          onFocusKey={setFocusedKey}
         />
       </div>
     </div>
@@ -231,11 +339,8 @@ interface TreeLevelProps {
   sortDir: SortDir
   expand: TreeExpandedApi
   onNavigate: (prefix: string) => void
-  /// Fires once after the query resolves with zero directories. Lets the
-  /// containing TreeNode mark itself as a known leaf (swap chevron for a
-  /// spacer). Only attached for non-root levels — the root has no chevron to
-  /// swap.
-  onResolveEmpty?: () => void
+  focusedKey: string | null
+  onFocusKey: (key: string | null) => void
 }
 
 function TreeLevel({
@@ -247,29 +352,43 @@ function TreeLevel({
   sortDir,
   expand,
   onNavigate,
-  onResolveEmpty,
+  focusedKey,
+  onFocusKey,
 }: TreeLevelProps) {
-  // One query per expanded folder, cached + sorted. Pagination is not
-  // consumed: directories with more than `LIST_PAGE_SIZE` children render
-  // truncated in the tree (a "Load more" leaf would be the way to extend).
-  const query = useListFiles(parent, undefined, storageName)
+  const query = useInfiniteListFiles(parent, storageName)
+  const loadMoreKey = `load-more:${parent}`
 
   const folders = useMemo(() => {
-    const dirs = query.data?.entries.filter((e) => e.is_dir) ?? []
+    const dirs =
+      query.data?.pages.flatMap((page) =>
+        page.entries.filter((entry) => entry.is_dir),
+      ) ?? []
     return sortEntries(dirs, sortDir)
-  }, [query.data?.entries, sortDir])
+  }, [query.data?.pages, sortDir])
 
-  const isResolvedEmpty =
-    !query.isPending && !query.isError && folders.length === 0
   useEffect(() => {
-    if (isResolvedEmpty && onResolveEmpty) onResolveEmpty()
-  }, [isResolvedEmpty, onResolveEmpty])
+    if (query.isPending) return
+    const nextFocus = reconcileTreeFocus(
+      focusedKey,
+      parent,
+      folders.map((folder) => folder.key),
+      query.hasNextPage,
+    )
+    if (nextFocus !== focusedKey) onFocusKey(nextFocus)
+  }, [
+    folders,
+    focusedKey,
+    onFocusKey,
+    parent,
+    query.hasNextPage,
+    query.isPending,
+  ])
 
   if (query.isPending) {
     return <LevelSkeleton depth={depth} />
   }
 
-  if (query.isError) {
+  if (query.isError && query.data === undefined) {
     return (
       <LevelError
         depth={depth}
@@ -280,13 +399,17 @@ function TreeLevel({
     )
   }
 
-  if (folders.length === 0) {
+  if (folders.length === 0 && !query.hasNextPage) {
     return <LevelEmpty depth={depth} atRoot={parent === ''} />
   }
 
   return (
-    <ul className="flex flex-col gap-0.5">
-      {folders.map((entry) => (
+    <ul
+      role="group"
+      aria-busy={query.isFetching}
+      className="flex flex-col gap-0.5"
+    >
+      {folders.map((entry, index) => (
         <TreeNode
           key={entry.key}
           entry={entry}
@@ -297,8 +420,56 @@ function TreeLevel({
           sortDir={sortDir}
           expand={expand}
           onNavigate={onNavigate}
+          focusedKey={focusedKey}
+          tabStop={
+            focusedKey === entry.key ||
+            (focusedKey === null && depth === 0 && index === 0)
+          }
+          onFocusKey={onFocusKey}
         />
       ))}
+      {query.hasNextPage && (
+        <li role="none">
+          <Button
+            role="treeitem"
+            data-tree-key={loadMoreKey}
+            data-tree-depth={depth}
+            tabIndex={
+              focusedKey === loadMoreKey ||
+              (focusedKey === null && depth === 0 && folders.length === 0)
+                ? 0
+                : -1
+            }
+            variant="ghost"
+            size="sm"
+            aria-level={depth + 1}
+            aria-disabled={query.isFetchingNextPage}
+            onClick={() => {
+              if (!query.isFetchingNextPage) void query.fetchNextPage()
+            }}
+            onFocus={() => onFocusKey(loadMoreKey)}
+            className="h-7 max-w-full justify-start text-xs text-muted-foreground aria-disabled:pointer-events-none aria-disabled:opacity-50"
+            style={{ marginLeft: depth * 12 + 24 }}
+          >
+            {query.isFetchingNextPage ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <ChevronDown className="size-3.5" />
+            )}
+            {query.isFetchingNextPage
+              ? 'Loading folders…'
+              : query.isFetchNextPageError
+                ? 'Retry loading folders'
+                : 'Load more folders'}
+          </Button>
+        </li>
+      )}
+      {query.isFetching && !query.isFetchingNextPage && (
+        <li role="status" className="flex items-center gap-1 px-2 py-1 text-xs text-muted-foreground">
+          <Loader2 className="size-3 animate-spin" />
+          Refreshing folders…
+        </li>
+      )}
     </ul>
   )
 }
@@ -312,6 +483,9 @@ interface TreeNodeProps {
   sortDir: SortDir
   expand: TreeExpandedApi
   onNavigate: (prefix: string) => void
+  focusedKey: string | null
+  tabStop: boolean
+  onFocusKey: (key: string | null) => void
 }
 
 function TreeNode({
@@ -323,6 +497,9 @@ function TreeNode({
   sortDir,
   expand,
   onNavigate,
+  focusedKey,
+  tabStop,
+  onFocusKey,
 }: TreeNodeProps) {
   const name = basenameOf(entry.key)
   // depth=0 in multi-bucket S3 IS the bucket level — everything deeper is
@@ -332,12 +509,6 @@ function TreeNode({
   const isCurrent = entry.key === activePrefix
   const isExpanded = expand.isExpanded(entry.key)
   const rowRef = useRef<HTMLButtonElement | null>(null)
-  // Flipped once we've listed this folder and found no subdirectories, so
-  // leaf folders render distinctly from "collapsed branch I haven't opened
-  // yet". Session-local: a leaf that gains children server-side stays
-  // visually leaf until an invalidate.
-  const [knownLeaf, setKnownLeaf] = useState(false)
-  const markLeaf = useCallback(() => setKnownLeaf(true), [])
 
   // Reveal the active row after auto-expand opens its ancestors. `nearest`
   // avoids scrolling when the row is already on screen (e.g. shallow paths).
@@ -347,12 +518,11 @@ function TreeNode({
     }
   }, [isCurrent])
 
-  const showChildren = isExpanded && !knownLeaf
-
   return (
-    <li>
+    <li role="none">
       <EntryContextMenu entry={entry} storageName={storageName}>
         <div
+          data-tree-row
           className={cn(
             'flex w-full items-center rounded-md text-sm transition-colors',
             isCurrent
@@ -360,51 +530,48 @@ function TreeNode({
               : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
           )}
         >
-          {knownLeaf ? (
-            <span
-              aria-hidden="true"
-              className="flex size-6 shrink-0 items-center justify-center"
-              style={{ marginLeft: depth * 12 }}
-            >
-              <span className="size-1 rounded-full bg-muted-foreground/40" />
-            </span>
-          ) : (
-            <button
-              type="button"
-              aria-label={isExpanded ? 'Collapse' : 'Expand'}
-              aria-expanded={isExpanded}
-              onClick={(e) => {
-                e.stopPropagation()
-                expand.toggle(entry.key)
-              }}
-              className="flex size-6 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground"
-              style={{ marginLeft: depth * 12 }}
-            >
-              {isExpanded ? (
-                <ChevronDown className="size-3.5" />
-              ) : (
-                <ChevronRight className="size-3.5" />
-              )}
-            </button>
-          )}
+          <button
+            type="button"
+            tabIndex={-1}
+            aria-label={isExpanded ? `Collapse ${name}` : `Expand ${name}`}
+            aria-expanded={isExpanded}
+            data-tree-toggle
+            onClick={(e) => {
+              e.stopPropagation()
+              onFocusKey(entry.key)
+              rowRef.current?.focus()
+              expand.toggle(entry.key)
+            }}
+            className="flex size-6 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground pointer-coarse:size-11"
+            style={{ marginLeft: depth * 12 }}
+          >
+            {isExpanded ? (
+              <ChevronDown className="size-3.5" />
+            ) : (
+              <ChevronRight className="size-3.5" />
+            )}
+          </button>
           <button
             ref={rowRef}
             type="button"
+            role="treeitem"
+            data-tree-key={entry.key}
+            data-tree-depth={depth}
+            tabIndex={tabStop ? 0 : -1}
             onClick={() => {
               onNavigate(entry.key)
-              // Row click acts as both navigate + expand toggle so users can
-              // drill in without aiming at the small chevron. Skip on known
-              // leaves — they have no children to reveal, and the toggle
-              // would silently dirty the persisted expand set.
-              if (!knownLeaf) expand.toggle(entry.key)
+              expand.open(entry.key)
             }}
+            onFocus={() => onFocusKey(entry.key)}
             aria-current={isCurrent ? 'page' : undefined}
-            className="flex min-w-0 flex-1 items-center gap-2 py-1.5 pr-2 text-left"
+            aria-expanded={isExpanded}
+            aria-level={depth + 1}
+            className="flex min-w-0 flex-1 items-center gap-2 py-1.5 pr-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring pointer-coarse:min-h-11"
             title={name}
           >
             <EntryIcon
               Icon={dir.Icon}
-              color={cn(dir.color, knownLeaf && 'opacity-60')}
+              color={dir.color}
               isSymlink={entry.is_symlink}
               className="size-4 shrink-0"
             />
@@ -412,7 +579,7 @@ function TreeNode({
           </button>
         </div>
       </EntryContextMenu>
-      {showChildren && (
+      {isExpanded && (
         <TreeLevel
           parent={entry.key}
           depth={depth + 1}
@@ -422,7 +589,8 @@ function TreeNode({
           sortDir={sortDir}
           expand={expand}
           onNavigate={onNavigate}
-          onResolveEmpty={markLeaf}
+          focusedKey={focusedKey}
+          onFocusKey={onFocusKey}
         />
       )}
     </li>
@@ -489,4 +657,3 @@ function describeQueryError(error: unknown): string {
   if (error instanceof Error) return error.message
   return 'Failed to load folders.'
 }
-

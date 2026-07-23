@@ -88,6 +88,7 @@ export function pruneOrphanTreeExpanded(validStorageNames: string[]): void {
 export interface TreeExpandedApi {
   isExpanded: (prefix: string) => boolean
   toggle: (prefix: string) => void
+  open: (prefix: string) => void
   /// Add every *ancestor* of `prefix` to the expanded set. The prefix itself
   /// is NOT added — the active folder is highlighted, not auto-opened, so
   /// users still drive whether to reveal its children.
@@ -141,6 +142,15 @@ export function useTreeExpanded(storageName: string): TreeExpandedApi {
     })
   }, [])
 
+  const open = useCallback((prefix: string) => {
+    setExpanded((prev) => {
+      if (prev.has(prefix)) return prev
+      const next = new Set(prev)
+      next.add(prefix)
+      return capSet(next)
+    })
+  }, [])
+
   const expandPath = useCallback((prefix: string) => {
     if (!prefix) return
     const segments = prefix.replace(/\/+$/, '').split('/').filter(Boolean)
@@ -163,7 +173,7 @@ export function useTreeExpanded(storageName: string): TreeExpandedApi {
     })
   }, [])
 
-  return { isExpanded, toggle, expandPath }
+  return { isExpanded, toggle, open, expandPath }
 }
 
 function sameOrder(a: Set<string>, b: Set<string>): boolean {

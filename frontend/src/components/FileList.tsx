@@ -55,7 +55,7 @@ import {
 } from '@/lib/roving-navigation'
 import { isMultiBucketS3 } from '@/lib/storage-display'
 import { resolveStorageUri } from '@/lib/resolve-uri'
-import { encodePathSegments } from '@/lib/route-path'
+import { encodePathSegments, getSidebarEntryRoute } from '@/lib/route-path'
 import {
   useListFiles,
   usePrefetchListFiles,
@@ -63,7 +63,10 @@ import {
   useStorages,
 } from '@/hooks/use-storage'
 import { useMediaQuery } from '@/hooks/use-media-query'
-import { useResizableWidth } from '@/hooks/use-resizable-width'
+import {
+  getKeyboardResizeWidth,
+  useResizableWidth,
+} from '@/hooks/use-resizable-width'
 import { useSidebarCollapsed } from '@/hooks/use-sidebar-collapsed'
 import { useSortDir, useSortField } from '@/hooks/use-sort-dir'
 import { useGridFit } from '@/hooks/use-grid-fit'
@@ -129,7 +132,7 @@ import { useRecents } from '@/hooks/use-recents'
 import { useSelection } from '@/hooks/use-selection'
 import { useCommandItems } from '@/hooks/use-command-items'
 import { CommandPalette } from '@/components/CommandPalette'
-import type { FileEntry } from '@/types/storage'
+import type { FileEntry, StorageEntryRef } from '@/types/storage'
 
 const PREVIEW_PARAM = 'preview'
 const PAGE_PARAM = 'page'
@@ -678,6 +681,20 @@ export function FileList() {
       return true
     },
     [goToPath, navigate, storageName, activeStorage],
+  )
+
+  const goToSidebarEntry = useCallback(
+    (entry: StorageEntryRef) => {
+      const view = isValidViewMode(urlViewParamRef.current)
+        ? urlViewParamRef.current
+        : undefined
+      const target = getSidebarEntryRoute(entry, view)
+
+      setTokenStack([undefined])
+      navigate({ pathname: target.pathname, search: target.search })
+      recordRecent(entry.storage, target.cleanKey, entry.type)
+    },
+    [navigate, recordRecent],
   )
 
   const switchStorage = useCallback(
@@ -1270,10 +1287,16 @@ export function FileList() {
                 storageName={storageName}
                 multiBucket={multiBucket}
                 onNavigate={goToPath}
+                onNavigateEntry={goToSidebarEntry}
               />
             </aside>
             <ResizeHandle
               onPointerDown={sidebarResize.startResize}
+              value={sidebarResize.width}
+              min={sidebarResize.minWidth}
+              max={sidebarResize.maxWidth}
+              onResize={sidebarResize.resizeTo}
+              ariaLabel="Resize folder sidebar"
               className="hidden md:block"
             />
           </>
@@ -1689,7 +1712,14 @@ export function FileList() {
                 )}
               </div>
             </div>
-            <ResizeHandle onPointerDown={splitResize.startResize} />
+            <ResizeHandle
+              onPointerDown={splitResize.startResize}
+              value={splitResize.width}
+              min={splitResize.minWidth}
+              max={splitResize.maxWidth}
+              onResize={splitResize.resizeTo}
+              ariaLabel="Resize file list"
+            />
             <div className="flex min-w-0 flex-1 flex-col pl-3">
               <div className="mb-2 flex items-center gap-2">
                 <Tooltip>
@@ -2080,6 +2110,11 @@ function FileRow({
 
 interface ResizeHandleProps {
   onPointerDown: (e: ReactPointerEvent) => void
+  value: number
+  min: number
+  max: number
+  onResize: (width: number) => void
+  ariaLabel: string
   /// Extra utility classes — e.g. callers that need to hide the handle at
   /// certain breakpoints (`hidden md:block`).
   className?: string
@@ -2089,22 +2124,41 @@ interface ResizeHandleProps {
 // the existing border-color used elsewhere; the hover/active states tint it
 // with the primary color so the affordance is discoverable without being
 // noisy at rest.
-function ResizeHandle({ onPointerDown, className }: ResizeHandleProps) {
+function ResizeHandle({
+  onPointerDown,
+  value,
+  min,
+  max,
+  onResize,
+  ariaLabel,
+  className,
+}: ResizeHandleProps) {
   return (
     <div
       role="separator"
       aria-orientation="vertical"
+      aria-label={ariaLabel}
+      aria-valuemin={min}
+      aria-valuemax={max}
+      aria-valuenow={value}
+      tabIndex={0}
       onPointerDown={onPointerDown}
+      onKeyDown={(event) => {
+        const next = getKeyboardResizeWidth(event.key, value, min, max)
+        if (next === null) return
+        event.preventDefault()
+        onResize(next)
+      }}
       className={cn(
-        'group relative w-1 shrink-0 cursor-col-resize bg-border transition-colors hover:bg-primary/40 active:bg-primary/60',
+        'group relative w-1 shrink-0 cursor-col-resize bg-border transition-colors hover:bg-primary/40 active:bg-primary/60 focus-visible:bg-primary/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
         className,
       )}
     >
-      {/* Invisible 8-px-wide hit area centered over the visible bar so users
-          don't need pixel-perfect aim to grab the handle. */}
+      {/* Invisible hit area centered over the visible bar so users don't need
+          pixel-perfect aim; coarse pointers get the full 44-px target. */}
       <span
         aria-hidden="true"
-        className="absolute inset-y-0 -left-1.5 w-4"
+        className="absolute inset-y-0 -left-1.5 w-4 pointer-coarse:-left-5 pointer-coarse:w-11"
       />
     </div>
   )

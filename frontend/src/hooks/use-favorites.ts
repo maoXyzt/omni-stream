@@ -11,14 +11,16 @@
 
 import { useCallback, useEffect, useState } from 'react'
 
+import type {
+  StorageEntryRef,
+  StorageEntryType,
+} from '@/types/storage'
+
 const STORAGE_KEY = 'omni-stream:favorites:v1'
 
-export type FavoriteType = 'folder' | 'file'
+export type FavoriteType = StorageEntryType
 
-export interface FavoriteEntry {
-  storage: string
-  key: string
-  type: FavoriteType
+export interface FavoriteEntry extends StorageEntryRef {
   pinnedAt: number
 }
 
@@ -26,6 +28,13 @@ export interface FavoritesState {
   favorites: FavoriteEntry[]
   add: (storage: string, key: string, type: FavoriteType) => void
   remove: (storage: string, key: string) => void
+}
+
+export function normalizeFavoriteKey(
+  key: string,
+  type: FavoriteType,
+): string {
+  return type === 'folder' && key && !key.endsWith('/') ? `${key}/` : key
 }
 
 export function useFavorites(): FavoritesState {
@@ -46,8 +55,14 @@ export function useFavorites(): FavoritesState {
     // Re-read storage on every mutation to avoid overwriting concurrent writes
     // from other tabs that arrived between the last storage event and now.
     const current = readStorage()
-    if (current.some((f) => f.storage === storage && f.key === key)) return
-    const updated = [...current, { storage, key, type, pinnedAt: Date.now() }]
+    const normalizedKey = normalizeFavoriteKey(key, type)
+    if (current.some((f) => f.storage === storage && f.key === normalizedKey)) {
+      return
+    }
+    const updated = [
+      ...current,
+      { storage, key: normalizedKey, type, pinnedAt: Date.now() },
+    ]
     const err = writeStorage(updated)
     if (!err) setFavorites(updated)
   }, [])
@@ -86,6 +101,7 @@ function readStorage(): FavoriteEntry[] {
   const env = parsed as { version?: unknown; favorites?: unknown }
   if (env.version !== 1 || !Array.isArray(env.favorites)) return []
   const out: FavoriteEntry[] = []
+  const seen = new Set<string>()
   for (const item of env.favorites) {
     if (!item || typeof item !== 'object') continue
     const f = item as Record<string, unknown>
@@ -93,12 +109,16 @@ function readStorage(): FavoriteEntry[] {
     if (typeof f.key !== 'string') continue
     if (f.type !== 'folder' && f.type !== 'file') continue
     if (typeof f.pinnedAt !== 'number') continue
-    out.push({
+    const entry: FavoriteEntry = {
       storage: f.storage,
-      key: f.key,
+      key: normalizeFavoriteKey(f.key, f.type),
       type: f.type,
       pinnedAt: f.pinnedAt,
-    })
+    }
+    const identity = JSON.stringify([entry.storage, entry.key])
+    if (seen.has(identity)) continue
+    seen.add(identity)
+    out.push(entry)
   }
   return out
 }
