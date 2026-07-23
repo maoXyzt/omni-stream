@@ -46,7 +46,7 @@ fn compute_next_token_v2(
     return None;
   }
 
-  synthesize_v1_marker_from_entries(entries)
+  synthesize_v1_marker_from_entries(entries, None)
 }
 
 /// Compute `next_token` for a v1 `ListObjects` response.
@@ -58,6 +58,7 @@ fn compute_next_token_v1(
   server_next_marker: Option<&str>,
   is_truncated: Option<bool>,
   entries: &[FileEntry],
+  bucket_prefix: Option<&str>,
 ) -> Option<String> {
   if let Some(m) = server_next_marker {
     return Some(format!("{V1_MARKER_PREFIX}{m}"));
@@ -68,20 +69,26 @@ fn compute_next_token_v1(
     return None;
   }
 
-  synthesize_v1_marker_from_entries(entries)
+  synthesize_v1_marker_from_entries(entries, bucket_prefix)
 }
 
-fn synthesize_v1_marker_from_entries(entries: &[FileEntry]) -> Option<String> {
+fn synthesize_v1_marker_from_entries(
+  entries: &[FileEntry],
+  bucket_prefix: Option<&str>,
+) -> Option<String> {
   let last_entry = entries.iter().max_by(|a, b| a.key.cmp(&b.key))?;
+  let key = bucket_prefix
+    .and_then(|prefix| last_entry.key.strip_prefix(prefix))
+    .unwrap_or(&last_entry.key);
 
   // If the boundary lands on a CommonPrefix ("dir/"), a marker of "dir/"
   // would still match keys inside it (since "dir/" < "dir/foo"), causing
   // the same directory to re-emit. Append max-codepoint to step past the
   // entire subtree.
   let cursor = if last_entry.is_dir {
-    format!("{}\u{10FFFF}", last_entry.key)
+    format!("{key}\u{10FFFF}")
   } else {
-    last_entry.key.clone()
+    key.to_string()
   };
   Some(format!("{V1_MARKER_PREFIX}{cursor}"))
 }
@@ -401,7 +408,12 @@ impl S3Backend {
       });
     }
 
-    let next_token = compute_next_token_v1(resp.next_marker(), resp.is_truncated(), &entries);
+    let next_token = compute_next_token_v1(
+      resp.next_marker(),
+      resp.is_truncated(),
+      &entries,
+      bucket_prefix,
+    );
 
     Ok(ListResult {
       entries,
@@ -940,37 +952,57 @@ mod tests {
   // --- v1 path -----------------------------------------------------------
 
   #[test]
-  fn v1_server_next_marker_wins() {
+  fn v1_server_next_marker_is_opaque_in_multi_bucket_mode() {
     let entries = n_files(LIST_PAGE_SIZE as usize);
-    let got = compute_next_token_v1(Some("dir/last-key"), Some(true), &entries);
-    assert_eq!(got, Some(format!("{V1_MARKER_PREFIX}dir/last-key")));
+    let got = compute_next_token_v1(
+      Some("bucket/server-marker"),
+      Some(true),
+      &entries,
+      Some("bucket/"),
+    );
+    assert_eq!(got, Some(format!("{V1_MARKER_PREFIX}bucket/server-marker")));
   }
 
   #[test]
   fn v1_short_page_without_truncated_returns_none() {
     let entries = n_files(30);
-    assert_eq!(compute_next_token_v1(None, Some(false), &entries), None);
-    assert_eq!(compute_next_token_v1(None, None, &entries), None);
+    assert_eq!(
+      compute_next_token_v1(None, Some(false), &entries, None),
+      None
+    );
+    assert_eq!(compute_next_token_v1(None, None, &entries, None), None);
   }
 
   #[test]
   fn v1_full_page_explicitly_not_truncated_is_eof() {
     let entries = n_files(LIST_PAGE_SIZE as usize);
-    assert_eq!(compute_next_token_v1(None, Some(false), &entries), None);
+    assert_eq!(
+      compute_next_token_v1(None, Some(false), &entries, None),
+      None
+    );
   }
 
   #[test]
   fn v1_full_page_without_next_marker_falls_back_to_last_key() {
     let entries = n_files(LIST_PAGE_SIZE as usize);
-    let got = compute_next_token_v1(None, None, &entries).expect("expected fallback token");
+    let got = compute_next_token_v1(None, None, &entries, None).expect("expected fallback token");
     assert_eq!(got, format!("{V1_MARKER_PREFIX}k0099.bin"));
   }
 
   #[test]
   fn v1_boundary_on_common_prefix_appends_sentinel() {
     let entries = vec![dir("dir1/"), dir("dir2/"), dir("dir3/")];
-    let got = compute_next_token_v1(None, Some(true), &entries).expect("expected fallback token");
+    let got =
+      compute_next_token_v1(None, Some(true), &entries, None).expect("expected fallback token");
     assert_eq!(got, format!("{V1_MARKER_PREFIX}dir3/\u{10FFFF}"));
+  }
+
+  #[test]
+  fn v1_synthesized_marker_strips_multi_bucket_display_prefix() {
+    let entries = vec![file("bucket/dir/key")];
+    let got = compute_next_token_v1(None, Some(true), &entries, Some("bucket/"))
+      .expect("expected fallback token");
+    assert_eq!(got, format!("{V1_MARKER_PREFIX}dir/key"));
   }
 
   // --- multi-bucket path routing ----------------------------------------
