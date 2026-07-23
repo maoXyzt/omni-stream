@@ -1,5 +1,10 @@
 import { useCallback } from 'react'
-import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
+import {
+  keepPreviousData,
+  useInfiniteQuery,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query'
 
 import { getServerInfo, listFiles, listStorages, statFile } from '@/api/storage'
 
@@ -39,6 +44,26 @@ export function useListFiles(
     // stale (cheap by construction — staleTime gates it). Catches the case
     // where the user updates files in another tool and tabs back expecting
     // to see the change. Overrides the global default (`false` in App).
+    refetchOnWindowFocus: true,
+    enabled: storage !== undefined,
+  })
+}
+
+export function useInfiniteListFiles(
+  prefix: string,
+  storage: string | undefined,
+) {
+  return useInfiniteQuery({
+    queryKey: [
+      'list',
+      storage ?? null,
+      prefix,
+      { scope: 'tree' },
+    ] as const,
+    queryFn: ({ pageParam }) => listFiles(prefix, pageParam, storage),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (lastPage) => lastPage.next_token ?? undefined,
+    staleTime: 5 * 60_000,
     refetchOnWindowFocus: true,
     enabled: storage !== undefined,
   })
