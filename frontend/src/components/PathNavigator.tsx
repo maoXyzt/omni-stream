@@ -1,8 +1,8 @@
-import { useState, type FormEvent, type KeyboardEvent } from 'react'
-import { FolderInput, Loader2 } from 'lucide-react'
+import { useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
+import { ArrowRight, CircleX, FolderInput, Loader2, X } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
-import { resolveStorageUri } from '@/lib/resolve-uri'
+import { cleanPathInput, resolveStorageUri } from '@/lib/resolve-uri'
 import type { StorageDescriptor } from '@/types/storage'
 import { Button } from '@/components/ui/button'
 import {
@@ -30,6 +30,7 @@ interface PathNavigatorProps {
 }
 
 export function PathNavigator({ prefix, onNavigate, activeStorage }: PathNavigatorProps) {
+  const inputRef = useRef<HTMLTextAreaElement>(null)
   const [open, setOpen] = useState(false)
   const [value, setValue] = useState(prefix)
   const [submitting, setSubmitting] = useState(false)
@@ -44,7 +45,7 @@ export function PathNavigator({ prefix, onNavigate, activeStorage }: PathNavigat
 
   // Strip stray newlines (from paste) and whitespace. Computed once and reused
   // in both the preview and handleSubmit so the two are always in sync.
-  const cleaned = value.replace(/[\r\n]+/g, '').trim()
+  const cleaned = cleanPathInput(value)
 
   function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
     // e.isComposing guards against IME Enter (e.g. Chinese/Japanese candidate
@@ -96,7 +97,14 @@ export function PathNavigator({ prefix, onNavigate, activeStorage }: PathNavigat
         </TooltipTrigger>
         <TooltipContent>Jump to a folder or file path</TooltipContent>
       </Tooltip>
-      <DialogContent className="sm:max-w-2xl">
+      <DialogContent
+        className="sm:max-w-2xl"
+        onOpenAutoFocus={(e) => {
+          e.preventDefault()
+          inputRef.current?.focus()
+          inputRef.current?.select()
+        }}
+      >
         <DialogHeader>
           <DialogTitle>Go to path</DialogTitle>
           <DialogDescription>
@@ -109,25 +117,46 @@ export function PathNavigator({ prefix, onNavigate, activeStorage }: PathNavigat
           <label htmlFor="path-navigator-input" className="text-sm font-medium">
             Storage path
           </label>
-          <textarea
-            id="path-navigator-input"
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="foo/bar/"
-            autoFocus
-            spellCheck={false}
-            autoComplete="off"
-            rows={3}
-            aria-invalid={cleaned ? !resolved.ok : undefined}
-            aria-describedby={cleaned ? 'path-navigator-result' : undefined}
-            className={cn(
-              'w-full min-w-0 resize-y rounded-lg border border-input bg-transparent px-2.5 py-1.5',
-              'font-mono text-sm leading-relaxed transition-colors outline-none',
-              'placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50',
-              'dark:bg-input/30',
+          <div className="relative">
+            <textarea
+              ref={inputRef}
+              id="path-navigator-input"
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="foo/bar/"
+              spellCheck={false}
+              autoComplete="off"
+              rows={3}
+              disabled={submitting}
+              aria-invalid={cleaned ? !resolved.ok : undefined}
+              aria-describedby={cleaned ? 'path-navigator-result' : undefined}
+              className={cn(
+                'w-full min-w-0 resize-y rounded-lg border border-input bg-transparent py-1.5 pl-2.5 pr-12',
+                'font-mono text-sm leading-relaxed transition-colors outline-none',
+                'placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50',
+                'disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-destructive/20',
+                'dark:bg-input/30 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40',
+              )}
+            />
+            {value && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                className="absolute right-1.5 top-1.5 text-muted-foreground"
+                aria-label="Clear path and jump to root"
+                title="Clear path"
+                disabled={submitting}
+                onClick={() => {
+                  setValue('')
+                  inputRef.current?.focus()
+                }}
+              >
+                <X />
+              </Button>
             )}
-          />
+          </div>
           {cleaned && (
             <div
               id="path-navigator-result"
@@ -139,7 +168,11 @@ export function PathNavigator({ prefix, onNavigate, activeStorage }: PathNavigat
                   : 'bg-destructive/10 text-destructive dark:bg-destructive/20',
               )}
             >
-              <span className="shrink-0 select-none">{resolved.ok ? '→' : '✕'}</span>
+              {resolved.ok ? (
+                <ArrowRight className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+              ) : (
+                <CircleX className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+              )}
               <span className="break-all">
                 {resolved.ok
                   ? resolvedKey === ''
@@ -158,7 +191,7 @@ export function PathNavigator({ prefix, onNavigate, activeStorage }: PathNavigat
             >
               Cancel
             </Button>
-            <Button type="submit" disabled={submitting}>
+            <Button type="submit" disabled={submitting || !resolved.ok}>
               {submitting && <Loader2 className="size-4 animate-spin" />}
               Go
             </Button>

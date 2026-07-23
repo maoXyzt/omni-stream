@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { resolveStorageUri } from '@/lib/resolve-uri'
+import { cleanPathInput, resolveStorageUri } from '@/lib/resolve-uri'
 import type { StorageDescriptor } from '@/types/storage'
 
 const singleBucket = (bucket: string): StorageDescriptor => ({
@@ -32,6 +32,14 @@ const REPORTED =
   's3://infographics/vigeneval/training_files/captions-rewritten_260129_9949rows_processed_train.json'
 const REPORTED_KEY =
   'vigeneval/training_files/captions-rewritten_260129_9949rows_processed_train.json'
+
+describe('cleanPathInput', () => {
+  it('removes pasted line breaks and surrounding whitespace', () => {
+    expect(cleanPathInput('  s3://bucket/\r\npath/file.txt \n')).toBe(
+      's3://bucket/path/file.txt',
+    )
+  })
+})
 
 describe('resolveStorageUri — relative input (no scheme)', () => {
   it('returns a relative path unchanged', () => {
