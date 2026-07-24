@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
+import { getTreeAncestorPrefixes } from '@/lib/tree-navigation'
+
 const KEY_PREFIX = 'omni-stream:tree-expanded:'
 
 /// Per-storage cap on persisted expanded prefixes. JS `Set` preserves
@@ -89,6 +91,9 @@ export interface TreeExpandedApi {
   isExpanded: (prefix: string) => boolean
   toggle: (prefix: string) => void
   open: (prefix: string) => void
+  /// Collapse every branch except the strict ancestors of `prefix`, keeping
+  /// the current folder visible while returning the tree to a compact state.
+  collapseToPath: (prefix: string) => void
   /// Add every *ancestor* of `prefix` to the expanded set. The prefix itself
   /// is NOT added — the active folder is highlighted, not auto-opened, so
   /// users still drive whether to reveal its children.
@@ -151,20 +156,24 @@ export function useTreeExpanded(storageName: string): TreeExpandedApi {
     })
   }, [])
 
+  const collapseToPath = useCallback((prefix: string) => {
+    setExpanded((prev) => {
+      const next = new Set(getTreeAncestorPrefixes(prefix))
+      return sameOrder(prev, next) ? prev : next
+    })
+  }, [])
+
   const expandPath = useCallback((prefix: string) => {
-    if (!prefix) return
-    const segments = prefix.replace(/\/+$/, '').split('/').filter(Boolean)
-    if (segments.length === 0) return
+    const ancestors = getTreeAncestorPrefixes(prefix)
+    if (ancestors.length === 0) return
     setExpanded((prev) => {
       const next = new Set(prev)
-      let acc = ''
       // Add every strict ancestor — stop one short of the full prefix so the
       // active folder itself isn't auto-expanded. Touch existing entries
       // (delete-then-add) so navigation refreshes their LRU recency.
-      for (let i = 0; i < segments.length - 1; i++) {
-        acc += `${segments[i]}/`
-        if (next.has(acc)) next.delete(acc)
-        next.add(acc)
+      for (const ancestor of ancestors) {
+        if (next.has(ancestor)) next.delete(ancestor)
+        next.add(ancestor)
       }
       // No-op when the membership and ordering both match — avoid a wasted
       // render + write when nothing actually changed.
@@ -173,7 +182,7 @@ export function useTreeExpanded(storageName: string): TreeExpandedApi {
     })
   }, [])
 
-  return { isExpanded, toggle, open, expandPath }
+  return { isExpanded, toggle, open, collapseToPath, expandPath }
 }
 
 function sameOrder(a: Set<string>, b: Set<string>): boolean {

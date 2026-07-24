@@ -5,6 +5,7 @@ import { fuzzyRank } from '@/lib/fuzzy'
 import type { CommandItem } from '@/hooks/use-command-items'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { Kbd } from '@/components/ui/kbd'
 import { cn } from '@/lib/utils'
 
 interface Props {
@@ -189,6 +190,23 @@ export function CommandPalette({ open, onClose, items }: Props) {
               </div>
             ))
           )}
+        </div>
+        <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1 border-t bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+          <span className="flex items-center gap-1">
+            <Kbd variant="default" className="ml-0">↑</Kbd>
+            <Kbd variant="default" className="ml-0">↓</Kbd>
+            Navigate
+          </span>
+          <span aria-hidden="true">·</span>
+          <span className="flex items-center gap-1">
+            <Kbd variant="default" className="ml-0">Enter</Kbd>
+            Open
+          </span>
+          <span aria-hidden="true">·</span>
+          <span className="flex items-center gap-1">
+            <Kbd variant="default" className="ml-0">Esc</Kbd>
+            Close
+          </span>
         </div>
       </DialogContent>
     </Dialog>

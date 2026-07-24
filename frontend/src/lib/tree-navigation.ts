@@ -8,6 +8,17 @@ export type TreeKeyboardAction =
   | { type: 'expand' | 'collapse' }
   | null
 
+export function getTreeAncestorPrefixes(prefix: string): string[] {
+  const segments = prefix.replace(/\/+$/, '').split('/').filter(Boolean)
+  const ancestors: string[] = []
+  let current = ''
+  for (let i = 0; i < segments.length - 1; i++) {
+    current += `${segments[i]}/`
+    ancestors.push(current)
+  }
+  return ancestors
+}
+
 export function getTreeKeyboardAction(
   key: string,
   items: readonly VisibleTreeItem[],

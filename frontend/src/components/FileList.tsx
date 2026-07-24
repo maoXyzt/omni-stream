@@ -124,6 +124,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
+import { Kbd } from '@/components/ui/kbd'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   Tooltip,
@@ -1359,13 +1360,33 @@ export function FileList() {
             currentBucket={currentBucket}
           />
         )}
-        {/* `ml-auto` floats this to the right edge regardless of how many
-            other items live in the header; `asChild` lets the Button styles
-            apply to the underlying anchor so the link still opens in a new
-            tab with `noopener noreferrer`. */}
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button variant="ghost" size="icon-sm" asChild className="ml-auto">
+            <Button
+              variant="outline"
+              size="sm"
+              className="ml-auto gap-2 text-muted-foreground pointer-coarse:min-h-11 pointer-coarse:min-w-11"
+              aria-label="Open quick open and commands"
+              aria-keyshortcuts="Meta+K Control+K"
+              onClick={() => setShowCommandPalette(true)}
+            >
+              <Search className="size-4" />
+              <span className="hidden md:inline">Quick open &amp; commands…</span>
+              <Kbd
+                variant="default"
+                className="ml-1 hidden md:inline-flex"
+              >
+                ⌘/Ctrl K
+              </Kbd>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Quick open &amp; commands</TooltipContent>
+        </Tooltip>
+        {/* `asChild` keeps the official GitHub link semantics while applying
+            the shared icon-button styling. */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="ghost" size="icon-sm" asChild>
               <a
                 href={REPO_URL}
                 target="_blank"
