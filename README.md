@@ -68,12 +68,13 @@ extract, mark `omni-stream` executable, and put it on `$PATH` if you like.
 
 ## 2. Configuration
 
-`config.toml` lookup order (first hit wins):
+If `$OMNI_CONFIG` is set, OmniStream uses that exact path without falling back,
+even when the file does not exist. Otherwise, it uses the first existing file
+from this lookup order:
 
-1. `$OMNI_CONFIG` (absolute path, highest priority)
-2. `$XDG_CONFIG_HOME/omni-stream/config.toml`
-3. `directories::ProjectDirs` platform default (macOS: `~/Library/Application Support/omni-stream/`; Linux: `~/.config/omni-stream/`)
-4. `./config.toml` (current directory)
+1. `$XDG_CONFIG_HOME/omni-stream/config.toml`
+2. `directories::ProjectDirs` platform default (macOS: `~/Library/Application Support/omni-stream/`; Linux: `~/.config/omni-stream/`)
+3. `./config.toml` (current directory)
 
 `config.example.toml` in the repo root works as a template. A minimal config:
 
@@ -178,7 +179,12 @@ token = "any-long-random-string"
 public_read = false   # every request requires the token
 ```
 
-> **Note**: the `/raw` file mount relies on Bearer-header auth; browsers can't inject headers on navigation / fetch, so `/raw` is not practically usable under full lockdown (`public_read = false`). The default `public_read = true` keeps `/raw` accessible.
+> **Note**: the `/raw` file mount relies on Bearer-header auth. Browser
+> navigation and automatic subresource loads cannot attach that header;
+> programmatic fetch / XHR can only do so when code explicitly sets
+> `Authorization`. Therefore browser-opened `/raw` dashboards are not
+> practically usable under full lockdown (`public_read = false`). The default
+> `public_read = true` keeps `/raw` accessible.
 
 The embedded SPA (`/`, `/assets/*`) is always open. TLS is out of scope — put nginx / caddy in front for HTTPS.
 

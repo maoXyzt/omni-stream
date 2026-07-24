@@ -668,7 +668,7 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
           )}
           <span className="truncate text-xs text-muted-foreground">{statusLine}</span>
         </div>
-        <div className="flex w-full min-w-0 flex-wrap items-center justify-end gap-2 @4xl/text-preview:w-auto @4xl/text-preview:flex-nowrap">
+        <div className="flex w-full min-w-0 flex-wrap items-center justify-start gap-2 @4xl/text-preview:w-auto @4xl/text-preview:flex-nowrap @4xl/text-preview:justify-end">
           {showSpinner && (
             <Loader2 className="size-4 animate-spin text-muted-foreground" />
           )}
