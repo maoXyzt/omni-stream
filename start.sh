@@ -7,6 +7,7 @@ export CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-/tmp/cargo_build_target}
 
 build_service() {
     cargo build --release --bin omni-stream --features duckdb
+    touch "${CARGO_TARGET_DIR}/release/omni-stream.duckdb-enabled"
 }
 
 build_frontend() {
@@ -23,7 +24,10 @@ build_all() {
 
 run_service() {
     local service_bin="${CARGO_TARGET_DIR:-./target}/release/omni-stream"
-    [[ -x "$service_bin" ]] || build_all
+    local duckdb_stamp="${service_bin}.duckdb-enabled"
+    if [[ ! -x "$service_bin" || ! -f "$duckdb_stamp" || "$service_bin" -nt "$duckdb_stamp" ]]; then
+        build_all
+    fi
     RUST_LOG=${RUST_LOG:-info,tower_http=debug} "$service_bin"
 }
 

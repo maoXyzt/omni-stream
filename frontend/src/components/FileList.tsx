@@ -313,10 +313,10 @@ export function FileList() {
     if (!main) return
 
     const styles = window.getComputedStyle(main)
+    const paddingLeft = Number.parseFloat(styles.paddingLeft) || 0
+    const paddingRight = Number.parseFloat(styles.paddingRight) || 0
     setMainContentWidth(
-      main.clientWidth -
-        Number.parseFloat(styles.paddingLeft) -
-        Number.parseFloat(styles.paddingRight),
+      main.clientWidth - paddingLeft - paddingRight,
     )
 
     const observer = new ResizeObserver(([entry]) => {
