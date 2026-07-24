@@ -727,7 +727,7 @@ function LevelEmpty({ depth, atRoot }: { depth: number; atRoot: boolean }) {
       className="py-1 text-xs italic text-muted-foreground"
       style={{ paddingLeft: depth * 12 + 24 }}
     >
-      {atRoot ? 'No folders at root.' : '(empty)'}
+      {atRoot ? 'No folders at root.' : 'No subfolders.'}
     </p>
   )
 }
