@@ -28,8 +28,19 @@ import { useRecents } from '@/hooks/use-recents'
 import { EntryContextMenu } from '@/components/EntryContextMenu'
 import { EntryIcon } from '@/components/EntryIcon'
 import { dirVisual } from '@/components/preview/registry'
+import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
+} from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from '@/components/ui/tabs'
 import {
   Tooltip,
   TooltipContent,
@@ -41,6 +52,7 @@ import {
   getTreeKeyboardAction,
   reconcileTreeFocus,
 } from '@/lib/tree-navigation'
+import { getSidebarEntryPresentation } from '@/lib/sidebar-navigation'
 import { cn } from '@/lib/utils'
 import type { FileEntry, StorageEntryRef } from '@/types/storage'
 
@@ -71,8 +83,6 @@ export function Sidebar({
 
   const expand = useTreeExpanded(storageName)
   const { expandPath } = expand
-  const [favoritesOpen, setFavoritesOpen] = useState(true)
-  const [recentsOpen, setRecentsOpen] = useState(true)
   const [focusedKey, setFocusedKey] = useState<string | null>(null)
   const treeRef = useRef<HTMLDivElement>(null)
 
@@ -88,10 +98,10 @@ export function Sidebar({
 
   const { favorites, remove: removeFavorite } = useFavorites()
   const { recents } = useRecents()
-  const { data: storagesData } = useStorages()
+  const storagesQuery = useStorages()
   const knownStorages = useMemo(
-    () => new Set(storagesData?.storages.map((s) => s.name) ?? []),
-    [storagesData],
+    () => new Set(storagesQuery.data?.storages.map((s) => s.name) ?? []),
+    [storagesQuery.data],
   )
 
   // Filter to entries whose storage still exists (prune orphans).
@@ -145,209 +155,286 @@ export function Sidebar({
   }
 
   return (
-    <div className="flex h-full flex-col gap-1 py-2">
-      {/* Favorites section */}
-      {validFavorites.length > 0 && (
-        <section className="shrink-0">
-          <button
-            type="button"
-            className="mx-2 flex items-center gap-1 rounded-sm px-2 py-1.5 text-left outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring pointer-coarse:min-h-11"
-            aria-expanded={favoritesOpen}
-            onClick={() => setFavoritesOpen((open) => !open)}
-          >
-            <Star className="size-3.5 text-muted-foreground" />
-            <span className="flex-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Favorites
-            </span>
-            <ChevronDown
-              className={cn(
-                'size-3.5 text-muted-foreground transition-transform motion-reduce:transition-none',
-                !favoritesOpen && '-rotate-90',
-              )}
-            />
-          </button>
-          {favoritesOpen && (
-            <ul className="px-2 pb-1">
-              {validFavorites.map((f) => {
-                const label = basenameOf(f.key) || f.storage
-                const location = `${f.storage} · ${f.key || '/'}`
-                const isActive =
-                  f.storage === storageName &&
-                  f.type === 'folder' &&
-                  (prefix === f.key || prefix.startsWith(f.key))
-                return (
-                  <li key={`${f.storage}::${f.key}`}>
-                    <div className="group flex items-center gap-1 rounded-sm px-2 py-1 text-xs hover:bg-accent">
-                      <button
-                        type="button"
-                        className={cn(
-                          'flex min-w-0 flex-1 items-center gap-1.5 text-left pointer-coarse:min-h-11',
-                          isActive
-                            ? 'font-medium text-foreground'
-                            : 'text-muted-foreground hover:text-foreground',
-                        )}
-                        aria-label={`Open ${label}, ${location}`}
-                        aria-current={
-                          f.storage === storageName &&
-                          f.type === 'folder' &&
-                          prefix === f.key
-                            ? 'page'
-                            : undefined
-                        }
-                        onClick={() =>
-                          onNavigateEntry(f)
-                        }
-                      >
-                        {f.type === 'folder' ? (
-                          <Folder className="size-3.5 shrink-0" />
-                        ) : (
-                          <File className="size-3.5 shrink-0" />
-                        )}
-                        <span className="flex min-w-0 flex-col">
-                          <span className="truncate">{label}</span>
-                          <span className="truncate text-xs font-normal text-muted-foreground">
-                            {location}
-                          </span>
-                        </span>
-                      </button>
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        className="size-5 shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
-                        aria-label={`Remove ${label} from favorites`}
-                        onClick={() => removeFavorite(f.storage, f.key)}
-                      >
-                        <Star className="size-3 fill-current" />
-                      </Button>
-                    </div>
-                  </li>
-                )
-              })}
-            </ul>
-          )}
-          <div className="mx-4 mb-1 h-px bg-border" />
-        </section>
-      )}
+    <Tabs
+      defaultValue="folders"
+      className="flex h-full min-h-0 flex-col gap-1 py-2"
+    >
+      <TabsList
+        className="mx-2 grid w-auto shrink-0 grid-cols-2 pointer-coarse:h-11"
+        aria-label="Sidebar views"
+      >
+        <TabsTrigger value="folders">Folders</TabsTrigger>
+        <TabsTrigger value="quick-access">Quick access</TabsTrigger>
+      </TabsList>
 
-      {/* Recent section */}
-      {validRecents.length > 0 && (
-        <section className="shrink-0">
-          <button
-            type="button"
-            className="mx-2 flex items-center gap-1 rounded-sm px-2 py-1.5 text-left outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring pointer-coarse:min-h-11"
-            aria-expanded={recentsOpen}
-            onClick={() => setRecentsOpen((open) => !open)}
-          >
-            <Clock className="size-3.5 text-muted-foreground" />
+      <TabsContent
+        value="folders"
+        forceMount
+        className="min-h-0 flex-1 data-[state=inactive]:hidden"
+      >
+        <div className="flex h-full min-h-0 flex-col">
+          <div className="mx-2 flex items-center gap-1 px-2 py-1.5">
             <span className="flex-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Recent
+              Folders
             </span>
-            <ChevronDown
-              className={cn(
-                'size-3.5 text-muted-foreground transition-transform motion-reduce:transition-none',
-                !recentsOpen && '-rotate-90',
-              )}
-            />
-          </button>
-          {recentsOpen && (
-            <ul className="px-2 pb-1">
-              {validRecents.map((r) => {
-                const label = basenameOf(r.key) || r.storage
-                const location = `${r.storage} · ${r.key || '/'}`
-                return (
-                  <li key={`${r.storage}::${r.key}::${r.visitedAt}`}>
-                    <button
-                      type="button"
-                      className="flex w-full items-center gap-1.5 rounded-sm px-2 py-1 text-left text-xs text-muted-foreground hover:bg-accent hover:text-foreground pointer-coarse:min-h-11"
-                      aria-label={`Open ${label}, ${location}`}
-                      onClick={() =>
-                        onNavigateEntry(r)
-                      }
-                    >
-                      {r.type === 'folder' ? (
-                        <Folder className="size-3.5 shrink-0" />
-                      ) : (
-                        <File className="size-3.5 shrink-0" />
-                      )}
-                      <span className="flex min-w-0 flex-col">
-                        <span className="truncate">{label}</span>
-                        <span className="truncate text-xs text-muted-foreground">
-                          {location}
-                        </span>
-                      </span>
-                    </button>
-                  </li>
-                )
-              })}
-            </ul>
-          )}
-          <div className="mx-4 mb-1 h-px bg-border" />
-        </section>
-      )}
-
-      {/* Folders tree */}
-      <div className="mx-2 flex items-center gap-1 px-2 py-1.5">
-        <span className="flex-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          Folders
-        </span>
-        <Tooltip>
-          <TooltipTrigger asChild>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="size-7 shrink-0 p-0 pointer-coarse:size-11"
+                  aria-label="Collapse tree to current folder"
+                  onClick={() => {
+                    expand.collapseToPath(prefix)
+                    setFocusedKey(prefix || null)
+                  }}
+                >
+                  <ChevronsUp className="size-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Collapse other folders</TooltipContent>
+            </Tooltip>
             <Button
               variant="ghost"
               size="sm"
               className="size-7 shrink-0 p-0 pointer-coarse:size-11"
-              aria-label="Collapse tree to current folder"
-              onClick={() => {
-                expand.collapseToPath(prefix)
-                setFocusedKey(prefix || null)
-              }}
+              aria-label={
+                sortDir === 'asc' ? 'Sort descending' : 'Sort ascending'
+              }
+              aria-pressed={sortDir === 'desc'}
+              title={
+                sortDir === 'asc'
+                  ? 'Sort A→Z (click to flip to Z→A)'
+                  : 'Sort Z→A (click to flip to A→Z)'
+              }
+              onClick={onToggleSort}
             >
-              <ChevronsUp className="size-4" />
+              {sortDir === 'asc' ? (
+                <ArrowDownAZ className="size-4" />
+              ) : (
+                <ArrowDownZA className="size-4" />
+              )}
             </Button>
-          </TooltipTrigger>
-          <TooltipContent>Collapse other folders</TooltipContent>
-        </Tooltip>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="size-7 shrink-0 p-0"
-          aria-label={sortDir === 'asc' ? 'Sort descending' : 'Sort ascending'}
-          aria-pressed={sortDir === 'desc'}
-          title={
-            sortDir === 'asc'
-              ? 'Sort A→Z (click to flip to Z→A)'
-              : 'Sort Z→A (click to flip to A→Z)'
-          }
-          onClick={onToggleSort}
-        >
-          {sortDir === 'asc' ? (
-            <ArrowDownAZ className="size-4" />
-          ) : (
-            <ArrowDownZA className="size-4" />
-          )}
-        </Button>
-      </div>
+          </div>
 
-      <div
-        ref={treeRef}
-        role="tree"
-        aria-label="Folders"
-        onKeyDown={handleTreeKeyDown}
-        className="min-h-24 flex-1 overflow-y-auto px-2"
+          <div
+            ref={treeRef}
+            role="tree"
+            aria-label="Folders"
+            onKeyDown={handleTreeKeyDown}
+            className="min-h-24 flex-1 overflow-y-auto px-2"
+          >
+            <TreeLevel
+              parent=""
+              depth={0}
+              activePrefix={prefix}
+              storageName={storageName}
+              multiBucket={multiBucket}
+              sortDir={sortDir}
+              expand={expand}
+              onNavigate={onNavigate}
+              focusedKey={focusedKey}
+              onFocusKey={setFocusedKey}
+            />
+          </div>
+        </div>
+      </TabsContent>
+
+      <TabsContent
+        value="quick-access"
+        forceMount
+        className="min-h-0 flex-1 overflow-y-auto px-2 data-[state=inactive]:hidden"
       >
-        <TreeLevel
-          parent=""
-          depth={0}
-          activePrefix={prefix}
-          storageName={storageName}
-          multiBucket={multiBucket}
-          sortDir={sortDir}
-          expand={expand}
-          onNavigate={onNavigate}
-          focusedKey={focusedKey}
-          onFocusKey={setFocusedKey}
-        />
-      </div>
+        {storagesQuery.isPending ? (
+          <QuickAccessSkeleton />
+        ) : storagesQuery.isError && storagesQuery.data === undefined ? (
+          <Alert variant="destructive" className="my-2">
+            <AlertCircle />
+            <AlertTitle>Failed to load quick access</AlertTitle>
+            <AlertDescription>
+              <p>
+                {storagesQuery.error instanceof Error
+                  ? storagesQuery.error.message
+                  : 'Failed to load storages.'}
+              </p>
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-2 h-7 px-2 text-xs pointer-coarse:min-h-11"
+                disabled={storagesQuery.isFetching}
+                onClick={() => void storagesQuery.refetch()}
+              >
+                {storagesQuery.isFetching ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <RotateCw className="size-4" />
+                )}
+                Retry
+              </Button>
+            </AlertDescription>
+          </Alert>
+        ) : (
+          <>
+            {storagesQuery.isFetching && (
+              <p
+                role="status"
+                className="flex items-center gap-1 px-2 py-1 text-xs text-muted-foreground"
+              >
+                <Loader2 className="size-4 animate-spin" />
+                Refreshing quick access…
+              </p>
+            )}
+
+            {validFavorites.length === 0 && validRecents.length === 0 ? (
+              <div className="px-2 py-8 text-center text-xs text-muted-foreground">
+                <p>No quick access items yet.</p>
+                <p className="mt-1">
+                  Star an item or open a location to add it here.
+                </p>
+              </div>
+            ) : (
+              <>
+                {validFavorites.length > 0 && (
+                  <section>
+                    <div className="flex items-center gap-1 px-2 py-1.5">
+                      <Star className="size-3.5 text-muted-foreground" />
+                      <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                        Favorites
+                      </h2>
+                    </div>
+                    <ul className="pb-1">
+                      {validFavorites.map((f) => {
+                        const presentation = getSidebarEntryPresentation(
+                          f,
+                          storageName,
+                          prefix,
+                        )
+                        return (
+                          <li key={`${f.storage}::${f.key}`}>
+                            <div
+                              className={cn(
+                                'group flex items-center gap-1 rounded-sm px-2 py-1 text-xs hover:bg-accent',
+                                presentation.isActive && 'bg-accent/60',
+                              )}
+                            >
+                              <button
+                                type="button"
+                                className={cn(
+                                  'flex min-w-0 flex-1 items-center gap-1.5 text-left pointer-coarse:min-h-11',
+                                  presentation.isActive
+                                    ? 'font-medium text-foreground'
+                                    : 'text-muted-foreground hover:text-foreground',
+                                )}
+                                aria-label={`Open ${presentation.label}, ${presentation.location}`}
+                                aria-current={
+                                  presentation.isCurrent ? 'page' : undefined
+                                }
+                                onClick={() => onNavigateEntry(f)}
+                              >
+                                {f.type === 'folder' ? (
+                                  <Folder className="size-3.5 shrink-0" />
+                                ) : (
+                                  <File className="size-3.5 shrink-0" />
+                                )}
+                                <span className="flex min-w-0 flex-col">
+                                  <span className="truncate">
+                                    {presentation.label}
+                                  </span>
+                                  <span className="truncate text-xs font-normal text-muted-foreground">
+                                    {presentation.location}
+                                  </span>
+                                </span>
+                              </button>
+                              <Button
+                                variant="ghost"
+                                size="icon-sm"
+                                className="size-5 shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 pointer-coarse:size-11 pointer-coarse:opacity-100"
+                                aria-label={`Remove ${presentation.label} from favorites`}
+                                onClick={() =>
+                                  removeFavorite(f.storage, f.key)
+                                }
+                              >
+                                <Star className="size-3 fill-current" />
+                              </Button>
+                            </div>
+                          </li>
+                        )
+                      })}
+                    </ul>
+                  </section>
+                )}
+
+                {validFavorites.length > 0 && validRecents.length > 0 && (
+                  <div className="mx-2 my-1 h-px bg-border" />
+                )}
+
+                {validRecents.length > 0 && (
+                  <section>
+                    <div className="flex items-center gap-1 px-2 py-1.5">
+                      <Clock className="size-3.5 text-muted-foreground" />
+                      <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                        Recent
+                      </h2>
+                    </div>
+                    <ul className="pb-1">
+                      {validRecents.map((r) => {
+                        const presentation = getSidebarEntryPresentation(
+                          r,
+                          storageName,
+                          prefix,
+                        )
+                        return (
+                          <li key={`${r.storage}::${r.key}::${r.visitedAt}`}>
+                            <button
+                              type="button"
+                              className={cn(
+                                'flex w-full items-center gap-1.5 rounded-sm px-2 py-1 text-left text-xs hover:bg-accent pointer-coarse:min-h-11',
+                                presentation.isActive
+                                  ? 'bg-accent/60 font-medium text-foreground'
+                                  : 'text-muted-foreground hover:text-foreground',
+                              )}
+                              aria-label={`Open ${presentation.label}, ${presentation.location}`}
+                              aria-current={
+                                presentation.isCurrent ? 'page' : undefined
+                              }
+                              onClick={() => onNavigateEntry(r)}
+                            >
+                              {r.type === 'folder' ? (
+                                <Folder className="size-3.5 shrink-0" />
+                              ) : (
+                                <File className="size-3.5 shrink-0" />
+                              )}
+                              <span className="flex min-w-0 flex-col">
+                                <span className="truncate">
+                                  {presentation.label}
+                                </span>
+                                <span className="truncate text-xs font-normal text-muted-foreground">
+                                  {presentation.location}
+                                </span>
+                              </span>
+                            </button>
+                          </li>
+                        )
+                      })}
+                    </ul>
+                  </section>
+                )}
+              </>
+            )}
+          </>
+        )}
+      </TabsContent>
+    </Tabs>
+  )
+}
+
+function QuickAccessSkeleton() {
+  return (
+    <div className="flex flex-col gap-2 px-2 py-2" aria-busy="true">
+      <Skeleton className="h-4 w-20 rounded-sm" />
+      {Array.from({ length: 4 }).map((_, index) => (
+        <Skeleton key={index} className="h-9 rounded-sm" />
+      ))}
     </div>
   )
 }
