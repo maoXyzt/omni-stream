@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  canShowInlinePreview,
   getBrowseScrollTarget,
   getFileListEmptyState,
   saveScrollPosition,
@@ -80,5 +81,13 @@ describe('getFileListEmptyState', () => {
     expect(getFileListEmptyState(0, 0)).toBe('empty-directory')
     expect(getFileListEmptyState(4, 0)).toBe('no-matches')
     expect(getFileListEmptyState(4, 2)).toBeNull()
+  })
+})
+
+describe('canShowInlinePreview', () => {
+  it('requires the list, preview, gutter, and resize handle to fit', () => {
+    expect(canShowInlinePreview(null, 360)).toBe(false)
+    expect(canShowInlinePreview(795, 360)).toBe(false)
+    expect(canShowInlinePreview(796, 360)).toBe(true)
   })
 })
