@@ -24,10 +24,11 @@ cp config.example.toml config.toml   # 按需编辑
 
 | 命令 | 作用 |
 |------|------|
+| `./start.sh` \| `./start.sh run` | 构建当前前端与含 DuckDB 的 release 后端，然后启动后端 |
 | `./start.sh build` | 等同 `build --all` |
-| `./start.sh build --all` \| `-a` | 前端 `pnpm build` + 后端 `cargo build --release` |
+| `./start.sh build --all` \| `-a` | 前端 `pnpm build` + 含 DuckDB 的后端 release 构建 |
 | `./start.sh build --frontend` \| `-f` | 仅前端静态产物 |
-| `./start.sh build --backend` \| `-b` | 仅后端 release 二进制 |
+| `./start.sh build --backend` \| `-b` | 仅含 DuckDB 的后端 release 二进制 |
 | `./start.sh -h` | 打印完整帮助 |
 
 脚本导出两个环境变量（均可在运行前覆盖）：
@@ -35,7 +36,7 @@ cp config.example.toml config.toml   # 按需编辑
 - `OMNI_BACKEND_URL=http://127.0.0.1:28080` — Vite dev server 反代目标，与后端默认监听地址一致
 - `CARGO_TARGET_DIR=/tmp/cargo_build_target` — 把编译产物移出仓库目录以减少磁盘占用
 
-> **注意**：因设置了 `CARGO_TARGET_DIR`，release 二进制默认在 `/tmp/cargo_build_target/release/omni-stream`，而非 `./target/release/`。若未显式设置该变量则产物在后者。
+> **注意**：`start.sh` 默认把 release 二进制写到 `/tmp/cargo_build_target/release/omni-stream`。手动运行 Cargo 且未设置 `CARGO_TARGET_DIR` 时，产物才位于 `./target/release/`。
 
 ### 3.2 手动命令（debug 构建 / CI）
 
@@ -55,7 +56,7 @@ cargo test --bin omni-stream
 
 ## 4. 可选 Feature：DuckDB（SQL 查询 & JSONL/TSV/CSV 转换）
 
-`duckdb` feature 默认**关闭**（`Cargo.toml` 中 `default = []`），原因是 bundled DuckDB 需要编译 C++ 代码，`cargo install omni-stream` 和本地 `start.sh` 均不启用。
+`duckdb` feature 默认**关闭**（`Cargo.toml` 中 `default = []`），原因是 bundled DuckDB 需要编译 C++ 代码。`cargo install omni-stream` 和未显式传入 feature 的手动 Cargo 命令不会启用；本地 `start.sh` 会显式启用。
 
 **启用后新增的能力：**
 - `POST /api/query` — Parquet 预览内嵌 SQL tab 的后端（DuckDB 执行只读查询；COPY 及写语句被拒）
@@ -80,7 +81,7 @@ cargo run --features duckdb --bin omni-stream
 需要改前端并使用 HMR 时，开两个终端：
 
 ```bash
-# 终端 A：后端 cargo run（如需 SQL 端点则加 --features duckdb）
+# 终端 A：构建当前前端与含 DuckDB 的 release 后端，然后启动后端
 ./start.sh run
 
 # 终端 B：Vite dev server（默认端口 5173），/api/* 反代到后端
