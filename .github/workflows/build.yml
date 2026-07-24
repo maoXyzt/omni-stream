@@ -298,8 +298,7 @@ jobs:
   # PATH on install. Same approach as ruff / uv / polars.
   #
   # The frontend dist is pulled from the upstream `frontend` job's artifact
-  # (rust-embed reads it at compile time), and README-en.md is swapped over
-  # README.md so PyPI's long description matches crates.io.
+  # (rust-embed reads it at compile time).
   wheels:
     name: wheel (${{ matrix.target }})
     needs: [frontend, matrix-config]
@@ -315,12 +314,6 @@ jobs:
         with:
           name: frontend-dist
           path: frontend/dist
-
-      # Same swap as `publish-dry-run` / `publish` — see comments there. The
-      # PyPI project's long description is the README packaged into the wheel
-      # METADATA; we want English on PyPI, matching crates.io.
-      - name: Substitute English README for PyPI packaging
-        run: cp README-en.md README.md
 
       # Build the wheel. The action's manylinux container ships a Rust
       # toolchain, so we pin to MSRV for parity with the `backend` job.
@@ -432,18 +425,9 @@ jobs:
         with:
           key: publish-dry-run
 
-      # The repo's primary README.md is Chinese (per AGENTS.md §6) but crates.io
-      # readers are predominantly English-speaking, so overwrite the file with
-      # README-en.md right before `cargo package` reads it. The checkout is
-      # ephemeral — this swap never touches the repo. AGENTS.md §6 enforces
-      # that the two READMEs stay structurally in sync, which keeps the
-      # crates.io view honest about features.
-      - name: Substitute English README for crates.io packaging
-        run: cp README-en.md README.md
-
       # `--allow-dirty`: `frontend/dist/` is gitignored but pulled from the
-      # `frontend` artifact at runtime, and the README swap above also dirties
-      # the tree; cargo otherwise refuses to package with uncommitted files.
+      # `frontend` artifact at runtime; cargo otherwise refuses to package with
+      # uncommitted files.
       # The `include` field in Cargo.toml is what actually ships dist into the
       # tarball.
       - run: cargo publish --dry-run --locked --allow-dirty --registry crates-io
@@ -467,11 +451,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: publish
-
-      # Same swap as `publish-dry-run` — see comment there. Must happen here
-      # too because this is what actually uploads to crates.io.
-      - name: Substitute English README for crates.io packaging
-        run: cp README-en.md README.md
 
       # See `publish-dry-run` for why `--allow-dirty` is required.
       - name: cargo publish
