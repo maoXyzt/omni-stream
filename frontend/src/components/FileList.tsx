@@ -1346,6 +1346,15 @@ export function FileList() {
       <header className="flex shrink-0 flex-wrap items-center gap-3 border-b border-border bg-background px-3 py-3 sm:px-6">
         <h1 className="min-w-0 text-2xl font-semibold">
           OmniStream
+          {serverInfo.data?.version && (
+            <span
+              className="ml-2 rounded bg-muted px-1.5 py-0.5 align-middle font-mono text-xs font-normal text-muted-foreground"
+              aria-label={`Backend version ${serverInfo.data.version}`}
+              title="Backend version"
+            >
+              v{serverInfo.data.version}
+            </span>
+          )}
           {serverInfo.data?.hostname && (
             <span className="ml-2 hidden max-w-[40vw] truncate align-middle text-base font-normal text-muted-foreground md:inline-block">
               {serverInfo.data.hostname}
@@ -1406,7 +1415,7 @@ export function FileList() {
           <>
             <aside
               style={{ width: sidebarResize.width }}
-              className="hidden shrink-0 md:flex md:flex-col md:overflow-y-auto md:border-r md:border-border"
+              className="hidden shrink-0 md:flex md:flex-col md:overflow-hidden md:border-r md:border-border"
             >
               <Sidebar
                 prefix={prefix}
@@ -2062,16 +2071,6 @@ export function FileList() {
         >
           <ArrowUp className="size-5" />
         </Button>
-      )}
-
-      {/* Backend version chip in the bottom-left, fixed so it survives scroll
-          and modal overlays. `pointer-events-none` lets clicks pass through
-          to whatever's underneath (e.g. the sidebar) since the chip is
-          purely informational. */}
-      {serverInfo.data?.version && (
-        <div className="pointer-events-none fixed bottom-2 left-2 z-30 rounded-md border bg-background/70 px-2 py-0.5 font-mono text-[10px] text-muted-foreground/80 shadow-sm backdrop-blur supports-backdrop-filter:bg-background/50">
-          v{serverInfo.data.version}
-        </div>
       )}
 
       {previewState && mainContentWidth !== null && !splitView && (
