@@ -16,9 +16,9 @@ interface Result {
   minWidth: number
   maxWidth: number
   /// Attach to the drag-handle's `onPointerDown`. Pointer-move listeners are
-  /// attached to `window` for the duration of the drag so the cursor can
-  /// leave the handle without dropping the gesture.
-  startResize: (e: ReactPointerEvent) => void
+  /// attached to `window`; `maxOverride` can temporarily preserve space for
+  /// a sibling pane without overwriting the persisted preferred width.
+  startResize: (e: ReactPointerEvent, maxOverride?: number) => void
   resizeTo: (width: number) => void
 }
 
@@ -33,6 +33,13 @@ export function getKeyboardResizeWidth(
   if (key === 'Home') return min
   if (key === 'End') return max
   return null
+}
+
+export function getResizeDragMax(
+  configuredMax: number,
+  maxOverride?: number,
+): number {
+  return Math.min(maxOverride ?? configuredMax, configuredMax)
 }
 
 /// Draggable width with localStorage persistence. The drag deltas are applied
@@ -80,18 +87,22 @@ export function useResizableWidth({
   )
 
   const startResize = useCallback(
-    (e: ReactPointerEvent) => {
+    (e: ReactPointerEvent, maxOverride?: number) => {
       // Skip secondary buttons — only left mouse / primary touch should drag.
       if (e.button !== 0) return
       e.preventDefault()
-      dragRef.current = { startX: e.clientX, startWidth: width }
+      const dragMax = getResizeDragMax(maxPx, maxOverride)
+      dragRef.current = {
+        startX: e.clientX,
+        startWidth: Math.min(width, dragMax),
+      }
 
       const onMove = (ev: PointerEvent) => {
         const d = dragRef.current
         if (!d) return
         const next = Math.min(
           Math.max(d.startWidth + (ev.clientX - d.startX), minPx),
-          maxPx,
+          dragMax,
         )
         setWidth(next)
       }

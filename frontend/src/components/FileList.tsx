@@ -50,8 +50,10 @@ import {
 import { ApiError, getStoredToken, setStoredToken } from '@/api/client'
 import { listFiles, proxyUrl, statFile } from '@/api/storage'
 import {
+  canShowInlinePreview,
   getBrowseScrollTarget,
   getFileListEmptyState,
+  INLINE_PREVIEW_RESERVED_WIDTH,
   saveScrollPosition,
   type FileListEmptyState as EmptyStateKind,
 } from '@/lib/file-list-ux'
@@ -73,7 +75,6 @@ import {
   useServerInfo,
   useStorages,
 } from '@/hooks/use-storage'
-import { useMediaQuery } from '@/hooks/use-media-query'
 import {
   getKeyboardResizeWidth,
   useResizableWidth,
@@ -252,9 +253,6 @@ export function FileList() {
     }
   }, [urlViewParam, storedViewMode, setStoredViewMode])
   const [gridFit, setGridFit] = useGridFit()
-  // Inline split layout (narrow file list + preview pane) needs horizontal
-  // room. Below `md` we keep the full-width list and fall back to the modal.
-  const isDesktop = useMediaQuery('(min-width: 768px)')
   const [sortDir, setSortDir] = useSortDir()
   const [sortField, setSortField] = useSortField()
   const { record: recordRecent } = useRecents()
@@ -300,6 +298,33 @@ export function FileList() {
   const currentToken = tokenStack[currentPage - 1]
   const listQuery = useListFiles(prefix, currentToken, storageName || undefined)
   const prefetchListFiles = usePrefetchListFiles()
+  const isAuthError =
+    (listQuery.isError &&
+      listQuery.error instanceof ApiError &&
+      listQuery.error.status === 401) ||
+    (storagesQuery.isError &&
+      storagesQuery.error instanceof ApiError &&
+      storagesQuery.error.status === 401)
+  const mainRef = useRef<HTMLElement>(null)
+  const [mainContentWidth, setMainContentWidth] = useState<number | null>(null)
+
+  useLayoutEffect(() => {
+    const main = mainRef.current
+    if (!main) return
+
+    const styles = window.getComputedStyle(main)
+    setMainContentWidth(
+      main.clientWidth -
+        Number.parseFloat(styles.paddingLeft) -
+        Number.parseFloat(styles.paddingRight),
+    )
+
+    const observer = new ResizeObserver(([entry]) => {
+      setMainContentWidth(entry.contentRect.width)
+    })
+    observer.observe(main)
+    return () => observer.disconnect()
+  }, [isAuthError, storageName])
 
   // A directly-visited URL without a trailing slash is ambiguous —
   // `normalizePrefix` has already committed to listing it as a directory.
@@ -947,10 +972,24 @@ export function FileList() {
     [goToPath, openPreview],
   )
 
-  // Split layout = list view on desktop with a preview open. Grid + mobile
-  // continue to use the modal preview path.
+  // Split layout = list view with enough room for both panes. Measuring the
+  // main content box accounts for the resizable folder sidebar; viewport
+  // breakpoints do not.
+  const inlineListMaxWidth =
+    mainContentWidth === null
+      ? splitResize.maxWidth
+      : Math.max(
+          splitResize.minWidth,
+          Math.min(
+            splitResize.maxWidth,
+            mainContentWidth - INLINE_PREVIEW_RESERVED_WIDTH,
+          ),
+        )
+  const inlineListWidth = Math.min(splitResize.width, inlineListMaxWidth)
   const splitView =
-    viewMode === 'list' && isDesktop && previewState !== null
+    viewMode === 'list' &&
+    previewState !== null &&
+    canShowInlinePreview(mainContentWidth, splitResize.minWidth)
 
   // `?` help dialog state — mounted here so the shortcut is always active
   // while FileList is rendered.
@@ -1020,11 +1059,9 @@ export function FileList() {
     },
   )
 
-  // Scroll-to-top: the shell's main element is the scroll container (sidebar
-  // and main scroll independently), so we listen on the ref rather than on
-  // window. Threshold 100px = roughly "user has scrolled past the toolbar".
-  const mainRef = useRef<HTMLElement>(null)
-  const galleryListRef = useRef<HTMLDivElement>(null)
+  // Only the file viewport scrolls, so location and listing controls remain
+  // available in both the regular and split layouts.
+  const browseViewportRef = useRef<HTMLDivElement>(null)
   const directoryKey = `${storageName}\0${prefix}`
   const pageKey = `${directoryKey}\0${currentPage}`
   const previousBrowseStateRef = useRef({
@@ -1043,7 +1080,7 @@ export function FileList() {
     const directoryChanged = previous.directoryKey !== directoryKey
     const pageChanged = previous.pageKey !== pageKey
     const splitViewChanged = previous.splitView !== splitView
-    const container = splitView ? galleryListRef.current : mainRef.current
+    const container = browseViewportRef.current
     const scrollPositions = scrollPositionsRef.current
     const scrollTop = getBrowseScrollTarget({
       pageChanged,
@@ -1078,7 +1115,7 @@ export function FileList() {
   useLayoutEffect(() => {
     if (showListSkeleton) return
     const scrollTop = pendingScrollTopRef.current
-    const container = splitView ? galleryListRef.current : mainRef.current
+    const container = browseViewportRef.current
     if (scrollTop === null || !container) return
     container.scrollTop = scrollTop
     pendingScrollTopRef.current = null
@@ -1102,14 +1139,14 @@ export function FileList() {
     saveScrollPosition(scrollPositionsRef.current, location.key, scrollTop)
   }, [location.key])
   const scrollToTop = useCallback(() => {
-    const container = splitView ? galleryListRef.current : mainRef.current
-    container?.scrollTo({
+    pendingScrollTopRef.current = 0
+    browseViewportRef.current?.scrollTo({
       top: 0,
       behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches
         ? 'auto'
         : 'smooth',
     })
-  }, [splitView])
+  }, [])
 
   // ---------------------------------------------------------------------------
   // Browsing-state arrow-key roving navigation (B3).
@@ -1283,14 +1320,6 @@ export function FileList() {
     )
   }
 
-  const isAuthError =
-    (listQuery.isError &&
-      listQuery.error instanceof ApiError &&
-      listQuery.error.status === 401) ||
-    (storagesQuery.isError &&
-      storagesQuery.error instanceof ApiError &&
-      storagesQuery.error.status === 401)
-
   if (isAuthError) {
     return (
       <TokenPrompt
@@ -1381,8 +1410,7 @@ export function FileList() {
           id="main-content"
           ref={mainRef}
           tabIndex={-1}
-          onScroll={handleBrowseScroll}
-          className="flex w-full min-w-0 flex-col gap-4 overflow-y-auto px-3 py-4 sm:px-6"
+          className="flex w-full min-w-0 flex-col gap-4 overflow-hidden px-3 py-4 sm:px-6"
         >
           <span className="sr-only" role="status" aria-live="polite" aria-atomic="true">
             Opened {prefix || '/'} in {storageName}
@@ -1699,18 +1727,24 @@ export function FileList() {
           )}
 
       {showListSkeleton ? (
-        viewMode === 'grid' ? (
-          <GridSkeleton />
-        ) : splitView ? (
-          <GallerySkeleton />
-        ) : (
-          <ListSkeleton />
-        )
+        <div
+          ref={browseViewportRef}
+          onScroll={handleBrowseScroll}
+          className="min-h-0 flex-1 overflow-auto"
+        >
+          {viewMode === 'grid' ? (
+            <GridSkeleton />
+          ) : splitView ? (
+            <GallerySkeleton />
+          ) : (
+            <ListSkeleton />
+          )}
+        </div>
       ) : listQuery.data ? (
         splitView ? (
           <div className="flex min-h-0 flex-1">
             <div
-              style={{ width: splitResize.width }}
+              style={{ width: inlineListWidth }}
               className="flex shrink-0 flex-col gap-2 overflow-hidden pr-3"
             >
               {/* Batch action bar — appears above the filter/pager row when
@@ -1763,7 +1797,7 @@ export function FileList() {
                   bubble up but `e.target !== currentTarget` so they don't
                   trigger the close. */}
               <div
-                ref={galleryListRef}
+                ref={browseViewportRef}
                 onScroll={handleBrowseScroll}
                 onClick={(e) => {
                   if (e.target === e.currentTarget) closePreview()
@@ -1796,10 +1830,12 @@ export function FileList() {
               </div>
             </div>
             <ResizeHandle
-              onPointerDown={splitResize.startResize}
-              value={splitResize.width}
+              onPointerDown={(event) =>
+                splitResize.startResize(event, inlineListMaxWidth)
+              }
+              value={inlineListWidth}
               min={splitResize.minWidth}
-              max={splitResize.maxWidth}
+              max={inlineListMaxWidth}
               onResize={splitResize.resizeTo}
               ariaLabel="Resize file list"
             />
@@ -1868,7 +1904,7 @@ export function FileList() {
             </div>
           </div>
         ) : (
-          <>
+          <div className="flex min-h-0 flex-1 flex-col gap-4">
             {/* Batch action bar — appears above the filter/pager row. */}
             {selection.size > 0 && storageName && (
               <BatchActionBar
@@ -1910,78 +1946,84 @@ export function FileList() {
               </div>
             </div>
 
-            {emptyState ? (
-              <FileListEmptyState
-                state={emptyState}
-                canWrite={canWrite}
-                onClearFilters={clearFilters}
-                onNewFolder={() => setShowNewFolder(true)}
-                onUpload={() => setShowUpload(true)}
-              />
-            ) : viewMode === 'grid' ? (
-              <FileGrid
-                entries={filteredEntries}
-                prefix={prefix}
-                storageName={storageName}
-                inBucketRoot={inBucketRoot}
-                fit={gridFit}
-                onSelect={handleEntry}
-                selectedKeys={selection.selectedKeys}
-                onSelectionToggle={handleSelectionToggle}
-              />
-            ) : (
-              <Table aria-label="Files">
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-8">
-                      <Checkbox
-                        checked={headerChecked}
-                        aria-label="Select all files on this page"
-                        disabled={fileEntries.length === 0}
-                        onClick={(e) => e.stopPropagation()}
-                        onCheckedChange={(checked) => {
-                          if (checked) handleSelectAll()
-                          else selection.clear()
-                        }}
-                      />
-                    </TableHead>
-                    <TableHead className="w-1/2">Name</TableHead>
-                    <TableHead className="hidden w-28 lg:table-cell">Type</TableHead>
-                    <TableHead className="hidden w-32 text-right lg:table-cell">Size</TableHead>
-                    <TableHead className="hidden lg:table-cell">Modified</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredEntries.map((entry, index) => (
-                    <FileRow
-                      key={entry.key}
-                      entry={entry}
-                      prefix={prefix}
-                      storageName={storageName}
-                      inBucketRoot={inBucketRoot}
-                      onSelect={handleEntry}
-                      selectionChecked={selection.isSelected(entry.key)}
-                      onSelectionToggle={handleSelectionToggle}
-                      rovingTabIndex={index === 0 ? 0 : -1}
-                    />
-                  ))}
-                </TableBody>
-              </Table>
-            )}
-
-            {/* README panel — shown when no file is open and the directory
-                contains a README.md (current page or detected via stat). */}
-            {previewState === null && readmeTarget && (
-              <Suspense fallback={null}>
-                <ReadmePanel
-                  fileKey={readmeTarget.key}
-                  storage={storageName || undefined}
-                  version={readmeTarget.last_modified}
-                  onViewSource={() => openPreview(readmeTarget)}
+            <div
+              ref={browseViewportRef}
+              onScroll={handleBrowseScroll}
+              className="min-h-0 flex-1 overflow-auto [&>[data-slot=table-container]]:overflow-visible"
+            >
+              {emptyState ? (
+                <FileListEmptyState
+                  state={emptyState}
+                  canWrite={canWrite}
+                  onClearFilters={clearFilters}
+                  onNewFolder={() => setShowNewFolder(true)}
+                  onUpload={() => setShowUpload(true)}
                 />
-              </Suspense>
-            )}
-          </>
+              ) : viewMode === 'grid' ? (
+                <FileGrid
+                  entries={filteredEntries}
+                  prefix={prefix}
+                  storageName={storageName}
+                  inBucketRoot={inBucketRoot}
+                  fit={gridFit}
+                  onSelect={handleEntry}
+                  selectedKeys={selection.selectedKeys}
+                  onSelectionToggle={handleSelectionToggle}
+                />
+              ) : (
+                <Table aria-label="Files">
+                  <TableHeader className="sticky top-0 z-10 bg-background shadow-[inset_0_-1px_0_var(--border)] [&_tr]:border-0">
+                    <TableRow>
+                      <TableHead className="w-8">
+                        <Checkbox
+                          checked={headerChecked}
+                          aria-label="Select all files on this page"
+                          disabled={fileEntries.length === 0}
+                          onClick={(e) => e.stopPropagation()}
+                          onCheckedChange={(checked) => {
+                            if (checked) handleSelectAll()
+                            else selection.clear()
+                          }}
+                        />
+                      </TableHead>
+                      <TableHead className="w-1/2">Name</TableHead>
+                      <TableHead className="hidden w-28 lg:table-cell">Type</TableHead>
+                      <TableHead className="hidden w-32 text-right lg:table-cell">Size</TableHead>
+                      <TableHead className="hidden lg:table-cell">Modified</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredEntries.map((entry, index) => (
+                      <FileRow
+                        key={entry.key}
+                        entry={entry}
+                        prefix={prefix}
+                        storageName={storageName}
+                        inBucketRoot={inBucketRoot}
+                        onSelect={handleEntry}
+                        selectionChecked={selection.isSelected(entry.key)}
+                        onSelectionToggle={handleSelectionToggle}
+                        rovingTabIndex={index === 0 ? 0 : -1}
+                      />
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+
+              {/* README panel — shown when no file is open and the directory
+                  contains a README.md (current page or detected via stat). */}
+              {previewState === null && readmeTarget && (
+                <Suspense fallback={null}>
+                  <ReadmePanel
+                    fileKey={readmeTarget.key}
+                    storage={storageName || undefined}
+                    version={readmeTarget.last_modified}
+                    onViewSource={() => openPreview(readmeTarget)}
+                  />
+                </Suspense>
+              )}
+            </div>
+          </div>
         )
       ) : null}
 
@@ -2011,7 +2053,7 @@ export function FileList() {
         </div>
       )}
 
-      {previewState && !splitView && (
+      {previewState && mainContentWidth !== null && !splitView && (
         <PreviewModal
           fileKey={previewState.key}
           kind={previewState.kind}

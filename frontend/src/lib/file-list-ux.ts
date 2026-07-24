@@ -1,6 +1,8 @@
 export type FileListEmptyState = 'empty-directory' | 'no-matches' | null
 
 const MAX_SCROLL_POSITIONS = 50
+// 420px preview content + 12px pane gutter + 4px resize handle.
+export const INLINE_PREVIEW_RESERVED_WIDTH = 436
 
 interface BrowseScrollTransition {
   pageChanged: boolean
@@ -40,4 +42,14 @@ export function getFileListEmptyState(
 ): FileListEmptyState {
   if (visibleCount > 0) return null
   return totalCount === 0 ? 'empty-directory' : 'no-matches'
+}
+
+export function canShowInlinePreview(
+  contentWidth: number | null,
+  listWidth: number,
+): boolean {
+  return (
+    contentWidth !== null &&
+    contentWidth >= listWidth + INLINE_PREVIEW_RESERVED_WIDTH
+  )
 }

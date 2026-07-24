@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 
-import { getKeyboardResizeWidth } from '@/hooks/use-resizable-width'
+import {
+  getKeyboardResizeWidth,
+  getResizeDragMax,
+} from '@/hooks/use-resizable-width'
 
 describe('getKeyboardResizeWidth', () => {
   it('steps left and right while respecting bounds', () => {
@@ -13,5 +16,13 @@ describe('getKeyboardResizeWidth', () => {
     expect(getKeyboardResizeWidth('Home', 240, 180, 480)).toBe(180)
     expect(getKeyboardResizeWidth('End', 240, 180, 480)).toBe(480)
     expect(getKeyboardResizeWidth('Enter', 240, 180, 480)).toBeNull()
+  })
+})
+
+describe('getResizeDragMax', () => {
+  it('uses only a stricter temporary maximum', () => {
+    expect(getResizeDragMax(600)).toBe(600)
+    expect(getResizeDragMax(600, 480)).toBe(480)
+    expect(getResizeDragMax(600, 720)).toBe(600)
   })
 })
