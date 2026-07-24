@@ -1,6 +1,6 @@
 [package]
 name = "omni-stream"
-version = "0.12.0"
+version = "0.12.1"
 edition = "2024"
 rust-version = "1.91"
 description = "Single-binary streaming storage proxy: axum + tokio + aws-sdk-s3 backend with an embedded React SPA, serving local FS or S3-compatible object storage behind one port."
