@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  getTreeAncestorPrefixes,
   getTreeKeyboardAction,
   reconcileTreeFocus,
   type VisibleTreeItem,
@@ -12,6 +13,17 @@ const items: VisibleTreeItem[] = [
   { depth: 1, expanded: null },
   { depth: 0, expanded: false },
 ]
+
+describe('getTreeAncestorPrefixes', () => {
+  it('keeps only the strict ancestors of the current folder', () => {
+    expect(getTreeAncestorPrefixes('')).toEqual([])
+    expect(getTreeAncestorPrefixes('photos/')).toEqual([])
+    expect(getTreeAncestorPrefixes('photos/2026/events/')).toEqual([
+      'photos/',
+      'photos/2026/',
+    ])
+  })
+})
 
 describe('getTreeKeyboardAction', () => {
   it('moves through visible items and supports Home/End', () => {

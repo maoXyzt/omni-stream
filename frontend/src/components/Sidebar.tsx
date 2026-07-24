@@ -11,6 +11,7 @@ import {
   ArrowDownZA,
   ChevronDown,
   ChevronRight,
+  ChevronsUp,
   Clock,
   File,
   Folder,
@@ -29,6 +30,11 @@ import { EntryIcon } from '@/components/EntryIcon'
 import { dirVisual } from '@/components/preview/registry'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import { basenameOf } from '@/lib/path'
 import { sortEntries } from '@/lib/sort'
 import {
@@ -284,6 +290,23 @@ export function Sidebar({
         <span className="flex-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
           Folders
         </span>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="size-7 shrink-0 p-0 pointer-coarse:size-11"
+              aria-label="Collapse tree to current folder"
+              onClick={() => {
+                expand.collapseToPath(prefix)
+                setFocusedKey(prefix || null)
+              }}
+            >
+              <ChevronsUp className="size-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Collapse other folders</TooltipContent>
+        </Tooltip>
         <Button
           variant="ghost"
           size="sm"
