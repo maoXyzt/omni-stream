@@ -1440,7 +1440,7 @@ export function FileList() {
           id="main-content"
           ref={mainRef}
           tabIndex={-1}
-          className="flex w-full min-w-0 flex-col gap-4 overflow-hidden px-3 py-4 sm:px-6"
+          className="@container/file-list flex w-full min-w-0 flex-col gap-4 overflow-hidden px-3 py-4 sm:px-6"
         >
           <span className="sr-only" role="status" aria-live="polite" aria-atomic="true">
             Opened {prefix || '/'} in {storageName}
@@ -1473,7 +1473,7 @@ export function FileList() {
               <PathBreadcrumb prefix={prefix} onNavigate={goToPath} />
               <PathNavigator prefix={prefix} activeStorage={activeStorage} onNavigate={goToPathOrFile} />
             </div>
-            <div className="flex w-full shrink-0 flex-wrap items-center justify-between gap-2 lg:w-auto lg:justify-start">
+            <div className="flex w-full shrink-0 flex-wrap items-center justify-between gap-2 @5xl/file-list:w-auto @5xl/file-list:justify-start">
               {/* Sort dropdown — field selector (name/size/mtime/type) and
                   direction toggle. The dropdown is compact so it doesn't
                   crowd the toolbar on narrow viewports. */}
@@ -1544,7 +1544,7 @@ export function FileList() {
                 <TooltipContent>Refresh listing</TooltipContent>
               </Tooltip>
               {canWrite && (
-                <div className="hidden items-center gap-2 lg:flex">
+                <div className="hidden items-center gap-2 @5xl/file-list:flex">
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <Button
@@ -1588,11 +1588,11 @@ export function FileList() {
               )}
               <ViewToggle mode={viewMode} onChange={setViewMode} />
               {viewMode === 'grid' && (
-                <div className="hidden lg:block">
+                <div className="hidden @5xl/file-list:block">
                   <GridFitToggle fit={gridFit} onChange={setGridFit} />
                 </div>
               )}
-              <div className="hidden items-center gap-2 lg:flex">
+              <div className="hidden items-center gap-2 @5xl/file-list:flex">
                 <ShareLinkButton />
                 {serverInfo.data?.auth_enabled && !hasToken && (
                   <Tooltip>
@@ -1637,13 +1637,13 @@ export function FileList() {
                   <Button
                     variant="outline"
                     size="sm"
-                    className="lg:hidden"
+                    className="@5xl/file-list:hidden"
                     aria-label="More actions"
                   >
                     <Ellipsis className="size-4" />
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-52 lg:hidden">
+                <DropdownMenuContent align="end" className="w-52">
                   {canWrite && (
                     <>
                       <DropdownMenuItem onSelect={() => setShowNewFolder(true)}>

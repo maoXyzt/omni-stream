@@ -654,9 +654,9 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
   }, [dirty])
 
   return (
-    <div className="flex h-full w-full flex-col overflow-hidden rounded-md bg-muted/30">
-      <div className="flex items-center justify-between gap-3 border-b border-border bg-background/50 px-3 py-2">
-        <div className="flex min-w-0 items-center gap-2">
+    <div className="@container/text-preview flex h-full w-full flex-col overflow-hidden rounded-md bg-muted/30">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-background/50 px-3 py-2">
+        <div className="flex w-full min-w-0 items-center gap-2 @4xl/text-preview:w-auto @4xl/text-preview:flex-1">
           {isPartial && (
             <span
               className="flex shrink-0 items-center gap-1 rounded-md bg-amber-500/15 px-1.5 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-400"
@@ -668,7 +668,7 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
           )}
           <span className="truncate text-xs text-muted-foreground">{statusLine}</span>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex w-full min-w-0 flex-wrap items-center justify-end gap-2 @4xl/text-preview:w-auto @4xl/text-preview:flex-nowrap">
           {showSpinner && (
             <Loader2 className="size-4 animate-spin text-muted-foreground" />
           )}
