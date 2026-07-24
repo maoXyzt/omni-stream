@@ -1,12 +1,12 @@
 import { useCallback } from 'react'
 import {
-  keepPreviousData,
   useInfiniteQuery,
   useQuery,
   useQueryClient,
 } from '@tanstack/react-query'
 
 import { getServerInfo, listFiles, listStorages, statFile } from '@/api/storage'
+import { shouldKeepPreviousListPage } from '@/lib/file-list-ux'
 
 export function useStorages() {
   return useQuery({
@@ -35,7 +35,10 @@ export function useListFiles(
   return useQuery({
     queryKey: ['list', storage ?? null, prefix, pageToken ?? null] as const,
     queryFn: () => listFiles(prefix, pageToken, storage),
-    placeholderData: keepPreviousData,
+    placeholderData: (previousData, previousQuery) =>
+      shouldKeepPreviousListPage(previousQuery?.queryKey, storage, prefix)
+        ? previousData
+        : undefined,
     // 5 minutes: long enough that paging within a prefix and re-expanding
     // sidebar nodes reuses the cache without refetching, short enough that
     // a user returning after a break sees a fresh listing.
@@ -63,7 +66,10 @@ export function useInfiniteListFiles(
     queryFn: ({ pageParam }) => listFiles(prefix, pageParam, storage),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (lastPage) => lastPage.next_token ?? undefined,
-    placeholderData: keepPreviousData,
+    placeholderData: (previousData, previousQuery) =>
+      shouldKeepPreviousListPage(previousQuery?.queryKey, storage, prefix)
+        ? previousData
+        : undefined,
     staleTime: 5 * 60_000,
     refetchOnWindowFocus: true,
     enabled: storage !== undefined,

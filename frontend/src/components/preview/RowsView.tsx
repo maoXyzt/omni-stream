@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertCircle, Check, Loader2, RotateCw, Settings2 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -13,6 +13,8 @@ import { useStorages } from '@/hooks/use-storage'
 import { presetMatch } from '@/lib/rows-applicability'
 import { type Node } from '@/lib/rows-schema'
 import { type ColumnInfo, type RowsSource } from '@/lib/rows-source'
+import { shouldKeepPreviousRowsPage } from '@/lib/rows-view-ux'
+import { cn } from '@/lib/utils'
 import { PageControls } from '@/components/preview/PageControls'
 import { PartialInfoNotice } from '@/components/preview/PartialInfoNotice'
 import { RowCard, RowNode } from '@/components/preview/rows-render'
@@ -129,14 +131,22 @@ export function RowsView({ fileKey, source, storage }: RowsViewProps) {
     setKnownTotal(source.totalRows)
   }, [storage, fileKey, source])
 
-  // Page-scoped query. keepPreviousData smooths transitions: previous
-  // cards stay visible while the next page is fetched, no skeleton
-  // flicker between pages.
+  // Page-scoped query. Previous cards stay visible while another page from
+  // this file loads, but never leak across storage or file switches.
   const rowsQuery = useQuery({
     queryKey: ['rows-data', storage ?? null, fileKey, pageIndex] as const,
-    queryFn: () => source.readRows(pageIndex * ROWS_PAGE, (pageIndex + 1) * ROWS_PAGE),
+    queryFn: async () => ({
+      pageIndex,
+      page: await source.readRows(
+        pageIndex * ROWS_PAGE,
+        (pageIndex + 1) * ROWS_PAGE,
+      ),
+    }),
     enabled: source.totalRows !== 0,
-    placeholderData: keepPreviousData,
+    placeholderData: (previousData, previousQuery) =>
+      shouldKeepPreviousRowsPage(previousQuery?.queryKey, storage, fileKey)
+        ? previousData
+        : undefined,
     // Page slices are deterministic for the lifetime of this source —
     // never re-fetch automatically. The cache survives across page
     // navigations so going back to a visited page is instant.
@@ -145,7 +155,7 @@ export function RowsView({ fileKey, source, storage }: RowsViewProps) {
 
   // Lock in totalRows whenever a read result reveals it.
   useEffect(() => {
-    const v = rowsQuery.data?.totalRows
+    const v = rowsQuery.data?.page.totalRows
     if (v !== null && v !== undefined) {
       setKnownTotal((prev) => (prev === v ? prev : v))
     }
@@ -158,11 +168,17 @@ export function RowsView({ fileKey, source, storage }: RowsViewProps) {
   const queryClient = useQueryClient()
   useEffect(() => {
     if (rowsQuery.isPending || rowsQuery.isFetching) return
-    if (!rowsQuery.data?.hasMore) return
+    if (!rowsQuery.data?.page.hasMore) return
     const next = pageIndex + 1
     void queryClient.prefetchQuery({
       queryKey: ['rows-data', storage ?? null, fileKey, next] as const,
-      queryFn: () => source.readRows(next * ROWS_PAGE, (next + 1) * ROWS_PAGE),
+      queryFn: async () => ({
+        pageIndex: next,
+        page: await source.readRows(
+          next * ROWS_PAGE,
+          (next + 1) * ROWS_PAGE,
+        ),
+      }),
       staleTime: Infinity,
     })
   }, [
@@ -171,18 +187,19 @@ export function RowsView({ fileKey, source, storage }: RowsViewProps) {
     storage,
     fileKey,
     pageIndex,
-    rowsQuery.data?.hasMore,
+    rowsQuery.data?.page.hasMore,
     rowsQuery.isPending,
     rowsQuery.isFetching,
   ])
 
-  const page = rowsQuery.data
+  const page = rowsQuery.data?.page
+  const renderedPageIndex = rowsQuery.data?.pageIndex ?? pageIndex
   const rows = page?.rows ?? []
   const totalRows = knownTotal
   const diagnostics = page?.diagnostics ?? source.diagnostics
   // First-page-in-flight is the only state that warrants the skeleton; a
-  // failing fetchNextPage keeps the prior page on screen via
-  // keepPreviousData, so we never blank out.
+  // failing page fetch keeps the prior page on screen via placeholderData,
+  // so we never blank out.
   const firstLoading =
     source.totalRows !== 0 && rowsQuery.isPending && rowsQuery.isFetching
   const isFetching = rowsQuery.isFetching
@@ -239,7 +256,7 @@ export function RowsView({ fileKey, source, storage }: RowsViewProps) {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-baseline gap-x-2 text-sm text-muted-foreground">
           <span>
-            {formatRowRange(pageIndex, ROWS_PAGE, rows.length, totalRows)}
+            {formatRowRange(renderedPageIndex, ROWS_PAGE, rows.length, totalRows)}
           </span>
           {diagnostics?.skippedLines && diagnostics.skippedLines > 0 && (
             <span
@@ -258,6 +275,7 @@ export function RowsView({ fileKey, source, storage }: RowsViewProps) {
               pageCount={pageCount}
               hasMore={hasMore}
               loading={isFetching}
+              showLoadingStatus={rowsQuery.isPlaceholderData}
               onPrev={() => setPageIndex((p) => Math.max(0, p - 1))}
               onNext={() => setPageIndex((p) => p + 1)}
               onJump={(p) => setPageIndex(p)}
@@ -283,7 +301,13 @@ export function RowsView({ fileKey, source, storage }: RowsViewProps) {
         </Alert>
       )}
 
-      <div className="min-h-0 flex-1 overflow-auto">
+      <div
+        aria-busy={isFetching || undefined}
+        className={cn(
+          'min-h-0 flex-1 overflow-auto transition-opacity',
+          rowsQuery.isPlaceholderData && 'opacity-60',
+        )}
+      >
         {rules.length === 0 ? (
           <EmptyState
             columns={columns}
@@ -303,7 +327,7 @@ export function RowsView({ fileKey, source, storage }: RowsViewProps) {
                 // Absolute index keeps the row header label consistent
                 // across pages ("row 41" on page 2 rather than restarting
                 // at "row 1") and gives stable React keys per-row.
-                const absoluteIndex = pageIndex * ROWS_PAGE + i
+                const absoluteIndex = renderedPageIndex * ROWS_PAGE + i
                 return (
                   <RowCard key={absoluteIndex} index={absoluteIndex}>
                     {rules.map((node, j) => (

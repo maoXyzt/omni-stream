@@ -5,6 +5,7 @@ import {
   getBrowseScrollTarget,
   getFileListEmptyState,
   saveScrollPosition,
+  shouldKeepPreviousListPage,
 } from '@/lib/file-list-ux'
 
 describe('getBrowseScrollTarget', () => {
@@ -89,5 +90,31 @@ describe('canShowInlinePreview', () => {
     expect(canShowInlinePreview(null, 360)).toBe(false)
     expect(canShowInlinePreview(795, 360)).toBe(false)
     expect(canShowInlinePreview(796, 360)).toBe(true)
+  })
+})
+
+describe('shouldKeepPreviousListPage', () => {
+  it('keeps pagination data only within the same storage and directory', () => {
+    expect(
+      shouldKeepPreviousListPage(
+        ['list', 'primary', 'photos/', 'next'],
+        'primary',
+        'photos/',
+      ),
+    ).toBe(true)
+    expect(
+      shouldKeepPreviousListPage(
+        ['list', 'archive', 'photos/', null],
+        'primary',
+        'photos/',
+      ),
+    ).toBe(false)
+    expect(
+      shouldKeepPreviousListPage(
+        ['list', 'primary', 'photos/2025/', null],
+        'primary',
+        'photos/',
+      ),
+    ).toBe(false)
   })
 })

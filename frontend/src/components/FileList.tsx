@@ -598,19 +598,10 @@ export function FileList() {
     )
   }, [previewState, listQuery.data])
 
-  // `keepPreviousData` keeps the previous prefix's entries visible while
-  // the new listing loads — useful for paginating within a prefix, but
-  // when the user descends into a subfolder the carry-over entries don't
-  // start with the new prefix and render with their full paths until the
-  // fresh data lands. Detect that mismatch and treat it as loading.
-  const isStaleForPrefix = useMemo(() => {
-    const sample = listQuery.data?.entries[0]
-    return Boolean(sample) && !sample!.key.startsWith(prefix)
-  }, [listQuery.data, prefix])
   // During a server-side walk we haven't populated `tokenStack[currentPage-1]`
   // yet, so `useListFiles` is reading page 1's listing under the hood — render
   // the skeleton until the walk seeds the cache + updates the stack.
-  const showListSkeleton = listQuery.isPending || isStaleForPrefix || walking
+  const showListSkeleton = listQuery.isPending || walking
 
   // Two sources of truth for the total: (1) the backend hint (local-fs has
   // it cheap, S3 doesn't ship it), and (2) frontend-discovered EOF — when

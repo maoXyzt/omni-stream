@@ -53,3 +53,14 @@ export function canShowInlinePreview(
     contentWidth >= listWidth + INLINE_PREVIEW_RESERVED_WIDTH
   )
 }
+
+export function shouldKeepPreviousListPage(
+  previousQueryKey: readonly unknown[] | undefined,
+  storage: string | undefined,
+  prefix: string,
+): boolean {
+  return (
+    previousQueryKey?.[1] === (storage ?? null) &&
+    previousQueryKey[2] === prefix
+  )
+}

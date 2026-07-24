@@ -1,10 +1,10 @@
 // Prev / page-jump / Next button cluster. Shared by previewers and views
 // that page through a RowsSource (CSV, Rows view, future tabular formats).
-// Each consumer renders its own status text alongside this — the controls
-// are loosely coupled to the surrounding layout.
+// Consumers can opt into the loading status when this control is the
+// region's single indicator; `loading` always disables interaction.
 
 import { useEffect, useState } from 'react'
-import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
@@ -21,6 +21,7 @@ interface PageControlsProps {
   /// derived totalRows.
   hasMore: boolean
   loading: boolean
+  showLoadingStatus?: boolean
   onPrev: () => void
   onNext: () => void
   onJump: (pageIndex: number) => void
@@ -31,12 +32,16 @@ export function PageControls({
   pageCount,
   hasMore,
   loading,
+  showLoadingStatus = false,
   onPrev,
   onNext,
   onJump,
 }: PageControlsProps) {
   return (
-    <div className="flex items-center gap-1">
+    <div
+      className="flex items-center gap-1"
+      aria-busy={loading || undefined}
+    >
       <Button
         variant="outline"
         size="sm"
@@ -55,6 +60,16 @@ export function PageControls({
         disabled={loading || (pageCount !== null && pageCount <= 1)}
         onJump={onJump}
       />
+      {loading && showLoadingStatus && (
+        <span
+          role="status"
+          aria-live="polite"
+          className="flex items-center gap-1 text-xs text-muted-foreground"
+        >
+          <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+          Loading page {pageIndex + 1}…
+        </span>
+      )}
       <Button
         variant="outline"
         size="sm"
