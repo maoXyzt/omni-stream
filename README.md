@@ -249,6 +249,9 @@ If you installed via `cargo install`, `omni-stream` is already on `$PATH`:
 # Serve one local directory with zero configuration
 omni-stream serve ./data
 
+# Same, but listen on a different port
+omni-stream serve ./data -p 9000
+
 # Use the config.toml found by the §2 lookup order
 omni-stream
 
@@ -262,10 +265,11 @@ OMNI_SERVER_PORT=8081 omni-stream
 RUST_LOG=info,tower_http=debug omni-stream
 ```
 
-`omni-stream serve <location>` always uses `127.0.0.1:28080`, a read-only
-local backend, and the built-in defaults. It does not load `config.toml` or
-`OMNI_*` configuration variables. Use the existing `omni-stream` form when
-you need configurable ports, authentication, or other storage backends.
+`omni-stream serve <location>` binds `127.0.0.1:28080` and uses a read-only
+local backend with the built-in defaults. `-p` / `--port <PORT>` is the only
+override; it does not load `config.toml` or `OMNI_*` configuration variables.
+Use the existing `omni-stream` form when you need a non-loopback host,
+authentication, or other storage backends.
 
 Tarballs from GitHub Releases don't add themselves to `$PATH`, so either run `./omni-stream` from the extracted directory or move it somewhere like `/usr/local/bin/`.
 

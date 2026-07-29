@@ -393,9 +393,13 @@ impl fmt::Debug for AuthConfig {
 
 impl Config {
   /// Build the minimal, zero-config setup used by `omni-stream serve <path>`.
-  pub fn for_local_root(root_path: PathBuf) -> anyhow::Result<Self> {
+  /// `port` overrides the listen port; `None` keeps the built-in default.
+  pub fn for_local_root(root_path: PathBuf, port: Option<u16>) -> anyhow::Result<Self> {
     let cfg = Self {
-      server: ServerConfig::default(),
+      server: ServerConfig {
+        port: port.unwrap_or_else(default_port),
+        ..ServerConfig::default()
+      },
       storages: vec![StorageConfig {
         name: "local".to_string(),
         r#type: StorageType::Local,
@@ -725,7 +729,7 @@ local = { root_path = "/tmp" }
   #[test]
   fn local_serve_config_uses_defaults() {
     let root = PathBuf::from("./data");
-    let cfg = Config::for_local_root(root.clone()).expect("local config");
+    let cfg = Config::for_local_root(root.clone(), None).expect("local config");
     let storage = cfg.active_storage().expect("active storage");
 
     assert_eq!(cfg.server.host, "127.0.0.1");
@@ -740,7 +744,15 @@ local = { root_path = "/tmp" }
     let local = storage.local.as_ref().expect("local settings");
     assert_eq!(local.root_path, root);
     assert!(local.follow_symlinks);
-    assert!(Config::for_local_root(PathBuf::new()).is_err());
+    assert!(Config::for_local_root(PathBuf::new(), None).is_err());
+  }
+
+  #[test]
+  fn local_serve_config_honours_port_override() {
+    let cfg = Config::for_local_root(PathBuf::from("./data"), Some(9000)).expect("local config");
+    assert_eq!(cfg.server.port, 9000);
+    // Only the port is overridable — the host stays loopback-only.
+    assert_eq!(cfg.server.host, "127.0.0.1");
   }
 
   #[test]
