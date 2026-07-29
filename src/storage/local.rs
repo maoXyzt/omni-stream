@@ -683,16 +683,20 @@ impl StorageBackend for LocalFsBackend {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use std::sync::atomic::{AtomicU64, Ordering};
   use std::time::UNIX_EPOCH;
+
+  static NEXT_TEMP_ID: AtomicU64 = AtomicU64::new(0);
 
   fn tempdir() -> PathBuf {
     let dir = std::env::temp_dir().join(format!(
-      "omni-list-test-{}-{}",
+      "omni-list-test-{}-{}-{}",
       std::process::id(),
       SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos(),
+      NEXT_TEMP_ID.fetch_add(1, Ordering::Relaxed),
     ));
     std::fs::create_dir_all(&dir).unwrap();
     dir

@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use anyhow::Context;
+use anyhow::{Context, bail};
 use axum::Router;
 use axum::extract::DefaultBodyLimit;
 use axum::http::StatusCode;
@@ -51,17 +51,27 @@ async fn main() -> anyhow::Result<()> {
   // `Config::load()` so `config init` / `config list` / `config check
   // <path>` work on a fresh host where no config file exists yet.
   //
-  // Hand-rolled parser, not clap: the surface is six positional subcommands
-  // with no flags, and a derive-clap setup would add ~100 KB plus several
-  // seconds of compile time for no UX win. Revisit when we grow real flags
-  // (e.g. `--format json`, `--color={auto,always,never}`).
+  // Hand-rolled parser, not clap: the surface is a handful of positional
+  // subcommands plus one flag (`serve --port`), and a derive-clap setup would
+  // add ~100 KB plus several seconds of compile time for no UX win. Revisit
+  // when the flag surface grows (e.g. `--format json`, `--color={auto,always,never}`).
   let mut argv = std::env::args().skip(1);
-  if let Some(sub) = argv.next() {
-    match sub.as_str() {
+  let cfg = match argv.next() {
+    Some(sub) => match sub.as_str() {
       "config" => return run_config_admin(argv.collect::<Vec<_>>()),
       "cache" => {
         let cfg = Config::load().context("load configuration")?;
         return run_cache_admin(argv.collect::<Vec<_>>(), &cfg);
+      }
+      "serve" => {
+        let args = argv.collect::<Vec<_>>();
+        if args.iter().any(|a| a == "-h" || a == "--help") {
+          print_serve_help();
+          return Ok(());
+        }
+        let serve = parse_serve_args(args)?;
+        Config::for_local_root(serve.location, serve.port)
+          .context("build local serve configuration")?
       }
       "-h" | "--help" | "help" => {
         print_top_help();
@@ -77,12 +87,13 @@ async fn main() -> anyhow::Result<()> {
         print_top_help();
         std::process::exit(2);
       }
-    }
-  }
+    },
+    None => Config::load().context("load configuration")?,
+  };
 
   // Config is immutable post-load (design §6) — wrap in Arc so future code paths
   // (e.g. handlers exposing version/health info) can share it cheaply.
-  let cfg = Arc::new(Config::load().context("load configuration")?);
+  let cfg = Arc::new(cfg);
 
   let registry = create_registry(&cfg).await?;
   let thumb = ThumbState::build(&cfg.thumbnails).context("init thumbnail cache")?;
@@ -313,6 +324,12 @@ fn print_top_help() {
     cli_style::cyan("omni-stream"),
   );
   println!(
+    "  {} {} Serve a local directory {}",
+    cli_style::cyan("omni-stream serve"),
+    cli_style::cyan("<location>"),
+    cli_style::dim("(see `serve --help`)"),
+  );
+  println!(
     "  {} {}     Inspect / manage the config file {}",
     cli_style::cyan("omni-stream config"),
     cli_style::cyan("<op>"),
@@ -324,6 +341,77 @@ fn print_top_help() {
     cli_style::cyan("<op>"),
     cli_style::dim("(see `cache --help`)"),
   );
+}
+
+const SERVE_USAGE: &str = "usage: omni-stream serve <location> [-p PORT]";
+
+fn print_serve_help() {
+  println!(
+    "{} {} {}",
+    cli_style::bold("Usage: omni-stream serve"),
+    cli_style::cyan("<location>"),
+    cli_style::dim("[-p PORT]"),
+  );
+  println!();
+  println!("  Serve one local directory, read-only, on http://127.0.0.1:28080.");
+  println!();
+  println!(
+    "  {} {}  Listen on PORT instead of {}",
+    cli_style::cyan("-p, --port"),
+    cli_style::cyan("<PORT>"),
+    cli_style::cyan("28080"),
+  );
+  println!();
+  println!("  Config files and OMNI_* environment variables are not loaded.");
+}
+
+/// Parsed form of `omni-stream serve <location> [-p PORT]`. `port` stays
+/// `None` when the flag is absent so the built-in default keeps living in one
+/// place ([`config::ServerConfig::default`]) instead of being duplicated here.
+struct ServeArgs {
+  location: PathBuf,
+  port: Option<u16>,
+}
+
+/// Flags may appear before or after the location, and `--port` accepts both
+/// the separated (`--port 9000`) and joined (`--port=9000`) spellings. A
+/// repeated flag takes the last value, matching getopt convention.
+fn parse_serve_args(args: Vec<String>) -> anyhow::Result<ServeArgs> {
+  let mut location: Option<PathBuf> = None;
+  let mut port: Option<u16> = None;
+  let mut it = args.into_iter();
+  while let Some(arg) = it.next() {
+    if let Some(raw) = arg.strip_prefix("--port=") {
+      port = Some(parse_port(raw)?);
+    } else if arg == "-p" || arg == "--port" {
+      let raw = it
+        .next()
+        .with_context(|| format!("{arg} requires a port number; {SERVE_USAGE}"))?;
+      port = Some(parse_port(&raw)?);
+    } else if arg.starts_with('-') {
+      bail!("unknown serve option: {arg}; {SERVE_USAGE}");
+    } else if arg.is_empty() {
+      bail!("serve location must not be empty");
+    } else if location.is_some() {
+      bail!("serve takes exactly one location; {SERVE_USAGE}");
+    } else {
+      location = Some(PathBuf::from(arg));
+    }
+  }
+  let Some(location) = location else {
+    bail!("{SERVE_USAGE}");
+  };
+  Ok(ServeArgs { location, port })
+}
+
+fn parse_port(raw: &str) -> anyhow::Result<u16> {
+  match raw.parse::<u16>() {
+    // Port 0 would make the OS pick an ephemeral port, but the startup banner
+    // prints the *configured* address, so we'd hand the user a dead
+    // `http://127.0.0.1:0` URL. Reject it rather than print a lie.
+    Ok(0) | Err(_) => bail!("invalid port: {raw:?} (expected 1-65535)"),
+    Ok(p) => Ok(p),
+  }
 }
 
 fn print_config_help() {
@@ -855,5 +943,58 @@ async fn shutdown_signal() {
   tokio::select! {
       _ = ctrl_c => {},
       _ = terminate => {},
+  }
+}
+
+#[cfg(test)]
+mod cli_tests {
+  use super::*;
+
+  fn serve(args: &[&str]) -> anyhow::Result<ServeArgs> {
+    parse_serve_args(args.iter().map(|s| (*s).to_string()).collect())
+  }
+
+  #[test]
+  fn serve_requires_exactly_one_location() {
+    let parsed = serve(&["./data"]).expect("location");
+    assert_eq!(parsed.location, PathBuf::from("./data"));
+    assert_eq!(parsed.port, None);
+    assert!(serve(&[]).is_err());
+    assert!(serve(&[""]).is_err());
+    assert!(serve(&["./one", "./two"]).is_err());
+  }
+
+  #[test]
+  fn serve_accepts_port_flag_in_any_position() {
+    for args in [
+      ["./data", "-p", "9000"],
+      ["./data", "--port", "9000"],
+      ["-p", "9000", "./data"],
+    ] {
+      let parsed = serve(&args).expect("port flag");
+      assert_eq!(parsed.location, PathBuf::from("./data"));
+      assert_eq!(parsed.port, Some(9000));
+    }
+    let joined = serve(&["--port=9000", "./data"]).expect("joined form");
+    assert_eq!(joined.port, Some(9000));
+    // Last flag wins, getopt-style.
+    assert_eq!(
+      serve(&["./data", "-p", "9000", "-p", "9100"])
+        .expect("repeated flag")
+        .port,
+      Some(9100),
+    );
+  }
+
+  #[test]
+  fn serve_rejects_bad_ports_and_unknown_flags() {
+    assert!(serve(&["./data", "-p"]).is_err());
+    assert!(serve(&["./data", "-p", "0"]).is_err());
+    assert!(serve(&["./data", "-p", "70000"]).is_err());
+    assert!(serve(&["./data", "-p", "http"]).is_err());
+    assert!(serve(&["./data", "-p", ""]).is_err());
+    assert!(serve(&["./data", "--verbose"]).is_err());
+    // A port with no location is still a usage error.
+    assert!(serve(&["-p", "9000"]).is_err());
   }
 }
