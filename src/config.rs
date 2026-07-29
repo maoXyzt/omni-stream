@@ -577,6 +577,9 @@ impl Config {
   }
 
   fn validate(&self) -> anyhow::Result<()> {
+    if self.server.port == 0 {
+      bail!("server.port must be greater than 0");
+    }
     if self.sql.convert_timeout_secs == 0 {
       bail!("sql.convert_timeout_secs must be greater than 0");
     }
@@ -753,6 +756,7 @@ local = { root_path = "/tmp" }
     assert_eq!(cfg.server.port, 9000);
     // Only the port is overridable — the host stays loopback-only.
     assert_eq!(cfg.server.host, "127.0.0.1");
+    assert!(Config::for_local_root(PathBuf::from("./data"), Some(0)).is_err());
   }
 
   #[test]
