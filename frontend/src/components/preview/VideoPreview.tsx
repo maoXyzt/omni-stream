@@ -74,7 +74,10 @@ export function VideoPreview({ fileKey, src, storage }: PreviewerProps) {
               {failure.title}
             </p>
             <p className="text-sm text-muted-foreground">
-              {failure.description}
+              {failure.kind === 'unsupported' &&
+              serverInfo?.transcode_enabled === false
+                ? describeVideoFailure(4, false).description
+                : failure.description}
             </p>
           </div>
           {failure.kind === 'unsupported' ? (

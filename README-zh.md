@@ -31,7 +31,7 @@ HTTP 接口（前端 SPA 都基于此调用，也可以直接用 curl / 自写�
 - `GET /api/list?prefix=&page_token=&skip_pages=` —— 浏览目录；可选 `skip_pages` 让后端服务端 walk N 页，响应会带回中间页的 token 数组，前端一次往返就能跳到第 N 页
 - `GET /api/stat/{*key}` —— 取文件元信息
 - `GET /api/proxy/{*key}` —— 流式拉取，全程透传 `Range`，自动 200 / 206
-- `GET /api/transcode/{*key}` —— 用户主动触发的 H.264/AAC 实时兼容流（需 `[transcoding] enabled = true`，不支持拖动定位）
+- `GET /api/transcode/{*key}` —— 用户主动触发的 H.264/AAC 实时兼容流（发现兼容 FFmpeg 时默认启用，不支持拖动定位）
 - `GET /api/thumb/{*key}` —— 按需生成 WebP 缩略图（需 `[thumbnails] enabled = true`）
 - `POST /api/query` —— DuckDB **只读** SQL（SELECT / DESCRIBE / EXPLAIN 等；COPY 及写语句被拒；需 `--features duckdb` 构建 + `auth.enabled = true`）
 - `POST /api/convert` —— JSONL / NDJSON / TSV / CSV → Parquet 转换（写操作，auth 开启时始终需 token）
@@ -210,11 +210,12 @@ enabled = true
 
 完整选项见 `config.example.toml` 的 `[thumbnails]` 段。
 
-### 视频兼容播放（可选）
+### 视频兼容播放
 
 浏览器无法解码 MP4 或 MOV 容器中的所有编码。原生播放失败时，前端仍会给出清晰的
-下载操作；如果还希望提供用户主动触发的兼容播放，请安装带 `libx264` 和 `aac`
-编码器的 FFmpeg，并显式开启：
+下载操作。OmniStream 默认尝试发现带 `libx264` 和 `aac` 编码器的 FFmpeg，并启用
+用户主动触发的兼容播放。探测失败时服务仍会启动并记录 warning，视频错误提示也会
+说明服务端兼容播放当前不可用。
 
 ```toml
 [transcoding]
@@ -235,10 +236,11 @@ seek cache；FFmpeg 退出时会删除它。
 超过 `max_source_bytes`（或无法确认长度）的输入会在 FFmpeg 启动前被拒绝；请按系统
 临时磁盘容量设置该上限。
 
-该模式默认关闭，也不会自动启动：只有原生解码失败且用户点击
-**Try compatible playback** 后才运行。默认全局只允许一个进程，超出的请求立即返回
-HTTP 429；每个进程都有超时限制并只使用一个编码线程，浏览器断开时也会停止。
-实时输出不支持拖动定位。编码会消耗 CPU，只应在资源合适的主机或可信访问控制后开启。
+转码不会自动启动：只有原生解码失败且用户点击 **Try compatible playback** 后才运行。
+设置 `transcoding.enabled = false` 可关闭该能力。默认全局只允许一个进程，超出的请求
+立即返回 HTTP 429；每个进程都有超时限制并只使用一个编码线程，浏览器断开时也会
+停止。实时输出不支持拖动定位。编码会消耗 CPU，只应暴露在资源合适的主机或可信访问
+控制之后。
 
 全部选项见 `config.example.toml` 的 `[transcoding]` 段。
 

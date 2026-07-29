@@ -81,15 +81,16 @@ root_path = "/var/lib/omni-stream"  # required; absolute or ~-prefixed, no ".." 
 # max_age_days = 90                           # default; 0 disables the age cap
 # sweep_interval_secs = 3600                  # default; floored to 60s at runtime
 
-# ---- Compatible video playback (FFmpeg; disabled by default) -------------
-# When enabled, the frontend can offer a user-triggered H.264/AAC fragmented
-# MP4 stream after native browser decoding fails. FFmpeg must be installed
-# with the libx264 and AAC encoders. Output is streamed and never persisted.
+# ---- Compatible video playback (FFmpeg; auto-enabled when available) -----
+# By default, the frontend offers a user-triggered H.264/AAC fragmented MP4
+# stream after native browser decoding fails when FFmpeg with the libx264 and
+# AAC encoders is available. Missing/incompatible FFmpeg logs a warning but
+# does not prevent startup. Output is streamed and never persisted.
 # Some non-streamable inputs require FFmpeg's temporary seek cache, which uses
 # the system temp directory and is removed when the process exits.
 
 [transcoding]
-# enabled = false                  # default; explicit opt-in
+# enabled = true                   # default; set false to disable
 # ffmpeg_path = "ffmpeg"           # default; executable name or absolute path
 # max_concurrent = 1               # default; excess requests fail with HTTP 429
 # timeout_secs = 1800              # default (30 min); kills the FFmpeg process

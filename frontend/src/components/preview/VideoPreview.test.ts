@@ -18,6 +18,12 @@ describe('describeVideoFailure', () => {
     expect(describeVideoFailure(code).kind).toBe('load')
   })
 
+  it('explains when server-side compatible playback is unavailable', () => {
+    const failure = describeVideoFailure(4, false)
+
+    expect(failure.description).toContain('FFmpeg')
+  })
+
   it('explains a failed compatible stream without hiding the original', () => {
     const failure = describeTranscodeFailure()
 

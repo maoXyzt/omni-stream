@@ -22,7 +22,7 @@ HTTP API (the bundled SPA is built on top of these — `curl` or your own client
 - `GET /api/list?prefix=&page_token=&skip_pages=` — browse a directory; optional `skip_pages` makes the server walk N pages internally and return the target page plus every intermediate token, so jumping to page N takes one round-trip instead of N
 - `GET /api/stat/{*key}` — fetch file metadata
 - `GET /api/proxy/{*key}` — stream the file, transparently forwarding `Range`, returning 200 / 206 as appropriate
-- `GET /api/transcode/{*key}` — user-triggered live H.264/AAC compatibility stream (requires `[transcoding] enabled = true`; no seeking)
+- `GET /api/transcode/{*key}` — user-triggered live H.264/AAC compatibility stream (enabled by default when compatible FFmpeg is available; no seeking)
 - `GET /api/thumb/{*key}` — on-demand WebP thumbnail (requires `[thumbnails] enabled = true`)
 - `POST /api/query` — DuckDB **read-only** SQL (SELECT / DESCRIBE / EXPLAIN etc.; COPY and mutating statements are rejected; requires `--features duckdb` build + `auth.enabled = true`)
 - `POST /api/convert` — JSONL / NDJSON / TSV / CSV → Parquet conversion (write operation — always requires a token when auth is on)
@@ -204,12 +204,13 @@ enabled = true
 
 For the full set of options see the `[thumbnails]` section in `config.example.toml`.
 
-### Compatible video playback (optional)
+### Compatible video playback
 
 Browsers cannot decode every codec that can be stored in an MP4 or MOV
-container. Native playback failures already show a clear download action. To
-also offer a user-triggered compatible stream, install FFmpeg with the
-`libx264` and `aac` encoders and opt in:
+container. OmniStream tries to enable user-triggered compatible playback by
+default when FFmpeg with the `libx264` and `aac` encoders is available. If the
+probe fails, startup continues with a warning and the video error explains
+that server-side compatible playback is unavailable.
 
 ```toml
 [transcoding]
@@ -231,12 +232,13 @@ system temp directory; it is removed when FFmpeg exits. Sources larger than
 `max_source_bytes` (or without a known length) are rejected before FFmpeg
 starts; set the limit according to available temporary disk.
 
-This mode is intentionally off by default and never starts automatically:
-the user must click **Try compatible playback** after native decoding fails.
-The default single-process limit rejects extra work with HTTP 429, each
-process has a timeout and one encoder thread, and disconnecting the browser
-stops it. Live output does not support seeking. Because encoding consumes CPU,
-enable it only on a suitably sized host or behind trusted access controls.
+Transcoding never starts automatically: the user must click
+**Try compatible playback** after native decoding fails. Set
+`transcoding.enabled = false` to disable the capability. The default
+single-process limit rejects extra work with HTTP 429, each process has a
+timeout and one encoder thread, and disconnecting the browser stops it. Live
+output does not support seeking. Because encoding consumes CPU, expose it only
+on a suitably sized host or behind trusted access controls.
 
 For every option see the `[transcoding]` section in `config.example.toml`.
 

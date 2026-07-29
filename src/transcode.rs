@@ -30,31 +30,20 @@ pub struct TranscodeState {
 }
 
 impl TranscodeState {
-  /// `serve <path>` has no config surface, so opportunistically enable the
-  /// compatibility stream when the default FFmpeg command is usable. Missing
-  /// software is a warning here, not a startup error.
-  pub async fn discover_for_serve(config: &TranscodeConfig) -> Option<Arc<Self>> {
-    let mut discovered = config.clone();
-    discovered.enabled = true;
-    match Self::build(&discovered).await {
-      Ok(state) => state,
-      Err(error) => {
-        tracing::warn!(
-          %error,
-          "FFmpeg unavailable; continuing without video compatibility playback \
-           (install FFmpeg with libx264 and AAC encoders)",
-        );
-        None
-      }
-    }
-  }
-
-  pub async fn build(config: &TranscodeConfig) -> anyhow::Result<Option<Arc<Self>>> {
+  pub async fn build(config: &TranscodeConfig) -> Option<Arc<Self>> {
     if !config.enabled {
-      return Ok(None);
+      return None;
     }
 
-    probe_ffmpeg(config).await?;
+    if let Err(error) = probe_ffmpeg(config).await {
+      tracing::warn!(
+        ffmpeg = %config.ffmpeg_path,
+        %error,
+        "FFmpeg unavailable; continuing without video compatibility playback \
+         (install FFmpeg with libx264 and AAC encoders)",
+      );
+      return None;
+    }
     tracing::info!(
       ffmpeg = %config.ffmpeg_path,
       max_concurrent = config.max_concurrent,
@@ -62,10 +51,10 @@ impl TranscodeState {
       "video compatibility transcoding enabled",
     );
 
-    Ok(Some(Arc::new(Self {
+    Some(Arc::new(Self {
       config: config.clone(),
       slots: Arc::new(Semaphore::new(config.max_concurrent)),
-    })))
+    }))
   }
 
   /// Read the original through the storage trait and connect it directly to
@@ -368,12 +357,12 @@ mod tests {
   }
 
   #[tokio::test]
-  async fn serve_discovery_tolerates_missing_ffmpeg() {
+  async fn missing_ffmpeg_disables_transcoding_without_failing() {
     let config = TranscodeConfig {
       ffmpeg_path: "omni-stream-test-ffmpeg-does-not-exist".into(),
       ..TranscodeConfig::default()
     };
 
-    assert!(TranscodeState::discover_for_serve(&config).await.is_none());
+    assert!(TranscodeState::build(&config).await.is_none());
   }
 }
