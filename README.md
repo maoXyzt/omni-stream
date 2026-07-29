@@ -246,6 +246,9 @@ the repo, embedded into the binary — no external file required.
 If you installed via `cargo install`, `omni-stream` is already on `$PATH`:
 
 ```bash
+# Serve one local directory with zero configuration
+omni-stream serve ./data
+
 # Use the config.toml found by the §2 lookup order
 omni-stream
 
@@ -258,6 +261,11 @@ OMNI_SERVER_PORT=8081 omni-stream
 # Turn on request logging while debugging
 RUST_LOG=info,tower_http=debug omni-stream
 ```
+
+`omni-stream serve <location>` always uses `127.0.0.1:28080`, a read-only
+local backend, and the built-in defaults. It does not load `config.toml` or
+`OMNI_*` configuration variables. Use the existing `omni-stream` form when
+you need configurable ports, authentication, or other storage backends.
 
 Tarballs from GitHub Releases don't add themselves to `$PATH`, so either run `./omni-stream` from the extracted directory or move it somewhere like `/usr/local/bin/`.
 

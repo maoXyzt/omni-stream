@@ -392,6 +392,31 @@ impl fmt::Debug for AuthConfig {
 }
 
 impl Config {
+  /// Build the minimal, zero-config setup used by `omni-stream serve <path>`.
+  pub fn for_local_root(root_path: PathBuf) -> anyhow::Result<Self> {
+    let cfg = Self {
+      server: ServerConfig::default(),
+      storages: vec![StorageConfig {
+        name: "local".to_string(),
+        r#type: StorageType::Local,
+        active: true,
+        writeable: false,
+        s3: None,
+        local: Some(LocalConfig {
+          root_path,
+          follow_symlinks: default_follow_symlinks(),
+        }),
+      }],
+      auth: AuthConfig::default(),
+      thumbnails: ThumbConfig::default(),
+      sql: SqlConfig::default(),
+    };
+    cfg
+      .validate()
+      .context("validate local serve configuration")?;
+    Ok(cfg)
+  }
+
   pub fn load() -> anyhow::Result<Self> {
     let path_opt = Self::active_path();
     let shown = path_opt
@@ -695,6 +720,27 @@ local = { root_path = "/tmp" }
     let cfg = parse(raw);
     assert_eq!(cfg.server.host, "127.0.0.1");
     assert_eq!(cfg.server.port, 28080);
+  }
+
+  #[test]
+  fn local_serve_config_uses_defaults() {
+    let root = PathBuf::from("./data");
+    let cfg = Config::for_local_root(root.clone()).expect("local config");
+    let storage = cfg.active_storage().expect("active storage");
+
+    assert_eq!(cfg.server.host, "127.0.0.1");
+    assert_eq!(cfg.server.port, 28080);
+    assert!(!cfg.auth.enabled);
+    assert!(!cfg.thumbnails.enabled);
+    assert_eq!(cfg.storages.len(), 1);
+    assert_eq!(storage.name, "local");
+    assert_eq!(storage.r#type, StorageType::Local);
+    assert!(storage.active);
+    assert!(!storage.writeable);
+    let local = storage.local.as_ref().expect("local settings");
+    assert_eq!(local.root_path, root);
+    assert!(local.follow_symlinks);
+    assert!(Config::for_local_root(PathBuf::new()).is_err());
   }
 
   #[test]

@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use anyhow::Context;
+use anyhow::{Context, bail};
 use axum::Router;
 use axum::extract::DefaultBodyLimit;
 use axum::http::StatusCode;
@@ -56,12 +56,21 @@ async fn main() -> anyhow::Result<()> {
   // seconds of compile time for no UX win. Revisit when we grow real flags
   // (e.g. `--format json`, `--color={auto,always,never}`).
   let mut argv = std::env::args().skip(1);
-  if let Some(sub) = argv.next() {
-    match sub.as_str() {
+  let cfg = match argv.next() {
+    Some(sub) => match sub.as_str() {
       "config" => return run_config_admin(argv.collect::<Vec<_>>()),
       "cache" => {
         let cfg = Config::load().context("load configuration")?;
         return run_cache_admin(argv.collect::<Vec<_>>(), &cfg);
+      }
+      "serve" => {
+        let args = argv.collect::<Vec<_>>();
+        if matches!(args.as_slice(), [arg] if arg == "-h" || arg == "--help") {
+          print_serve_help();
+          return Ok(());
+        }
+        let location = parse_serve_location(args)?;
+        Config::for_local_root(location).context("build local serve configuration")?
       }
       "-h" | "--help" | "help" => {
         print_top_help();
@@ -77,12 +86,13 @@ async fn main() -> anyhow::Result<()> {
         print_top_help();
         std::process::exit(2);
       }
-    }
-  }
+    },
+    None => Config::load().context("load configuration")?,
+  };
 
   // Config is immutable post-load (design §6) — wrap in Arc so future code paths
   // (e.g. handlers exposing version/health info) can share it cheaply.
-  let cfg = Arc::new(Config::load().context("load configuration")?);
+  let cfg = Arc::new(cfg);
 
   let registry = create_registry(&cfg).await?;
   let thumb = ThumbState::build(&cfg.thumbnails).context("init thumbnail cache")?;
@@ -313,6 +323,11 @@ fn print_top_help() {
     cli_style::cyan("omni-stream"),
   );
   println!(
+    "  {} {} Serve a local directory with defaults",
+    cli_style::cyan("omni-stream serve"),
+    cli_style::cyan("<location>"),
+  );
+  println!(
     "  {} {}     Inspect / manage the config file {}",
     cli_style::cyan("omni-stream config"),
     cli_style::cyan("<op>"),
@@ -324,6 +339,25 @@ fn print_top_help() {
     cli_style::cyan("<op>"),
     cli_style::dim("(see `cache --help`)"),
   );
+}
+
+fn print_serve_help() {
+  println!(
+    "{} {}",
+    cli_style::bold("Usage: omni-stream serve"),
+    cli_style::cyan("<location>"),
+  );
+  println!();
+  println!("  Serve one local directory on http://127.0.0.1:28080.");
+  println!("  Config files and OMNI_* environment variables are not loaded.");
+}
+
+fn parse_serve_location(args: Vec<String>) -> anyhow::Result<PathBuf> {
+  match args.as_slice() {
+    [location] if !location.is_empty() => Ok(PathBuf::from(location)),
+    [location] if location.is_empty() => bail!("serve location must not be empty"),
+    _ => bail!("usage: omni-stream serve <location>"),
+  }
 }
 
 fn print_config_help() {
@@ -855,5 +889,21 @@ async fn shutdown_signal() {
   tokio::select! {
       _ = ctrl_c => {},
       _ = terminate => {},
+  }
+}
+
+#[cfg(test)]
+mod cli_tests {
+  use super::*;
+
+  #[test]
+  fn serve_requires_exactly_one_location() {
+    assert_eq!(
+      parse_serve_location(vec!["./data".to_string()]).expect("location"),
+      PathBuf::from("./data"),
+    );
+    assert!(parse_serve_location(Vec::new()).is_err());
+    assert!(parse_serve_location(vec![String::new()]).is_err());
+    assert!(parse_serve_location(vec!["./one".to_string(), "./two".to_string()]).is_err());
   }
 }

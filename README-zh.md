@@ -250,6 +250,9 @@ omni-stream config check ./my-config.toml
 走 `cargo install` 装的话，`omni-stream` 已经在 `$PATH` 里，直接：
 
 ```bash
+# 零配置 serve 一个本地目录
+omni-stream serve ./data
+
 # 用 §2 查找顺序里命中的 config.toml
 omni-stream
 
@@ -262,6 +265,10 @@ OMNI_SERVER_PORT=8081 omni-stream
 # 调试时打开请求日志
 RUST_LOG=info,tower_http=debug omni-stream
 ```
+
+`omni-stream serve <location>` 固定使用 `127.0.0.1:28080`、只读本地后端和
+内置默认值，不读取 `config.toml` 或 `OMNI_*` 配置变量。需要自定义端口、鉴权或
+其他存储后端时，继续使用原有的 `omni-stream` 启动方式。
 
 GitHub Releases 下载的 tarball 解压后没自动入 `$PATH`，要么 `./omni-stream` 当前目录跑，要么自己挪到 `/usr/local/bin/` 之类的目录。
 
