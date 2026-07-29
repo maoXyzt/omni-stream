@@ -81,6 +81,7 @@ impl TranscodeState {
       .map_err(|_| AppError::Busy("video transcoder is at capacity; try again later".into()))?;
 
     let source = backend.get_file(key, GetOptions::default()).await?;
+    check_source_size(source.content_length, self.config.max_source_bytes)?;
     let mut command = ffmpeg_command(&self.config);
     let mut child = command.spawn().map_err(|error| {
       AppError::Backend(format!(
@@ -122,6 +123,18 @@ impl TranscodeState {
       cancel_tx: Some(cancel_tx),
       input_task,
     }))
+  }
+}
+
+fn check_source_size(content_length: Option<u64>, max_source_bytes: u64) -> Result<(), AppError> {
+  match content_length {
+    Some(length) if length <= max_source_bytes => Ok(()),
+    Some(length) => Err(AppError::Unsupported(format!(
+      "video source is {length} bytes; transcoding.max_source_bytes is {max_source_bytes} bytes"
+    ))),
+    None => Err(AppError::Unsupported(
+      "video source size is unknown; refusing unbounded FFmpeg temporary caching".into(),
+    )),
   }
 }
 
@@ -339,6 +352,19 @@ mod tests {
     let first = Arc::clone(&state.slots).try_acquire_owned();
     assert!(first.is_ok());
     assert!(Arc::clone(&state.slots).try_acquire_owned().is_err());
+  }
+
+  #[test]
+  fn source_size_must_be_known_and_within_limit() {
+    assert!(check_source_size(Some(1024), 1024).is_ok());
+    assert!(matches!(
+      check_source_size(Some(1025), 1024),
+      Err(AppError::Unsupported(_))
+    ));
+    assert!(matches!(
+      check_source_size(None, 1024),
+      Err(AppError::Unsupported(_))
+    ));
   }
 
   #[tokio::test]

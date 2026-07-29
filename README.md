@@ -217,6 +217,7 @@ enabled = true
 # ffmpeg_path = "ffmpeg"
 # max_concurrent = 1
 # timeout_secs = 1800
+# max_source_bytes = 2147483648  # default 2 GiB
 # max_width = 1920
 # max_height = 1080
 # max_video_bitrate_kbps = 4000
@@ -226,7 +227,9 @@ The server reads through `StorageBackend`, pipes the source to FFmpeg, and
 streams fragmented H.264/AAC MP4 from stdout. It does not create or retain a
 transcoded output file and never buffers the complete video in memory. Inputs
 whose metadata requires seeking may use FFmpeg's temporary input cache in the
-system temp directory; it is removed when FFmpeg exits.
+system temp directory; it is removed when FFmpeg exits. Sources larger than
+`max_source_bytes` (or without a known length) are rejected before FFmpeg
+starts; set the limit according to available temporary disk.
 
 This mode is intentionally off by default and never starts automatically:
 the user must click **Try compatible playback** after native decoding fails.

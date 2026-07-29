@@ -303,6 +303,9 @@ pub struct TranscodeConfig {
   /// of queueing and tying up HTTP connections.
   pub max_concurrent: usize,
   pub timeout_secs: u64,
+  /// Reject larger or unknown-size sources before starting FFmpeg so its
+  /// seek cache cannot consume unbounded temporary disk.
+  pub max_source_bytes: u64,
   pub max_width: u32,
   pub max_height: u32,
   pub max_video_bitrate_kbps: u32,
@@ -315,6 +318,7 @@ impl Default for TranscodeConfig {
       ffmpeg_path: "ffmpeg".to_string(),
       max_concurrent: 1,
       timeout_secs: 1800,
+      max_source_bytes: 2 * 1024 * 1024 * 1024,
       max_width: 1920,
       max_height: 1080,
       max_video_bitrate_kbps: 4000,
@@ -626,6 +630,9 @@ impl Config {
     if self.transcoding.timeout_secs == 0 {
       bail!("transcoding.timeout_secs must be greater than 0");
     }
+    if self.transcoding.max_source_bytes == 0 {
+      bail!("transcoding.max_source_bytes must be greater than 0");
+    }
     if self.transcoding.max_width == 0 || self.transcoding.max_height == 0 {
       bail!("transcoding.max_width and max_height must be greater than 0");
     }
@@ -876,6 +883,7 @@ local = { root_path = "/tmp" }
     assert_eq!(cfg.transcoding.ffmpeg_path, "ffmpeg");
     assert_eq!(cfg.transcoding.max_concurrent, 1);
     assert_eq!(cfg.transcoding.timeout_secs, 1800);
+    assert_eq!(cfg.transcoding.max_source_bytes, 2 * 1024 * 1024 * 1024);
     assert_eq!(cfg.transcoding.max_width, 1920);
     assert_eq!(cfg.transcoding.max_height, 1080);
     assert_eq!(cfg.transcoding.max_video_bitrate_kbps, 4000);
@@ -922,6 +930,10 @@ local = { root_path = "/tmp" }
 
     let mut invalid = cfg.clone();
     invalid.transcoding.timeout_secs = 0;
+    assert!(invalid.validate().is_err());
+
+    let mut invalid = cfg.clone();
+    invalid.transcoding.max_source_bytes = 0;
     assert!(invalid.validate().is_err());
 
     let mut invalid = cfg.clone();

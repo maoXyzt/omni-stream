@@ -93,6 +93,7 @@ root_path = "/var/lib/omni-stream"  # required; absolute or ~-prefixed, no ".." 
 # ffmpeg_path = "ffmpeg"           # default; executable name or absolute path
 # max_concurrent = 1               # default; excess requests fail with HTTP 429
 # timeout_secs = 1800              # default (30 min); kills the FFmpeg process
+# max_source_bytes = 2147483648     # default 2 GiB; rejects larger/unknown sources before temp caching
 # max_width = 1920                 # default; preserves aspect ratio
 # max_height = 1080                # default; preserves aspect ratio
 # max_video_bitrate_kbps = 4000    # default; H.264 target/max bitrate

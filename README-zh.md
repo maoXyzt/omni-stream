@@ -222,6 +222,7 @@ enabled = true
 # ffmpeg_path = "ffmpeg"
 # max_concurrent = 1
 # timeout_secs = 1800
+# max_source_bytes = 2147483648  # 默认 2 GiB
 # max_width = 1920
 # max_height = 1080
 # max_video_bitrate_kbps = 4000
@@ -231,6 +232,8 @@ enabled = true
 H.264/AAC fragmented MP4。它不会创建或保留转码成品文件，也不会把完整视频缓冲
 到内存。若输入文件的元数据必须随机读取，FFmpeg 可能在系统临时目录使用临时输入
 seek cache；FFmpeg 退出时会删除它。
+超过 `max_source_bytes`（或无法确认长度）的输入会在 FFmpeg 启动前被拒绝；请按系统
+临时磁盘容量设置该上限。
 
 该模式默认关闭，也不会自动启动：只有原生解码失败且用户点击
 **Try compatible playback** 后才运行。默认全局只允许一个进程，超出的请求立即返回
