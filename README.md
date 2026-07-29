@@ -303,6 +303,9 @@ RUST_LOG=info,tower_http=debug omni-stream
 `omni-stream serve <location>` binds `127.0.0.1:28080` and uses a read-only
 local backend with the built-in defaults. `-p` / `--port <PORT>` is the only
 override; it does not load `config.toml` or `OMNI_*` configuration variables.
+It auto-detects FFmpeg on `PATH`: when FFmpeg has the `libx264` and AAC
+encoders, compatible video playback is enabled automatically; otherwise a
+warning is printed and startup continues without it.
 Use the existing `omni-stream` form when you need a non-loopback host,
 authentication, or other storage backends.
 

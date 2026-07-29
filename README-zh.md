@@ -302,7 +302,9 @@ RUST_LOG=info,tower_http=debug omni-stream
 
 `omni-stream serve <location>` 监听 `127.0.0.1:28080`，使用只读本地后端和内置
 默认值，不读取 `config.toml` 或 `OMNI_*` 配置变量。唯一可覆盖的是端口
-（`-p` / `--port <PORT>`）。需要非回环地址、鉴权或其他存储后端时，继续使用原有的
+（`-p` / `--port <PORT>`）。它会自动在 `PATH` 中探测 FFmpeg：若 FFmpeg
+包含 `libx264` 和 AAC 编码器，则自动启用视频兼容播放；否则打印警告并继续启动，
+不影响原生预览。需要非回环地址、鉴权或其他存储后端时，继续使用原有的
 `omni-stream` 启动方式。
 
 GitHub Releases 下载的 tarball 解压后没自动入 `$PATH`，要么 `./omni-stream` 当前目录跑，要么自己挪到 `/usr/local/bin/` 之类的目录。

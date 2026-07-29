@@ -58,7 +58,7 @@ async fn main() -> anyhow::Result<()> {
   // add ~100 KB plus several seconds of compile time for no UX win. Revisit
   // when the flag surface grows (e.g. `--format json`, `--color={auto,always,never}`).
   let mut argv = std::env::args().skip(1);
-  let cfg = match argv.next() {
+  let (cfg, discover_ffmpeg) = match argv.next() {
     Some(sub) => match sub.as_str() {
       "config" => return run_config_admin(argv.collect::<Vec<_>>()),
       "cache" => {
@@ -72,8 +72,11 @@ async fn main() -> anyhow::Result<()> {
           return Ok(());
         }
         let serve = parse_serve_args(args)?;
-        Config::for_local_root(serve.location, serve.port)
-          .context("build local serve configuration")?
+        (
+          Config::for_local_root(serve.location, serve.port)
+            .context("build local serve configuration")?,
+          true,
+        )
       }
       "-h" | "--help" | "help" => {
         print_top_help();
@@ -90,7 +93,7 @@ async fn main() -> anyhow::Result<()> {
         std::process::exit(2);
       }
     },
-    None => Config::load().context("load configuration")?,
+    None => (Config::load().context("load configuration")?, false),
   };
 
   // Config is immutable post-load (design §6) — wrap in Arc so future code paths
@@ -99,9 +102,13 @@ async fn main() -> anyhow::Result<()> {
 
   let registry = create_registry(&cfg).await?;
   let thumb = ThumbState::build(&cfg.thumbnails).context("init thumbnail cache")?;
-  let transcode = TranscodeState::build(&cfg.transcoding)
-    .await
-    .context("init video transcoder")?;
+  let transcode = if discover_ffmpeg {
+    TranscodeState::discover_for_serve(&cfg.transcoding).await
+  } else {
+    TranscodeState::build(&cfg.transcoding)
+      .await
+      .context("init video transcoder")?
+  };
   if let Some(t) = thumb.as_ref() {
     spawn_thumb_sweep(t.clone());
   }
@@ -370,6 +377,7 @@ fn print_serve_help() {
   );
   println!();
   println!("  Config files and OMNI_* environment variables are not loaded.");
+  println!("  FFmpeg is auto-detected; if unavailable, the server continues without it.");
 }
 
 /// Parsed form of `omni-stream serve <location> [-p PORT]`. `port` stays

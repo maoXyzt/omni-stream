@@ -30,6 +30,25 @@ pub struct TranscodeState {
 }
 
 impl TranscodeState {
+  /// `serve <path>` has no config surface, so opportunistically enable the
+  /// compatibility stream when the default FFmpeg command is usable. Missing
+  /// software is a warning here, not a startup error.
+  pub async fn discover_for_serve(config: &TranscodeConfig) -> Option<Arc<Self>> {
+    let mut discovered = config.clone();
+    discovered.enabled = true;
+    match Self::build(&discovered).await {
+      Ok(state) => state,
+      Err(error) => {
+        tracing::warn!(
+          %error,
+          "FFmpeg unavailable; continuing without video compatibility playback \
+           (install FFmpeg with libx264 and AAC encoders)",
+        );
+        None
+      }
+    }
+  }
+
   pub async fn build(config: &TranscodeConfig) -> anyhow::Result<Option<Arc<Self>>> {
     if !config.enabled {
       return Ok(None);
@@ -320,5 +339,15 @@ mod tests {
     let first = Arc::clone(&state.slots).try_acquire_owned();
     assert!(first.is_ok());
     assert!(Arc::clone(&state.slots).try_acquire_owned().is_err());
+  }
+
+  #[tokio::test]
+  async fn serve_discovery_tolerates_missing_ffmpeg() {
+    let config = TranscodeConfig {
+      ffmpeg_path: "omni-stream-test-ffmpeg-does-not-exist".into(),
+      ..TranscodeConfig::default()
+    };
+
+    assert!(TranscodeState::discover_for_serve(&config).await.is_none());
   }
 }
