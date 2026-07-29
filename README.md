@@ -7,7 +7,7 @@
 **A single-binary, streaming file browser and previewer** — point it at any local directory or S3-compatible object storage (MinIO / OSS / Ceph / R2 / …) and it instantly exposes them as a browsable, previewable HTTP service. The backend is built on `axum + tokio + aws-sdk-s3`, with one `StorageBackend` trait abstracting over every supported backend; a React SPA is bundled in, so opening `http://<host>:<port>/` lets you walk directories, lazy-load thumbnails, and preview files in place. Preview supports:
 
 - **Images** — png / jpg / gif / webp / avif / bmp / svg / ico
-- **Video** — mp4 / webm / mov / mkv / m4v / ogv, with `Range`-based seeking
+- **Video** — mp4 / webm / mov / mkv / m4v / ogv, with `Range`-based seeking; optional user-triggered FFmpeg compatibility playback for browser-unsupported codecs
 - **Text / code** — syntax highlighting by extension: json / yaml / toml / md /
   rs / ts / py / go / sql / shell / proto, and many more
 - **Tabular data** — Parquet (pure-JS decode via hyparquet, with an embedded **DuckDB SQL query tab**) / CSV / TSV;
@@ -18,10 +18,11 @@
 
 HTTP API (the bundled SPA is built on top of these — `curl` or your own client works just as well):
 
-- `GET /api/server` / `GET /api/storages` — server info (version, auth_enabled, sql_enabled, public_read) and storage list
+- `GET /api/server` / `GET /api/storages` — server info (version, auth_enabled, sql_enabled, transcode_enabled, public_read) and storage list
 - `GET /api/list?prefix=&page_token=&skip_pages=` — browse a directory; optional `skip_pages` makes the server walk N pages internally and return the target page plus every intermediate token, so jumping to page N takes one round-trip instead of N
 - `GET /api/stat/{*key}` — fetch file metadata
 - `GET /api/proxy/{*key}` — stream the file, transparently forwarding `Range`, returning 200 / 206 as appropriate
+- `GET /api/transcode/{*key}` — user-triggered live H.264/AAC compatibility stream (requires `[transcoding] enabled = true`; no seeking)
 - `GET /api/thumb/{*key}` — on-demand WebP thumbnail (requires `[thumbnails] enabled = true`)
 - `POST /api/query` — DuckDB **read-only** SQL (SELECT / DESCRIBE / EXPLAIN etc.; COPY and mutating statements are rejected; requires `--features duckdb` build + `auth.enabled = true`)
 - `POST /api/convert` — JSONL / NDJSON / TSV / CSV → Parquet conversion (write operation — always requires a token when auth is on)
@@ -144,6 +145,7 @@ s3 = { endpoint = "http://minio.local:9000", access_key = "...", secret_key = ".
 | `OMNI_AUTH_ENABLED` | overrides `auth.enabled` (`true` / `false`) |
 | `OMNI_AUTH_TOKEN` | overrides `auth.token` (recommended for keeping the secret out of the config file) |
 | `OMNI_AUTH_PUBLIC_READ` | overrides `auth.public_read` (`true` / `false`) |
+| `OMNI_TRANSCODING_ENABLED` | overrides `transcoding.enabled` (`true` / `false`) |
 | `OMNI_CONFIG` | force a specific absolute `config.toml` path |
 | `RUST_LOG` | tracing filter, e.g. `info,tower_http=debug,aws=info` |
 
@@ -165,7 +167,7 @@ OMNI_AUTH_ENABLED=true OMNI_AUTH_TOKEN=$(openssl rand -hex 32) ./omni-stream
 
 Once enabled, the **default behavior splits read and write access** (`public_read = true`, the default):
 
-- **Browse / preview / download** (`/api/list`, `/api/stat`, `/api/proxy`, `/api/thumb`, `/raw`) stay public — no token required.
+- **Browse / preview / download** (`/api/list`, `/api/stat`, `/api/proxy`, `/api/transcode`, `/api/thumb`, `/raw`) stay public — no token required.
 - **Write operations** (`/api/convert` for Parquet conversion) always require `Authorization: Bearer <token>`.
 - **SQL queries** (`/api/query`) are in the read group and require no token by default; however the endpoint only activates when `auth.enabled = true` (it never runs on a fully open API).
 - Frontend: a 401 on a write triggers a token-entry dialog; the token is stored in `localStorage` and the request is automatically retried. The toolbar also has an **Auth Token** button to pre-enter the token before any write.
@@ -201,6 +203,39 @@ enabled = true
 ```
 
 For the full set of options see the `[thumbnails]` section in `config.example.toml`.
+
+### Compatible video playback (optional)
+
+Browsers cannot decode every codec that can be stored in an MP4 or MOV
+container. Native playback failures already show a clear download action. To
+also offer a user-triggered compatible stream, install FFmpeg with the
+`libx264` and `aac` encoders and opt in:
+
+```toml
+[transcoding]
+enabled = true
+# ffmpeg_path = "ffmpeg"
+# max_concurrent = 1
+# timeout_secs = 1800
+# max_width = 1920
+# max_height = 1080
+# max_video_bitrate_kbps = 4000
+```
+
+The server reads through `StorageBackend`, pipes the source to FFmpeg, and
+streams fragmented H.264/AAC MP4 from stdout. It does not create or retain a
+transcoded output file and never buffers the complete video in memory. Inputs
+whose metadata requires seeking may use FFmpeg's temporary input cache in the
+system temp directory; it is removed when FFmpeg exits.
+
+This mode is intentionally off by default and never starts automatically:
+the user must click **Try compatible playback** after native decoding fails.
+The default single-process limit rejects extra work with HTTP 429, each
+process has a timeout and one encoder thread, and disconnecting the browser
+stops it. Live output does not support seeking. Because encoding consumes CPU,
+enable it only on a suitably sized host or behind trusted access controls.
+
+For every option see the `[transcoding]` section in `config.example.toml`.
 
 ### SQL queries and format conversion (optional — requires duckdb build)
 
@@ -286,6 +321,7 @@ After startup, opening `http://<host>:<port>/` in a browser lands you on the emb
 | Path contains `..` or other escape attempts / requesting a directory as a file | 400 | `InvalidPath` / `Unsupported` |
 | SQL execution error / rejected by read-only validator (duckdb) | 400 | `Query` / `QueryRejected` |
 | Convert target already exists and `overwrite=true` not set (duckdb) | 409 | `Conflict` |
+| Video transcoder is at its concurrency limit | 429 | `Busy` |
 | SQL query timed out (duckdb, `query_timeout_secs`) | 408 | `QueryTimeout` |
 | Storage exists in config but failed to initialize at startup | 503 | `StorageInvalid` |
 | Other I/O / SDK / network errors | 500 | `Io` / `Backend` |

@@ -8,7 +8,8 @@
 #   # key = val  # optional no default; uncomment only if you need it
 #
 # Env overrides (prefix OMNI_, separator _):
-#   OMNI_SERVER_HOST, OMNI_SERVER_PORT, OMNI_AUTH_TOKEN
+#   OMNI_SERVER_HOST, OMNI_SERVER_PORT, OMNI_AUTH_TOKEN,
+#   OMNI_TRANSCODING_ENABLED
 
 [server]
 # host = "127.0.0.1"  # default; use "0.0.0.0" to allow external access
@@ -79,6 +80,22 @@ root_path = "/var/lib/omni-stream"  # required; absolute or ~-prefixed, no ".." 
 # max_cache_bytes = 1073741824                # default 1 GiB; LRU sweep trims above this
 # max_age_days = 90                           # default; 0 disables the age cap
 # sweep_interval_secs = 3600                  # default; floored to 60s at runtime
+
+# ---- Compatible video playback (FFmpeg; disabled by default) -------------
+# When enabled, the frontend can offer a user-triggered H.264/AAC fragmented
+# MP4 stream after native browser decoding fails. FFmpeg must be installed
+# with the libx264 and AAC encoders. Output is streamed and never persisted.
+# Some non-streamable inputs require FFmpeg's temporary seek cache, which uses
+# the system temp directory and is removed when the process exits.
+
+[transcoding]
+# enabled = false                  # default; explicit opt-in
+# ffmpeg_path = "ffmpeg"           # default; executable name or absolute path
+# max_concurrent = 1               # default; excess requests fail with HTTP 429
+# timeout_secs = 1800              # default (30 min); kills the FFmpeg process
+# max_width = 1920                 # default; preserves aspect ratio
+# max_height = 1080                # default; preserves aspect ratio
+# max_video_bitrate_kbps = 4000    # default; H.264 target/max bitrate
 
 # ---- SQL query endpoint (DuckDB; needs a `--features duckdb` build) --------
 # POST /api/query runs read-only SQL (SELECT / DESCRIBE / EXPLAIN / etc.)

@@ -67,6 +67,16 @@ export function proxyUrl(
   return qs ? `${base}?${qs}` : base
 }
 
+/// User-triggered browser-compatible video stream. Unlike `/api/proxy`, this
+/// response is generated live and intentionally does not support byte ranges.
+export function transcodeUrl(key: string, storage?: string): string {
+  const params = new URLSearchParams()
+  if (storage) params.set('storage', storage)
+  const qs = params.toString()
+  const base = `/api/transcode/${encodeKey(key)}`
+  return qs ? `${base}?${qs}` : base
+}
+
 /// Navigable URL for a stored file (or directory) under the backend `/raw`
 /// mount. Unlike `proxyUrl`, the storage name lives in the PATH, not a query
 /// param — so when a served HTML page does a relative `fetch("sub/data.json")`

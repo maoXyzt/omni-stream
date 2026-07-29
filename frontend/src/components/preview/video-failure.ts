@@ -1,7 +1,16 @@
 export interface VideoFailure {
-  kind: 'unsupported' | 'load'
+  kind: 'unsupported' | 'load' | 'transcode'
   title: string
   description: string
+}
+
+export function describeTranscodeFailure(): VideoFailure {
+  return {
+    kind: 'transcode',
+    title: 'Compatible playback failed.',
+    description:
+      'The server could not convert this video. Try again or download the original.',
+  }
 }
 
 export function describeVideoFailure(code?: number): VideoFailure {

@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 
-import { describeVideoFailure } from './video-failure'
+import {
+  describeTranscodeFailure,
+  describeVideoFailure,
+} from './video-failure'
 
 describe('describeVideoFailure', () => {
   it.each([3, 4])('explains unsupported media error %i', (code) => {
@@ -13,5 +16,12 @@ describe('describeVideoFailure', () => {
 
   it.each([1, 2, undefined])('keeps media error %s retryable', (code) => {
     expect(describeVideoFailure(code).kind).toBe('load')
+  })
+
+  it('explains a failed compatible stream without hiding the original', () => {
+    const failure = describeTranscodeFailure()
+
+    expect(failure.kind).toBe('transcode')
+    expect(failure.description).toContain('download the original')
   })
 })
