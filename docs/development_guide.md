@@ -215,7 +215,7 @@ omni-stream/
 │       │   ├── FileGrid.tsx / FileTile.tsx
 │       │   ├── StorageSwitcher.tsx / TokenPrompt.tsx
 │       │   ├── EntryContextMenu.tsx / ViewToggle.tsx 等
-│       │   │                 #   EntryContextMenu 含 "Render in new tab"（.html 用 /raw 打开）
+│       │   │                 #   Copy URL / Open in new tab 走 /raw，Download 走 /api/proxy
 │       │   ├── preview/      # 各类文件预览器
 │       │   │   ├── registry.ts   # 预览类型注册表（扩展名 → 预览器）
 │       │   │   ├── TextPreview.tsx    # 文本（Range 分块加载，语法高亮）；CSV/TSV 转换按钮
