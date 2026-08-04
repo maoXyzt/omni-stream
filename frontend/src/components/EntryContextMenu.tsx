@@ -6,7 +6,6 @@ import {
   Download,
   ExternalLink,
   FolderTree,
-  Globe,
   Info,
   Link as LinkIcon,
   Pencil,
@@ -59,12 +58,6 @@ export function EntryContextMenu({
   children,
 }: EntryContextMenuProps) {
   const name = basenameOf(entry.key)
-  // HTML files can be opened as a *live* page via the /raw mount (storage in
-  // the path) so their relative fetches / `?ls` listings reach sibling files —
-  // distinct from "Open in new tab", which streams raw bytes via /api/proxy.
-  // Guard on storageName: rawUrl puts the storage in the path, so an empty
-  // name would yield a broken `/raw//…` URL.
-  const isHtml = !entry.is_dir && !!storageName && /\.x?html?$/i.test(name)
   // Cached forever (see useStorages) — cheap to read from any tile / row.
   const { data: storagesData } = useStorages()
   const storage = storagesData?.storages.find((s) => s.name === storageName)
@@ -167,30 +160,24 @@ export function EntryContextMenu({
 
   function entryUrl(): string {
     // Folders → the route URL that takes the user into that directory in the
-    // UI (shareable). Files → the proxy endpoint that streams the raw bytes
-    // (useful for direct-preview / download links).
+    // UI. Files → the path-addressed raw mount so copied links remain easy to
+    // construct and preserve their storage context.
     if (entry.is_dir) {
       return `${window.location.origin}/s/${encodeURIComponent(
         storageName,
       )}/${entry.key}`
     }
-    return (
-      window.location.origin + proxyUrl(entry.key, storageName || undefined)
-    )
+    return window.location.origin + fileUrl()
+  }
+
+  function fileUrl(): string {
+    return storageName
+      ? rawUrl(entry.key, storageName)
+      : proxyUrl(entry.key)
   }
 
   function openInNewTab() {
-    window.open(
-      proxyUrl(entry.key, storageName || undefined),
-      '_blank',
-      'noreferrer',
-    )
-  }
-
-  function openRendered() {
-    // /raw keeps storage in the path so the page's relative data fetches and
-    // `?ls` directory listings resolve to the right backend keys.
-    window.open(rawUrl(entry.key, storageName), '_blank', 'noopener')
+    window.open(fileUrl(), '_blank', 'noreferrer')
   }
 
   function downloadFile() {
@@ -241,12 +228,6 @@ export function EntryContextMenu({
           </ContextMenuItem>
           {!entry.is_dir && (
             <>
-              {isHtml && (
-                <ContextMenuItem onClick={openRendered}>
-                  <Globe />
-                  Render in new tab
-                </ContextMenuItem>
-              )}
               <ContextMenuItem onClick={openInNewTab}>
                 <ExternalLink />
                 Open in new tab
