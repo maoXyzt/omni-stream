@@ -1,7 +1,6 @@
 import { useState } from 'react'
-import { RotateCw } from 'lucide-react'
 
-import { Button } from '@/components/ui/button'
+import { PreviewLoadError } from './PreviewLoadError'
 import { PreviewSpinner } from './PreviewSpinner'
 import type { PreviewerProps } from './types'
 
@@ -22,27 +21,14 @@ export function VideoPreview({ src }: PreviewerProps) {
   return (
     <div className="relative flex h-full w-full items-center justify-center overflow-hidden rounded-md bg-muted/30 p-2">
       {failed ? (
-        <div
-          role="alert"
-          className="flex flex-col items-center gap-3 text-center"
-        >
-          <p className="text-sm font-medium text-destructive">
-            Failed to load video.
-          </p>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              setLoaded(false)
-              setFailed(false)
-              setAttempt((value) => value + 1)
-            }}
-          >
-            <RotateCw className="size-4" />
-            Retry
-          </Button>
-        </div>
+        <PreviewLoadError
+          kind="video"
+          onRetry={() => {
+            setLoaded(false)
+            setFailed(false)
+            setAttempt((value) => value + 1)
+          }}
+        />
       ) : (
         <>
           {!loaded && <PreviewSpinner />}

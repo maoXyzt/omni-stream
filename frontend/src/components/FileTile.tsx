@@ -10,6 +10,7 @@ import {
   iconForKey,
   previewableKind,
 } from '@/components/preview/registry'
+import { OBJECT_READ_PERMISSION_HINT } from '@/components/preview/PreviewLoadError'
 import type { GridFit } from '@/hooks/use-grid-fit'
 import { extensionOf } from '@/lib/path'
 import { canThumbnail, GRID_THUMB_MIN_BYTES } from '@/lib/thumbnail'
@@ -186,7 +187,17 @@ function ImageContent({ entry, storageName, alt, fit }: ImageContentProps) {
         })
       : proxyUrl(entry.key, storageName || undefined, entry.last_modified)
 
-  if (errored) return <IconFill icon={ImageOff} />
+  if (errored) {
+    return (
+      <div
+        className="flex size-full flex-col items-center justify-center gap-1 text-muted-foreground"
+        title={`Preview unavailable. ${OBJECT_READ_PERMISSION_HINT}`}
+      >
+        <ImageOff className="size-10" />
+        <span className="text-[10px]">Preview unavailable</span>
+      </div>
+    )
+  }
 
   function handleError() {
     // First failure on the thumb URL — could be 404 (thumbnails disabled),

@@ -43,8 +43,10 @@ export interface FileMeta {
 
 export interface ApiErrorBody {
   error?: string
+  /** Stable machine-readable classification for errors with tailored UX. */
+  code?: string
   message?: string
-  /** Actionable troubleshooting hint (present for ConvertFailed / QueryDiagnosed). */
+  /** Actionable troubleshooting hint for classified server errors. */
   hint?: string
   /** Verbatim DuckDB error text (present for ConvertFailed only). */
   raw?: string

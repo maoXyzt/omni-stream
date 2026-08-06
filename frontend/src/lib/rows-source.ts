@@ -5,6 +5,8 @@
 // parquet metadata, jsonl line offsets — stays behind this interface.
 
 import { CsvStream, csvSeparatorFor } from './csv-parser'
+import { ApiError } from '@/api/client'
+import type { ApiErrorBody } from '@/types/storage'
 import {
   type ParquetSource,
   extractTopLevelColumns,
@@ -95,6 +97,14 @@ export async function loadRowsSource(
 
 export type SourceFormat = 'parquet' | 'jsonl' | 'json' | 'csv'
 
+async function rowsFetchError(res: Response, format: string): Promise<ApiError> {
+  const payload = (await res.json().catch(() => undefined)) as
+    | ApiErrorBody
+    | undefined
+  const fallback = `failed to fetch ${format}: ${res.status} ${res.statusText || ''}`.trim()
+  return new ApiError(res.status, payload?.message ?? fallback, payload)
+}
+
 export function detectFormat(fileKey: string): SourceFormat | null {
   const dot = fileKey.lastIndexOf('.')
   if (dot < 0) return null
@@ -157,9 +167,7 @@ const JSONL_COLUMN_PROBE_ROWS = 100
 async function loadJsonlRowsSource(src: string): Promise<RowsSource> {
   const res = await fetch(src)
   if (!res.ok) {
-    throw new Error(
-      `failed to fetch JSONL: ${res.status} ${res.statusText || ''}`.trim(),
-    )
+    throw await rowsFetchError(res, 'JSONL')
   }
   if (!res.body) {
     throw new Error('jsonl: response has no streaming body')
@@ -375,9 +383,7 @@ const JSON_COLUMN_PROBE_ROWS = 100
 async function loadJsonRowsSource(src: string): Promise<RowsSource> {
   const res = await fetch(src)
   if (!res.ok) {
-    throw new Error(
-      `failed to fetch JSON: ${res.status} ${res.statusText || ''}`.trim(),
-    )
+    throw await rowsFetchError(res, 'JSON')
   }
   if (!res.body) {
     throw new Error('json: response has no streaming body')
@@ -644,9 +650,7 @@ async function loadCsvRowsSource(
 ): Promise<RowsSource> {
   const res = await fetch(src)
   if (!res.ok) {
-    throw new Error(
-      `failed to fetch CSV: ${res.status} ${res.statusText || ''}`.trim(),
-    )
+    throw await rowsFetchError(res, 'CSV')
   }
   if (!res.body) {
     throw new Error('csv: response has no streaming body')
