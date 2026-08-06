@@ -10,6 +10,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { TokenPrompt } from '@/components/TokenPrompt'
 import { RowsView } from '@/components/preview/RowsView'
 import { useStorages } from '@/hooks/use-storage'
+import { extractErrorDetail } from '@/lib/api-error'
 import { loadRowsSource } from '@/lib/rows-source'
 
 export function RowsPage() {
@@ -76,6 +77,9 @@ export function RowsPage() {
   }
 
   const fileName = fileKey.split('/').pop() ?? fileKey
+  const sourceError = sourceQuery.error
+    ? extractErrorDetail(sourceQuery.error)
+    : null
 
   return (
     <div className="flex h-screen w-full flex-col">
@@ -107,12 +111,17 @@ export function RowsPage() {
         tabIndex={-1}
         className="flex min-h-0 flex-1 flex-col overflow-hidden p-4"
       >
-        {sourceQuery.error ? (
+        {sourceError ? (
           <Alert variant="destructive" className="max-w-xl">
             <AlertCircle className="size-4" />
             <AlertTitle>Failed to read data file</AlertTitle>
             <AlertDescription className="flex flex-col gap-3">
-              <span>{sourceQuery.error.message}</span>
+              <span>{sourceError.message}</span>
+              {sourceError.hint && (
+                <span className="text-muted-foreground">
+                  {sourceError.hint}
+                </span>
+              )}
               <Button
                 variant="outline"
                 size="sm"

@@ -14,6 +14,12 @@ pub enum AppError {
   #[error("forbidden: {0}")]
   Forbidden(String),
 
+  /// The storage accepted directory listing but denied reading an object's
+  /// metadata or bytes. Kept distinct from generic `Forbidden` so clients can
+  /// show an actionable read-permission hint without parsing backend text.
+  #[error("object read forbidden: {0}")]
+  ObjectReadForbidden(String),
+
   #[error("invalid range: {0}")]
   InvalidRange(String),
 
@@ -79,7 +85,7 @@ impl AppError {
   fn status(&self) -> StatusCode {
     match self {
       AppError::NotFound(_) => StatusCode::NOT_FOUND,
-      AppError::Forbidden(_) => StatusCode::FORBIDDEN,
+      AppError::Forbidden(_) | AppError::ObjectReadForbidden(_) => StatusCode::FORBIDDEN,
       AppError::InvalidRange(_) => StatusCode::RANGE_NOT_SATISFIABLE,
       AppError::InvalidPath(_) | AppError::Unsupported(_) => StatusCode::BAD_REQUEST,
       AppError::Io(e) if e.kind() == io::ErrorKind::NotFound => StatusCode::NOT_FOUND,
@@ -101,6 +107,16 @@ impl AppError {
 impl IntoResponse for AppError {
   fn into_response(self) -> Response {
     let status = self.status();
+
+    if let AppError::ObjectReadForbidden(ref message) = self {
+      let body = Json(json!({
+          "error":   status.canonical_reason().unwrap_or("error"),
+          "code":    "OBJECT_READ_FORBIDDEN",
+          "message": message,
+          "hint":    "Check s3:GetObject for the object (and kms:Decrypt for SSE-KMS); s3:ListBucket only permits listing object names.",
+      }));
+      return (status, body).into_response();
+    }
 
     // Structured variants: emit extra fields so the SPA can render a rich
     // error dialog.  All other errors keep the plain {error, message} shape
@@ -124,5 +140,30 @@ impl IntoResponse for AppError {
         "message": self.to_string(),
     }));
     (status, body).into_response()
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use axum::body::to_bytes;
+
+  use super::*;
+
+  #[tokio::test]
+  async fn object_read_forbidden_has_stable_code_and_hint() {
+    let response = AppError::ObjectReadForbidden("S3 head denied".into()).into_response();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+    let body = to_bytes(response.into_body(), usize::MAX)
+      .await
+      .expect("read error response body");
+    let body: serde_json::Value = serde_json::from_slice(&body).expect("parse error response body");
+    assert_eq!(body["code"], "OBJECT_READ_FORBIDDEN");
+    assert_eq!(body["message"], "S3 head denied");
+    assert!(
+      body["hint"]
+        .as_str()
+        .is_some_and(|hint| { hint.contains("s3:GetObject") && hint.contains("s3:ListBucket") })
+    );
   }
 }

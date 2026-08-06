@@ -16,6 +16,7 @@ import { cn } from '@/lib/utils'
 import { Kbd } from '@/components/ui/kbd'
 import { useGlobalShortcut } from '@/hooks/use-global-shortcut'
 
+import { PreviewLoadError } from './PreviewLoadError'
 import { PreviewSpinner } from './PreviewSpinner'
 import type { PreviewerProps } from './types'
 
@@ -329,18 +330,11 @@ export function ImagePreview({ fileKey, src, storage }: PreviewerProps) {
       )}
 
       {loadFailed && (
-        <div
-          role="alert"
-          className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-muted/95 text-center"
-        >
-          <p className="text-sm font-medium text-destructive">
-            Failed to load image.
-          </p>
-          <Button type="button" variant="outline" size="sm" onClick={retryLoad}>
-            <RotateCw className="size-4" />
-            Retry
-          </Button>
-        </div>
+        <PreviewLoadError
+          kind="image"
+          onRetry={retryLoad}
+          className="absolute inset-0 z-20 bg-muted/95"
+        />
       )}
 
       <div

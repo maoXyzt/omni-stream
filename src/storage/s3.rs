@@ -98,6 +98,9 @@ fn synthesize_v1_marker_from_entries(
 fn classify_s3_status(status: u16, code: &str, op: &str, raw: impl std::fmt::Display) -> AppError {
   match (status, code) {
     (404, _) | (_, "NoSuchKey") => AppError::NotFound("S3 key not found".into()),
+    (403, _) | (_, "AccessDenied") | (_, "Forbidden") if matches!(op, "get" | "head") => {
+      AppError::ObjectReadForbidden(format!("S3 {op} denied: cannot read this object"))
+    }
     (403, _) | (_, "AccessDenied") | (_, "Forbidden") => {
       AppError::Forbidden(format!("S3 {op} denied: {raw}"))
     }
@@ -1089,6 +1092,12 @@ mod tests {
   }
 
   // --- status classification --------------------------------------------
+
+  #[test]
+  fn read_denial_explains_s3_permission_needed_for_preview() {
+    let err = classify_s3_status(403, "Forbidden", "head", "Forbidden");
+    assert!(matches!(err, AppError::ObjectReadForbidden(_)));
+  }
 
   #[test]
   fn classify_412_precondition_failed_is_conflict() {

@@ -6,7 +6,8 @@
 //
 // Format: `bytes 0-262143/1500000` or `bytes 0-262143/*`.
 
-import { apiClient, ApiError } from '@/api/client'
+import { apiClient } from '@/api/client'
+import { extractErrorDetail } from '@/lib/api-error'
 
 /// First-chunk size and the threshold above which chunked loading kicks
 /// in. A file at or below this size fits in one fetch (server returns
@@ -98,9 +99,8 @@ export function mergeChunk(prev: LoadState, fetched: RangeFetchResult): LoadStat
 }
 
 export function describeFetchError(err: unknown): string {
-  if (err instanceof ApiError) return `${err.status} — ${err.message}`
-  if (err instanceof Error) return err.message
-  return 'fetch failed'
+  const detail = extractErrorDetail(err)
+  return detail.hint ? `${detail.message} ${detail.hint}` : detail.message
 }
 
 export function formatBytes(n: number | null): string {

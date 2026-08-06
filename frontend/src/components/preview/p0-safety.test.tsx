@@ -7,6 +7,7 @@ import {
 } from '@/lib/accessibility'
 
 import { PreviewSpinner } from './PreviewSpinner'
+import { PreviewLoadError } from './PreviewLoadError'
 
 describe('P0 preview safety', () => {
   it('announces the shared preview loading state', () => {
@@ -14,6 +15,14 @@ describe('P0 preview safety', () => {
 
     expect(markup).toContain('role="status"')
     expect(markup).toContain('Loading preview')
+  })
+
+  it('explains object-read permission failures in shared preview errors', () => {
+    const markup = renderToStaticMarkup(<PreviewLoadError kind="image" />)
+
+    expect(markup).toContain('role="alert"')
+    expect(markup).toContain('s3:GetObject')
+    expect(markup).toContain('s3:ListBucket')
   })
 
   it('falls back to the current file list when the opener was removed', () => {

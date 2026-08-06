@@ -4,6 +4,7 @@ import { colorForKey, iconForKey } from '@/components/preview/registry'
 import { basenameOf } from '@/lib/path'
 import { cn } from '@/lib/utils'
 
+import { PreviewLoadError } from './PreviewLoadError'
 import { PreviewSpinner } from './PreviewSpinner'
 import type { PreviewerProps } from './types'
 
@@ -40,11 +41,8 @@ export function AudioPreview({ src, fileKey }: PreviewerProps) {
           onError={() => setFailed(true)}
           className="w-full max-w-xl"
         />
-        {failed && (
-          <p className="text-sm text-destructive">Failed to load audio.</p>
-        )}
+        {failed && <PreviewLoadError kind="audio" />}
       </div>
     </div>
   )
 }
-

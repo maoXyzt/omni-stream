@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   JsonArrayStream,
@@ -6,6 +6,7 @@ import {
   detectFormat,
   findValueEnd,
   inferJsonlColumns,
+  loadRowsSource,
   parseJsonlText,
 } from '@/lib/rows-source'
 
@@ -24,6 +25,46 @@ function makeByteStream(chunks: (string | Uint8Array)[]): ReadableStream<Uint8Ar
     },
   })
 }
+
+afterEach(() => vi.unstubAllGlobals())
+
+describe('loadRowsSource errors', () => {
+  it('preserves the backend permission hint for rows preview', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            code: 'OBJECT_READ_FORBIDDEN',
+            message:
+              'S3 get denied: cannot read this object',
+            hint:
+              'Check s3:GetObject; s3:ListBucket only permits listing object names.',
+          }),
+          {
+            status: 403,
+            statusText: 'Forbidden',
+            headers: { 'content-type': 'application/json' },
+          },
+        ),
+      ),
+    )
+
+    await expect(
+      loadRowsSource('/api/proxy/data.jsonl', 'data.jsonl'),
+    ).rejects.toMatchObject({
+      name: 'ApiError',
+      status: 403,
+      message: 'S3 get denied: cannot read this object',
+      payload: {
+        code: 'OBJECT_READ_FORBIDDEN',
+        message: 'S3 get denied: cannot read this object',
+        hint:
+          'Check s3:GetObject; s3:ListBucket only permits listing object names.',
+      },
+    })
+  })
+})
 
 describe('detectFormat', () => {
   it('recognises parquet extensions', () => {
