@@ -7,6 +7,7 @@ import {
   cleanPathInput,
   resolveStorageUri,
 } from '@/lib/resolve-uri'
+import { describeInvisibleChars, findInvisibleChars } from '@/lib/path'
 import type { StorageDescriptor } from '@/types/storage'
 import { Button } from '@/components/ui/button'
 import {
@@ -22,6 +23,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { Checkbox } from '@/components/ui/checkbox'
 
 interface PathNavigatorProps {
   prefix: string
@@ -39,12 +41,16 @@ export function PathNavigator({ prefix, onNavigate, activeStorage }: PathNavigat
   const [open, setOpen] = useState(false)
   const [value, setValue] = useState(prefix)
   const [submitting, setSubmitting] = useState(false)
+  const [invisibleConfirmed, setInvisibleConfirmed] = useState(false)
 
   // Reset the input to the live `prefix` whenever the dialog opens, so the
   // user always starts from "current path" rather than whatever they typed
   // last time. Tracking this in onOpenChange avoids a useEffect.
   function handleOpenChange(next: boolean) {
-    if (next) setValue(prefix)
+    if (next) {
+      setValue(prefix)
+      setInvisibleConfirmed(false)
+    }
     setOpen(next)
   }
 
@@ -53,6 +59,11 @@ export function PathNavigator({ prefix, onNavigate, activeStorage }: PathNavigat
   const cleaned = cleanPathInput(value)
   const resolved = resolveStorageUri(cleaned, activeStorage)
   const resolvedKey = resolved.ok ? resolved.path.replace(/^\/+/, '') : null
+  const invisibleChars = findInvisibleChars(cleaned)
+  const hasInvisibleChars = invisibleChars.length > 0
+  const canSubmit =
+    canSubmitResolvedPath(resolved, submitting) &&
+    (!hasInvisibleChars || invisibleConfirmed)
 
   function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
     // e.isComposing guards against IME Enter (e.g. Chinese/Japanese candidate
@@ -65,7 +76,7 @@ export function PathNavigator({ prefix, onNavigate, activeStorage }: PathNavigat
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
-    if (!canSubmitResolvedPath(resolved, submittingRef.current)) return
+    if (!canSubmit || submittingRef.current) return
     submittingRef.current = true
     setSubmitting(true)
     try {
@@ -126,7 +137,10 @@ export function PathNavigator({ prefix, onNavigate, activeStorage }: PathNavigat
               ref={inputRef}
               id="path-navigator-input"
               value={value}
-              onChange={(e) => setValue(e.target.value)}
+              onChange={(e) => {
+                setValue(e.target.value)
+                setInvisibleConfirmed(false)
+              }}
               onKeyDown={handleKeyDown}
               placeholder="foo/bar/"
               spellCheck={false}
@@ -134,7 +148,11 @@ export function PathNavigator({ prefix, onNavigate, activeStorage }: PathNavigat
               rows={3}
               disabled={submitting}
               aria-invalid={cleaned ? !resolved.ok : undefined}
-              aria-describedby="path-navigator-result"
+              aria-describedby={
+                hasInvisibleChars
+                  ? 'path-navigator-result path-navigator-warning'
+                  : 'path-navigator-result'
+              }
               className={cn(
                 'w-full min-w-0 resize-y rounded-lg border border-input bg-transparent py-1.5 pl-2.5 pr-12',
                 'font-mono text-sm leading-relaxed transition-colors outline-none',
@@ -161,6 +179,28 @@ export function PathNavigator({ prefix, onNavigate, activeStorage }: PathNavigat
               </Button>
             )}
           </div>
+          {hasInvisibleChars && (
+            <div
+              id="path-navigator-warning"
+              role="alert"
+              className="space-y-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-2.5 py-2 text-xs text-amber-900 dark:text-amber-200"
+            >
+              <p>
+                Detected invisible characters: {describeInvisibleChars(cleaned)}.
+                They are part of the path and may cause an S3 path mismatch.
+              </p>
+              <label className="flex items-start gap-2 font-medium">
+                <Checkbox
+                  checked={invisibleConfirmed}
+                  onCheckedChange={(checked) => {
+                    setInvisibleConfirmed(checked === true)
+                  }}
+                  className="mt-0.5"
+                />
+                <span>Keep these characters and use the exact path</span>
+              </label>
+            </div>
+          )}
           <div
             id="path-navigator-result"
             aria-live="polite"
@@ -195,7 +235,7 @@ export function PathNavigator({ prefix, onNavigate, activeStorage }: PathNavigat
             </Button>
             <Button
               type="submit"
-              disabled={!canSubmitResolvedPath(resolved, submitting)}
+              disabled={!canSubmit}
             >
               {submitting && <Loader2 className="size-4 animate-spin" />}
               Go

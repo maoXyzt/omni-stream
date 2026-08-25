@@ -26,6 +26,7 @@ import { useTreeExpanded, type TreeExpandedApi } from '@/hooks/use-tree-expanded
 import { useFavorites } from '@/hooks/use-favorites'
 import { useRecents } from '@/hooks/use-recents'
 import { EntryContextMenu } from '@/components/EntryContextMenu'
+import { InvisiblePathLabel } from '@/components/InvisiblePathLabel'
 import { EntryIcon } from '@/components/EntryIcon'
 import { dirVisual } from '@/components/preview/registry'
 import {
@@ -65,6 +66,7 @@ interface SidebarProps {
   /// through to TreeNode so depth-0 entries (which are the buckets
   /// themselves) get the bucket visual instead of the folder one.
   multiBucket: boolean
+  showInvisible: boolean
   onNavigate: (prefix: string) => void
   onNavigateEntry: (entry: StorageEntryRef) => void
 }
@@ -73,6 +75,7 @@ export function Sidebar({
   prefix,
   storageName,
   multiBucket,
+  showInvisible,
   onNavigate,
   onNavigateEntry,
 }: SidebarProps) {
@@ -230,6 +233,7 @@ export function Sidebar({
               activePrefix={prefix}
               storageName={storageName}
               multiBucket={multiBucket}
+              showInvisible={showInvisible}
               sortDir={sortDir}
               expand={expand}
               onNavigate={onNavigate}
@@ -405,12 +409,15 @@ export function Sidebar({
                                 <File className="size-3.5 shrink-0" />
                               )}
                               <span className="flex min-w-0 flex-col">
-                                <span className="truncate">
-                                  {presentation.label}
-                                </span>
-                                <span className="truncate text-xs font-normal text-muted-foreground">
-                                  {presentation.location}
-                                </span>
+                                <InvisiblePathLabel
+                                  value={presentation.label}
+                                  showInvisible={showInvisible}
+                                />
+                                <InvisiblePathLabel
+                                  value={presentation.location}
+                                  showInvisible={showInvisible}
+                                  className="text-xs font-normal text-muted-foreground"
+                                />
                               </span>
                             </button>
                           </li>
@@ -446,6 +453,7 @@ interface TreeLevelProps {
   activePrefix: string
   storageName: string
   multiBucket: boolean
+  showInvisible: boolean
   sortDir: SortDir
   expand: TreeExpandedApi
   onNavigate: (prefix: string) => void
@@ -459,6 +467,7 @@ function TreeLevel({
   activePrefix,
   storageName,
   multiBucket,
+  showInvisible,
   sortDir,
   expand,
   onNavigate,
@@ -527,6 +536,7 @@ function TreeLevel({
           activePrefix={activePrefix}
           storageName={storageName}
           multiBucket={multiBucket}
+          showInvisible={showInvisible}
           sortDir={sortDir}
           expand={expand}
           onNavigate={onNavigate}
@@ -590,6 +600,7 @@ interface TreeNodeProps {
   activePrefix: string
   storageName: string
   multiBucket: boolean
+  showInvisible: boolean
   sortDir: SortDir
   expand: TreeExpandedApi
   onNavigate: (prefix: string) => void
@@ -604,6 +615,7 @@ function TreeNode({
   activePrefix,
   storageName,
   multiBucket,
+  showInvisible,
   sortDir,
   expand,
   onNavigate,
@@ -685,7 +697,7 @@ function TreeNode({
               isSymlink={entry.is_symlink}
               className="size-4 shrink-0"
             />
-            <span className="truncate">{name}</span>
+            <InvisiblePathLabel value={name} showInvisible={showInvisible} />
           </button>
         </div>
       </EntryContextMenu>
@@ -696,6 +708,7 @@ function TreeNode({
           activePrefix={activePrefix}
           storageName={storageName}
           multiBucket={multiBucket}
+          showInvisible={showInvisible}
           sortDir={sortDir}
           expand={expand}
           onNavigate={onNavigate}

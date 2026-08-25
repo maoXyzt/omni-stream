@@ -16,9 +16,11 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { InvisiblePathLabel } from '@/components/InvisiblePathLabel'
 
 interface Props {
   prefix: string
+  showInvisible: boolean
   onNavigate: (next: string) => void
 }
 
@@ -27,7 +29,7 @@ interface Props {
 // paths. The first and last crumbs are always kept visible.
 const COLLAPSE_THRESHOLD = 4
 
-export function PathBreadcrumb({ prefix, onNavigate }: Props) {
+export function PathBreadcrumb({ prefix, showInvisible, onNavigate }: Props) {
   const segments = prefix.split('/').filter(Boolean)
   const crumbs = segments.map((seg, idx) => ({
     label: seg,
@@ -56,20 +58,32 @@ export function PathBreadcrumb({ prefix, onNavigate }: Props) {
         </BreadcrumbItem>
 
         {shouldCollapse ? (
-          <CollapsedCrumbs crumbs={crumbs} onNavigate={onNavigate} />
+          <CollapsedCrumbs
+            crumbs={crumbs}
+            showInvisible={showInvisible}
+            onNavigate={onNavigate}
+          />
         ) : (
           crumbs.map((c, idx) => (
             <Fragment key={c.path}>
               <BreadcrumbSeparator />
               <BreadcrumbItem>
                 {idx === crumbs.length - 1 ? (
-                  <BreadcrumbPage>{c.label}</BreadcrumbPage>
+                  <BreadcrumbPage>
+                    <InvisiblePathLabel
+                      value={c.label}
+                      showInvisible={showInvisible}
+                    />
+                  </BreadcrumbPage>
                 ) : (
                   <BreadcrumbLink
                     onClick={() => onNavigate(c.path)}
                     className="cursor-pointer"
                   >
-                    {c.label}
+                    <InvisiblePathLabel
+                      value={c.label}
+                      showInvisible={showInvisible}
+                    />
                   </BreadcrumbLink>
                 )}
               </BreadcrumbItem>
@@ -92,10 +106,15 @@ export function PathBreadcrumb({ prefix, onNavigate }: Props) {
 
 interface CollapsedCrumbsProps {
   crumbs: Array<{ label: string; path: string }>
+  showInvisible: boolean
   onNavigate: (path: string) => void
 }
 
-function CollapsedCrumbs({ crumbs, onNavigate }: CollapsedCrumbsProps) {
+function CollapsedCrumbs({
+  crumbs,
+  showInvisible,
+  onNavigate,
+}: CollapsedCrumbsProps) {
   const first = crumbs[0]
   const last = crumbs[crumbs.length - 1]
   // Everything between first and last goes into the dropdown.
@@ -110,7 +129,10 @@ function CollapsedCrumbs({ crumbs, onNavigate }: CollapsedCrumbsProps) {
           onClick={() => onNavigate(first.path)}
           className="cursor-pointer"
         >
-          {first.label}
+          <InvisiblePathLabel
+            value={first.label}
+            showInvisible={showInvisible}
+          />
         </BreadcrumbLink>
       </BreadcrumbItem>
 
@@ -133,7 +155,10 @@ function CollapsedCrumbs({ crumbs, onNavigate }: CollapsedCrumbsProps) {
                     onClick={() => onNavigate(c.path)}
                     className="cursor-pointer"
                   >
-                    {c.label}
+                    <InvisiblePathLabel
+                      value={c.label}
+                      showInvisible={showInvisible}
+                    />
                   </DropdownMenuItem>
                 ))}
               </DropdownMenuContent>
@@ -145,7 +170,9 @@ function CollapsedCrumbs({ crumbs, onNavigate }: CollapsedCrumbsProps) {
       {/* Last crumb — current page */}
       <BreadcrumbSeparator />
       <BreadcrumbItem>
-        <BreadcrumbPage>{last.label}</BreadcrumbPage>
+        <BreadcrumbPage>
+          <InvisiblePathLabel value={last.label} showInvisible={showInvisible} />
+        </BreadcrumbPage>
       </BreadcrumbItem>
     </>
   )

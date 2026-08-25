@@ -9,8 +9,9 @@ import { Check, Copy, Loader2, RotateCw } from 'lucide-react'
 import { useState } from 'react'
 
 import { useFileStat, useStorages } from '@/hooks/use-storage'
-import { absolutePathOf } from '@/lib/path'
+import { absolutePathOf, findInvisibleChars } from '@/lib/path'
 import { formatBytes, formatTime } from '@/lib/format'
+import { InvisiblePathLabel } from '@/components/InvisiblePathLabel'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -37,6 +38,7 @@ export function FileDetailsDialog({
   const { data: storagesData } = useStorages()
   const storage = storagesData?.storages.find((s) => s.name === storageName)
   const absPath = storage ? absolutePathOf(storage, fileKey) : null
+  const hasInvisibleChars = findInvisibleChars(fileKey).length > 0
 
   return (
     <Dialog open onOpenChange={(o) => { if (!o) onClose() }}>
@@ -46,6 +48,16 @@ export function FileDetailsDialog({
           <DialogDescription className="break-all font-mono text-xs">
             {fileKey}
           </DialogDescription>
+          {hasInvisibleChars && (
+            <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-2.5 py-2 text-xs text-amber-900 dark:text-amber-200">
+              <div className="mb-1 font-medium">Visible path</div>
+              <InvisiblePathLabel
+                value={fileKey}
+                showInvisible
+                className="font-mono"
+              />
+            </div>
+          )}
         </DialogHeader>
 
         {isPending ? (

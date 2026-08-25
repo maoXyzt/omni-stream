@@ -6,6 +6,7 @@ interface FileGridProps {
   entries: FileEntry[]
   prefix: string
   storageName: string
+  showInvisible: boolean
   /// True when the current listing is the root of an S3 multi-bucket
   /// storage; tile renders use the bucket icon for directory entries
   /// instead of the regular folder one.
@@ -20,6 +21,7 @@ export function FileGrid({
   entries,
   prefix,
   storageName,
+  showInvisible,
   inBucketRoot,
   fit,
   onSelect,
@@ -56,6 +58,7 @@ export function FileGrid({
           entry={entry}
           prefix={prefix}
           storageName={storageName}
+          showInvisible={showInvisible}
           inBucketRoot={inBucketRoot}
           fit={fit}
           onSelect={onSelect}
