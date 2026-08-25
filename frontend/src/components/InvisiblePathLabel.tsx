@@ -33,14 +33,11 @@ export function InvisiblePathLabel({ value, showInvisible, className }: Props) {
 
   return (
     <span className={cn('inline-flex min-w-0 items-center gap-1', className)}>
-      <span
-        className="min-w-0 truncate"
-        title={display}
-        aria-label={description}
-      >
+      <span className="min-w-0 truncate" title={display}>
         {display}
       </span>
       <span
+        role="img"
         className="inline-flex shrink-0 text-amber-600 dark:text-amber-400"
         title={description}
         aria-label={description}

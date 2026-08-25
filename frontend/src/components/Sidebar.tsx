@@ -329,7 +329,6 @@ export function Sidebar({
                                     ? 'font-medium text-foreground'
                                     : 'text-muted-foreground hover:text-foreground',
                                 )}
-                                aria-label={`Open ${presentation.label}, ${presentation.location}`}
                                 aria-current={
                                   presentation.isCurrent ? 'page' : undefined
                                 }
@@ -341,12 +340,15 @@ export function Sidebar({
                                   <File className="size-3.5 shrink-0" />
                                 )}
                                 <span className="flex min-w-0 flex-col">
-                                  <span className="truncate">
-                                    {presentation.label}
-                                  </span>
-                                  <span className="truncate text-xs font-normal text-muted-foreground">
-                                    {presentation.location}
-                                  </span>
+                                  <InvisiblePathLabel
+                                    value={presentation.label}
+                                    showInvisible={showInvisible}
+                                  />
+                                  <InvisiblePathLabel
+                                    value={presentation.location}
+                                    showInvisible={showInvisible}
+                                    className="text-xs font-normal text-muted-foreground"
+                                  />
                                 </span>
                               </button>
                               <Button
@@ -397,7 +399,6 @@ export function Sidebar({
                                   ? 'bg-accent/60 font-medium text-foreground'
                                   : 'text-muted-foreground hover:text-foreground',
                               )}
-                              aria-label={`Open ${presentation.label}, ${presentation.location}`}
                               aria-current={
                                 presentation.isCurrent ? 'page' : undefined
                               }
