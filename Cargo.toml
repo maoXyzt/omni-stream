@@ -98,5 +98,5 @@ tag-message = "release {{version}}"
 # compiling from source. Archives contain the binary at their root.
 [package.metadata.binstall]
 pkg-url = "{ repo }/releases/download/v{ version }/{ name }-v{ version }-{ target }.tar.gz"
-bin-dir = "{ bin }"
+bin-dir = "{ bin }{ binary-ext }"
 pkg-fmt = "tgz"
