@@ -324,7 +324,7 @@ SIGTERM 触发优雅关停（`axum::serve` + `with_graceful_shutdown`）。
 | --- | --- | --- |
 | 鉴权开启但未带 / token 错误 | 401 | （middleware，不走 AppError） |
 | 文件不存在 | 404 | `NotFound` |
-| 凭据无 GetObject 权限 / S3 AccessDenied | 403 | `Forbidden` |
+| 凭据无 GetObject 权限 / S3 AccessDenied | 403 | `ObjectReadForbidden`（`code = OBJECT_READ_FORBIDDEN`） |
 | 越界 / 非法 Range | 416 | `InvalidRange` |
 | 路径含 `..` 等越权片段 / 把目录当文件请求 | 400 | `InvalidPath` / `Unsupported` |
 | SQL 执行报错 / 被只读校验拒绝（duckdb） | 400 | `Query` / `QueryRejected` |
@@ -334,4 +334,4 @@ SIGTERM 触发优雅关停（`axum::serve` + `with_graceful_shutdown`）。
 | storage 配置存在但启动初始化失败 | 503 | `StorageInvalid` |
 | 其它 IO / SDK / 网络错误 | 500 | `Io` / `Backend` |
 
-错误体统一是 `{"error": "...", "message": "..."}` JSON。
+大多数错误体是 `{"error": "...", "message": "..."}` JSON。对象读取被拒绝时使用结构化的 `ObjectReadForbidden`：`{"error": "...", "code": "OBJECT_READ_FORBIDDEN", "message": "...", "hint": "..."}`。

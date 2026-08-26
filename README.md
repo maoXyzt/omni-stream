@@ -328,7 +328,7 @@ After startup, opening `http://<host>:<port>/` in a browser lands you on the emb
 | --- | --- | --- |
 | Auth enabled and token missing / wrong | 401 | (middleware — bypasses AppError) |
 | File not found | 404 | `NotFound` |
-| Credential lacks GetObject / S3 AccessDenied | 403 | `Forbidden` |
+| Credential lacks GetObject / S3 AccessDenied | 403 | `ObjectReadForbidden` (`code = OBJECT_READ_FORBIDDEN`) |
 | Out-of-range / malformed Range | 416 | `InvalidRange` |
 | Path contains `..` or other escape attempts / requesting a directory as a file | 400 | `InvalidPath` / `Unsupported` |
 | SQL execution error / rejected by read-only validator (duckdb) | 400 | `Query` / `QueryRejected` |
@@ -338,4 +338,4 @@ After startup, opening `http://<host>:<port>/` in a browser lands you on the emb
 | Storage exists in config but failed to initialize at startup | 503 | `StorageInvalid` |
 | Other I/O / SDK / network errors | 500 | `Io` / `Backend` |
 
-Response bodies are uniformly `{"error": "...", "message": "..."}` JSON.
+Most error responses are `{"error": "...", "message": "..."}` JSON. Denied object reads use the structured `ObjectReadForbidden` shape: `{"error": "...", "code": "OBJECT_READ_FORBIDDEN", "message": "...", "hint": "..."}`.

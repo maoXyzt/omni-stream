@@ -279,8 +279,16 @@ async fn supervise_process(
 }
 
 async fn stop_process(child: &mut Child, key: &str) {
+  match child.try_wait() {
+    Ok(Some(_)) => return,
+    Ok(None) => {}
+    Err(error) => tracing::warn!(%key, %error, "failed to check video transcoder status"),
+  }
   if let Err(error) = child.start_kill()
-    && error.kind() != io::ErrorKind::InvalidInput
+    && !matches!(
+      error.kind(),
+      io::ErrorKind::InvalidInput | io::ErrorKind::NotFound
+    )
   {
     tracing::warn!(%key, %error, "failed to stop video transcoder");
   }

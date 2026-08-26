@@ -3,6 +3,7 @@ import { CircleAlert, Download, Play, RotateCw } from 'lucide-react'
 
 import { transcodeUrl } from '@/api/storage'
 import { Button } from '@/components/ui/button'
+import { Skeleton } from '@/components/ui/skeleton'
 import { PreviewLoadError } from './PreviewLoadError'
 import { useServerInfo } from '@/hooks/use-storage'
 import { PreviewSpinner } from './PreviewSpinner'
@@ -14,7 +15,12 @@ import {
 } from './video-failure'
 
 export function VideoPreview({ fileKey, src, storage }: PreviewerProps) {
-  const { data: serverInfo } = useServerInfo()
+  const {
+    data: serverInfo,
+    isPending: serverInfoPending,
+    isError: serverInfoError,
+    refetch: refetchServerInfo,
+  } = useServerInfo()
   const [loaded, setLoaded] = useState(false)
   const [failure, setFailure] = useState<VideoFailure | null>(null)
   const [attempt, setAttempt] = useState(0)
@@ -81,35 +87,62 @@ export function VideoPreview({ fileKey, src, storage }: PreviewerProps) {
             </p>
           </div>
           {failure.kind === 'unsupported' ? (
-            <div className="flex flex-wrap justify-center gap-2">
-              {serverInfo?.transcode_enabled && (
-                <Button
-                  type="button"
-                  size="sm"
-                  onClick={() => {
-                    setCompatible(true)
-                    setLoaded(false)
-                    setFailure(null)
-                    setAttempt(0)
-                  }}
+            <>
+              {serverInfoPending && (
+                <div
+                  role="status"
+                  className="flex items-center gap-2 text-xs text-muted-foreground"
                 >
-                  <Play className="size-4" />
-                  Try compatible playback
-                </Button>
+                  <Skeleton className="h-4 w-32" />
+                  Checking compatible playback…
+                </div>
               )}
-              <Button
-                size="sm"
-                variant={
-                  serverInfo?.transcode_enabled ? 'outline' : 'default'
-                }
-                asChild
-              >
-                <a href={src} download>
-                  <Download className="size-4" />
-                  Download
-                </a>
-              </Button>
-            </div>
+              {serverInfoError && (
+                <div
+                  role="alert"
+                  className="flex items-center gap-2 text-xs text-muted-foreground"
+                >
+                  <span>Could not check compatible playback.</span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => void refetchServerInfo()}
+                  >
+                    Retry
+                  </Button>
+                </div>
+              )}
+              <div className="flex flex-wrap justify-center gap-2">
+                {serverInfo?.transcode_enabled && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => {
+                      setCompatible(true)
+                      setLoaded(false)
+                      setFailure(null)
+                      setAttempt(0)
+                    }}
+                  >
+                    <Play className="size-4" />
+                    Try compatible playback
+                  </Button>
+                )}
+                <Button
+                  size="sm"
+                  variant={
+                    serverInfo?.transcode_enabled ? 'outline' : 'default'
+                  }
+                  asChild
+                >
+                  <a href={src} download>
+                    <Download className="size-4" />
+                    Download
+                  </a>
+                </Button>
+              </div>
+            </>
           ) : failure.kind === 'transcode' ? (
             <div className="flex flex-wrap justify-center gap-2">
               <Button type="button" size="sm" onClick={retry}>
