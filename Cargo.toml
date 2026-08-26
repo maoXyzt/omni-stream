@@ -93,3 +93,10 @@ http = "1"
 publish = false
 pre-release-commit-message = "release: {{version}}"
 tag-message = "release {{version}}"
+
+# Let cargo-binstall fetch the matching GitHub Release archive instead of
+# compiling from source. Archives contain the binary at their root.
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/{ name }-v{ version }-{ target }.tar.gz"
+bin-dir = "{ bin }{ binary-ext }"
+pkg-fmt = "tgz"

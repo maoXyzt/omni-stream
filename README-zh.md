@@ -44,38 +44,20 @@ HTTP 接口（前端 SPA 都基于此调用，也可以直接用 curl / 自写�
 
 ## 1. 安装
 
-**推荐**：用 cargo 装到 `~/.cargo/bin/`：
+| 方式 | 用途 | 命令 |
+| --- | --- | --- |
+| uvx（推荐） | 一次性运行预编译 wheel，无需 Rust 工具链 | `uvx omni-stream --help` |
+| pip | 持久安装 Python wheel | `pip install omni-stream` |
+| [cargo-binstall](https://github.com/cargo-bins/cargo-binstall) | 预编译二进制 | `cargo binstall omni-stream` |
+| Cargo | 从源码编译（需要 Rust 1.91+） | `cargo install omni-stream` |
+| GitHub Releases | 手动下载二进制 | [最新版本](https://github.com/maoXyzt/omni-stream/releases/latest) |
 
-```bash
-cargo install omni-stream    # 需 Rust 1.91+
-```
+如使用 `uv`，请参阅[官方文档](https://docs.astral.sh/uv/)。
 
-**Python 用户**（无需 Rust 工具链，从 PyPI 安装）：
+> 源码构建、前后端开发和发版说明见
+> [docs/development_guide.md](docs/development_guide.md) 与
+> [docs/how_to_release.md](docs/how_to_release.md)。
 
-```bash
-uv tool install omni-stream  # 推荐：装到独立隔离环境里的全局 CLI
-# 或者一次性运行不安装
-uvx omni-stream --help
-# 不用 uv 的话，直接 pip 装到当前 venv 里
-pip install omni-stream
-```
-
-PyPI 上的 wheel 直接打包了预编译二进制，装完即可像普通命令行工具
-那样直接运行 `omni-stream`，不会启动 Python 解释器。同样覆盖 3 个平台：
-`x86_64-unknown-linux-gnu`（manylinux）、`x86_64-unknown-linux-musl`
-（musllinux）、`aarch64-apple-darwin`。
-
-> 没装过 uv：`curl -LsSf https://astral.sh/uv/install.sh | sh`（详见
-> <https://docs.astral.sh/uv/>）。也可以用 `pipx install omni-stream` 把 CLI
-> 装到隔离环境，wheel 是同一份。
-
-或从 GitHub Releases 下载已编译二进制：<https://github.com/maoXyzt/omni-stream/releases/latest>。
-覆盖 3 个平台 —— `x86_64-unknown-linux-gnu` / `x86_64-unknown-linux-musl` /
-`aarch64-apple-darwin` (Windows 用户可自行编译)。对于预编译二进制，解压后给 `omni-stream` 加可执行权限即可，自行决定
-要不要把它放进 `$PATH`。
-
-> 想从源码构建、修改前后端、参与开发，见 [docs/development_guide.md](docs/development_guide.md)；
-> 发版流程见 [docs/how_to_release.md](docs/how_to_release.md)。
 
 ## 2. 配置
 
@@ -318,7 +300,24 @@ GitHub Releases 下载的 tarball 解压后没自动入 `$PATH`，要么 `./omni
 启动后浏览器打开 `http://<host>:<port>/` 即是嵌入的前端 SPA。`Ctrl-C` /
 SIGTERM 触发优雅关停（`axum::serve` + `with_graceful_shutdown`）。
 
-## 4. HTTP 错误码语义
+## 4. HTTP API
+
+内嵌 SPA 使用以下接口，也可以直接用 `curl` 或其他客户端调用：
+
+- `GET /api/server` / `GET /api/storages` —— 服务器信息与存储列表
+- `GET /api/list?prefix=&page_token=&skip_pages=` —— 浏览目录
+- `GET /api/stat/{*key}` —— 获取文件元信息
+- `GET /api/proxy/{*key}` —— 支持 `Range` 的文件流式读取
+- `GET /api/transcode/{*key}` —— 可选的用户主动触发 H.264/AAC 兼容流
+- `GET /api/thumb/{*key}` —— 按需生成 WebP 缩略图
+- `POST /api/query` —— DuckDB 只读 SQL（需要 `duckdb` feature）
+- `POST /api/convert` —— JSONL / NDJSON / TSV / CSV → Parquet 转换
+- `GET /raw/{storage}` / `GET /raw/{storage}/{*path}` —— 可导航文件挂载
+- 嵌入式 SPA fallback —— 非 API 路径回落到 `index.html`
+
+接口前置条件与 SQL / 转换完整用法见 [docs/edit_features_guide.md](docs/edit_features_guide.md)。
+
+## 5. HTTP 错误码语义
 
 | 触发 | HTTP | AppError |
 | --- | --- | --- |
