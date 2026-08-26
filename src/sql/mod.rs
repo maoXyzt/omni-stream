@@ -265,6 +265,7 @@ mod tests {
     AppState::new(
       reg,
       None,
+      None,
       std::sync::Arc::new("test".into()),
       true,
       true,
@@ -288,6 +289,7 @@ mod tests {
       }],
       auth: Default::default(),
       thumbnails: Default::default(),
+      transcoding: Default::default(),
       sql: SqlConfig::default(),
     };
     Arc::new(SqlState::from_config(&cfg))

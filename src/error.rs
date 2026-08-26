@@ -50,6 +50,11 @@ pub enum AppError {
   #[error("conflict: {0}")]
   Conflict(String),
 
+  /// A bounded resource (currently the FFmpeg process pool) has no free
+  /// capacity. 429 tells callers to retry later without growing a queue.
+  #[error("busy: {0}")]
+  Busy(String),
+
   /// DuckDB-side failure (parser / binder / runtime). The engine message is
   /// passed through verbatim so the SQL editor shows actionable diagnostics.
   #[cfg(feature = "duckdb")]
@@ -92,6 +97,7 @@ impl AppError {
       AppError::StorageInvalid(_) => StatusCode::SERVICE_UNAVAILABLE,
       AppError::Io(_) | AppError::Backend(_) => StatusCode::INTERNAL_SERVER_ERROR,
       AppError::Conflict(_) => StatusCode::CONFLICT,
+      AppError::Busy(_) => StatusCode::TOO_MANY_REQUESTS,
       #[cfg(feature = "duckdb")]
       AppError::Query(_) | AppError::QueryRejected(_) => StatusCode::BAD_REQUEST,
       #[cfg(feature = "duckdb")]

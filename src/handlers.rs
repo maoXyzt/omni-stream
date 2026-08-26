@@ -13,6 +13,7 @@ use crate::error::AppError;
 use crate::storage::factory::{BackendRegistry, InvalidStorageEntry, NamedBackend, StorageDetails};
 use crate::storage::{FileMeta, GetOptions, ListResult, PutOptions, StorageBackend};
 use crate::thumbs::ThumbState;
+use crate::transcode::TranscodeState;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -25,6 +26,7 @@ pub struct AppState {
   order: Arc<Vec<String>>,
   default_name: Arc<String>,
   thumb: Option<Arc<ThumbState>>,
+  transcode: Option<Arc<TranscodeState>>,
   hostname: Arc<String>,
   /// Mirrors `auth.enabled` so `/api/server` can tell the SPA whether the
   /// bearer-token gate is active at all.
@@ -48,6 +50,7 @@ impl AppState {
   pub fn new(
     reg: BackendRegistry,
     thumb: Option<Arc<ThumbState>>,
+    transcode: Option<Arc<TranscodeState>>,
     hostname: Arc<String>,
     auth_enabled: bool,
     public_read: bool,
@@ -59,6 +62,7 @@ impl AppState {
       order: Arc::new(reg.order),
       default_name: Arc::new(reg.default_name),
       thumb,
+      transcode,
       hostname,
       auth_enabled,
       public_read,
@@ -224,6 +228,9 @@ pub struct ServerInfo {
   /// Whether `POST /api/query` is live (duckdb build + [sql] enabled +
   /// auth on). The SPA hides the SQL editor entry point when false.
   pub sql_enabled: bool,
+  /// Whether the optional FFmpeg compatibility stream passed its startup
+  /// probe and is available for user-triggered video playback.
+  pub transcode_enabled: bool,
   /// Whether at least one storage is writeable. The SPA hides every write
   /// affordance (edit / new file / delete / rename) when false. Writes still
   /// require the bearer token at request time regardless of this flag.
@@ -264,6 +271,7 @@ pub async fn server_info_handler(State(state): State<AppState>) -> Json<ServerIn
     auth_enabled: state.auth_enabled,
     public_read: state.public_read,
     sql_enabled: state.sql_enabled,
+    transcode_enabled: state.transcode.is_some(),
     write_enabled: state.write_enabled(),
     httpfs_ready,
   })
@@ -503,6 +511,31 @@ pub async fn proxy_handler(
   builder
     .body(body)
     .map_err(|e| AppError::Backend(format!("response build: {e}")))
+}
+
+/// User-triggered compatibility playback for codecs the browser cannot
+/// decode. Input and output remain streaming; FFmpeg produces fragmented MP4
+/// on stdout and the response deliberately does not advertise byte ranges.
+#[tracing::instrument(skip_all, fields(key = %key, storage = ?q.storage))]
+pub async fn transcode_handler(
+  State(state): State<AppState>,
+  Query(q): Query<StorageSelector>,
+  Path(key): Path<String>,
+) -> Result<Response, AppError> {
+  let transcode = state
+    .transcode
+    .as_ref()
+    .ok_or_else(|| AppError::NotFound("video compatibility playback is disabled".into()))?;
+  let backend = state.resolve(q.storage.as_deref())?;
+  let body = transcode.stream(backend, &key).await?;
+
+  Response::builder()
+    .status(StatusCode::OK)
+    .header(header::CONTENT_TYPE, "video/mp4")
+    .header(header::CACHE_CONTROL, "no-store")
+    .header(header::ACCEPT_RANGES, "none")
+    .body(Body::from_stream(body))
+    .map_err(|error| AppError::Backend(format!("build transcode response: {error}")))
 }
 
 /// Query params for the `/raw` mount. `ls` (presence, any value) flips a
@@ -965,7 +998,7 @@ mod tests {
       order: vec![name.to_string()],
       default_name: name.to_string(),
     };
-    AppState::new(reg, None, Arc::new("host".into()), true, true, false)
+    AppState::new(reg, None, None, Arc::new("host".into()), true, true, false)
   }
 
   #[test]

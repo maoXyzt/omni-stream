@@ -134,11 +134,12 @@ pnpm build          # tsc -b（类型检查）+ vite build
 
 | 方法 | 路径 | 说明 | 鉴权组 |
 |------|------|------|--------|
-| GET | `/api/server` | 服务器信息（版本、auth_enabled、sql_enabled、public_read） | 读组 |
+| GET | `/api/server` | 服务器信息（版本、auth_enabled、sql_enabled、transcode_enabled、public_read） | 读组 |
 | GET | `/api/storages` | 存储列表及描述符 | 读组 |
 | GET | `/api/list` | 文件目录列表（分页）| 读组 |
 | GET | `/api/stat/{*key}` | 文件元信息 | 读组 |
 | GET | `/api/proxy/{*key}` | 文件内容代理（支持 Range）| 读组 |
+| GET | `/api/transcode/{*key}` | FFmpeg 实时 H.264/AAC 兼容流（无 Range）| 读组 |
 | GET | `/api/thumb/{*key}` | 缩略图（WebP，需 `thumbnails.enabled`）| 读组 |
 | GET | `/raw/{storage}` / `/raw/{storage}/{*path}` | 可导航文件挂载（inline 服务；`?ls` 列目录）| 读组 |
 | POST | `/api/query` | DuckDB 只读 SQL ⚠️（COPY/写语句被拒）| 读组 |
@@ -167,12 +168,13 @@ omni-stream/
 ├── src/
 │   ├── main.rs               # 入口：CLI 分发、Config::load、路由注册、AppState
 │   ├── config.rs             # Config / StorageConfig / S3Config / LocalConfig
-│   │                         #   ThumbConfig / SqlConfig / AuthConfig
+│   │                         #   ThumbConfig / TranscodeConfig / SqlConfig / AuthConfig
 │   ├── error.rs              # AppError + IntoResponse；duckdb 下额外变体
-│   ├── handlers.rs           # HTTP 处理器（list/stat/proxy/thumb/server/storages/raw）
-│   │                         #   + AppState（持有 registry、thumb_state、sql_enabled、public_read）
+│   ├── handlers.rs           # HTTP 处理器（list/stat/proxy/transcode/thumb/server/storages/raw）
+│   │                         #   + AppState（持有 registry、thumb/transcode state、sql_enabled、public_read）
 │   ├── auth.rs               # Bearer-token 鉴权中间件
 │   ├── thumbs.rs             # 缩略图生成与 LRU 缓存（含 cache CLI 子命令底层逻辑）
+│   ├── transcode.rs          # FFmpeg 探测、限流、输入/输出流与进程生命周期
 │   ├── cli_style.rs          # CLI 输出着色封装（nu_ansi_term）
 │   ├── storage/
 │   │   ├── mod.rs            # StorageBackend trait + FileMeta / FileEntry / ListResult 等
@@ -198,7 +200,7 @@ omni-stream/
 │       ├── api/
 │       │   ├── client.ts     # axios 实例、Bearer token 注入、ApiError 封装
 │       │   ├── storage.ts    # listStorages / getServerInfo / listFiles / statFile
-│       │   │                 #   proxyUrl / thumbUrl / rawUrl
+│       │   │                 #   proxyUrl / transcodeUrl / thumbUrl / rawUrl
 │       │   ├── query.ts      # executeQuery → POST /api/query（DuckDB SQL）
 │       │   └── convert.ts    # convertToParquet → POST /api/convert
 │       ├── hooks/            # 自定义 hooks（useStorages / useServerInfo / useListFiles

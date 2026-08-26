@@ -110,6 +110,8 @@ export interface ServerInfo {
   /// Whether POST /api/query is live (server built with the duckdb feature,
   /// [sql] enabled, auth on). Gates the SQL editor entry points.
   sql_enabled: boolean
+  /// Whether user-triggered FFmpeg compatibility playback is available.
+  transcode_enabled: boolean
   /// Whether at least one storage is writeable. The SPA hides every write
   /// affordance (edit / new file / delete / rename) when false. Writes still
   /// require the bearer token at request time regardless of this flag.

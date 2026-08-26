@@ -70,6 +70,8 @@ pub struct Config {
   #[serde(default)]
   pub thumbnails: ThumbConfig,
   #[serde(default)]
+  pub transcoding: TranscodeConfig,
+  #[serde(default)]
   pub sql: SqlConfig,
 }
 
@@ -289,6 +291,40 @@ impl Default for ThumbConfig {
   }
 }
 
+/// User-triggered video compatibility stream. Disabled by default because
+/// transcoding consumes bounded but significant CPU and temporary disk.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct TranscodeConfig {
+  pub enabled: bool,
+  pub ffmpeg_path: String,
+  /// Global process cap. Requests above the limit fail immediately instead
+  /// of queueing and tying up HTTP connections.
+  pub max_concurrent: usize,
+  pub timeout_secs: u64,
+  /// Reject larger or unknown-size sources before starting FFmpeg so its
+  /// seek cache cannot consume unbounded temporary disk.
+  pub max_source_bytes: u64,
+  pub max_width: u32,
+  pub max_height: u32,
+  pub max_video_bitrate_kbps: u32,
+}
+
+impl Default for TranscodeConfig {
+  fn default() -> Self {
+    Self {
+      enabled: false,
+      ffmpeg_path: "ffmpeg".to_string(),
+      max_concurrent: 1,
+      timeout_secs: 1800,
+      max_source_bytes: 2 * 1024 * 1024 * 1024,
+      max_width: 1920,
+      max_height: 1080,
+      max_video_bitrate_kbps: 4000,
+    }
+  }
+}
+
 /// Settings for the DuckDB-backed `/api/query` endpoint. Only effective when
 /// the binary is built with `--features duckdb` AND `auth.enabled = true` —
 /// the endpoint executes arbitrary (read-mostly) SQL, so it never runs on an
@@ -413,6 +449,7 @@ impl Config {
       }],
       auth: AuthConfig::default(),
       thumbnails: ThumbConfig::default(),
+      transcoding: TranscodeConfig::default(),
       sql: SqlConfig::default(),
     };
     cfg
@@ -583,6 +620,24 @@ impl Config {
     if self.sql.convert_timeout_secs == 0 {
       bail!("sql.convert_timeout_secs must be greater than 0");
     }
+    if self.transcoding.ffmpeg_path.trim().is_empty() {
+      bail!("transcoding.ffmpeg_path must not be empty");
+    }
+    if self.transcoding.max_concurrent == 0 {
+      bail!("transcoding.max_concurrent must be greater than 0");
+    }
+    if self.transcoding.timeout_secs == 0 {
+      bail!("transcoding.timeout_secs must be greater than 0");
+    }
+    if self.transcoding.max_source_bytes == 0 {
+      bail!("transcoding.max_source_bytes must be greater than 0");
+    }
+    if self.transcoding.max_width == 0 || self.transcoding.max_height == 0 {
+      bail!("transcoding.max_width and max_height must be greater than 0");
+    }
+    if self.transcoding.max_video_bitrate_kbps == 0 {
+      bail!("transcoding.max_video_bitrate_kbps must be greater than 0");
+    }
     if self.storages.is_empty() {
       bail!("no storages configured; define at least one [[storages]] entry");
     }
@@ -739,6 +794,7 @@ local = { root_path = "/tmp" }
     assert_eq!(cfg.server.port, 28080);
     assert!(!cfg.auth.enabled);
     assert!(!cfg.thumbnails.enabled);
+    assert!(!cfg.transcoding.enabled);
     assert_eq!(cfg.storages.len(), 1);
     assert_eq!(storage.name, "local");
     assert_eq!(storage.r#type, StorageType::Local);
@@ -810,6 +866,86 @@ local = { root_path = "/tmp" }
     assert_eq!(cfg.sql.threads, 1);
     assert_eq!(cfg.sql.query_timeout_secs, 300);
     assert_eq!(cfg.sql.max_rows, 10_000);
+  }
+
+  #[test]
+  fn transcoding_defaults_disabled_and_bounded() {
+    let raw = r#"
+[[storages]]
+name = "x"
+type = "local"
+active = true
+local = { root_path = "/tmp" }
+"#;
+    let cfg = parse(raw);
+    assert!(!cfg.transcoding.enabled);
+    assert_eq!(cfg.transcoding.ffmpeg_path, "ffmpeg");
+    assert_eq!(cfg.transcoding.max_concurrent, 1);
+    assert_eq!(cfg.transcoding.timeout_secs, 1800);
+    assert_eq!(cfg.transcoding.max_source_bytes, 2 * 1024 * 1024 * 1024);
+    assert_eq!(cfg.transcoding.max_width, 1920);
+    assert_eq!(cfg.transcoding.max_height, 1080);
+    assert_eq!(cfg.transcoding.max_video_bitrate_kbps, 4000);
+  }
+
+  #[test]
+  fn transcoding_partial_override_keeps_safe_defaults() {
+    let raw = r#"
+[transcoding]
+enabled = true
+max_concurrent = 2
+
+[[storages]]
+name = "x"
+type = "local"
+active = true
+local = { root_path = "/tmp" }
+"#;
+    let cfg = parse(raw);
+    assert!(cfg.transcoding.enabled);
+    assert_eq!(cfg.transcoding.max_concurrent, 2);
+    assert_eq!(cfg.transcoding.timeout_secs, 1800);
+    assert_eq!(cfg.transcoding.max_video_bitrate_kbps, 4000);
+  }
+
+  #[test]
+  fn transcoding_rejects_unbounded_or_empty_settings() {
+    let raw = r#"
+[[storages]]
+name = "x"
+type = "local"
+active = true
+local = { root_path = "/tmp" }
+"#;
+    let cfg = parse(raw);
+
+    let mut invalid = cfg.clone();
+    invalid.transcoding.ffmpeg_path = "  ".into();
+    assert!(invalid.validate().is_err());
+
+    let mut invalid = cfg.clone();
+    invalid.transcoding.max_concurrent = 0;
+    assert!(invalid.validate().is_err());
+
+    let mut invalid = cfg.clone();
+    invalid.transcoding.timeout_secs = 0;
+    assert!(invalid.validate().is_err());
+
+    let mut invalid = cfg.clone();
+    invalid.transcoding.max_source_bytes = 0;
+    assert!(invalid.validate().is_err());
+
+    let mut invalid = cfg.clone();
+    invalid.transcoding.max_width = 0;
+    assert!(invalid.validate().is_err());
+
+    let mut invalid = cfg.clone();
+    invalid.transcoding.max_height = 0;
+    assert!(invalid.validate().is_err());
+
+    let mut invalid = cfg;
+    invalid.transcoding.max_video_bitrate_kbps = 0;
+    assert!(invalid.validate().is_err());
   }
 
   #[test]

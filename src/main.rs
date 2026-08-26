@@ -7,6 +7,7 @@ mod handlers;
 mod sql;
 mod storage;
 mod thumbs;
+mod transcode;
 
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -31,10 +32,11 @@ use crate::config::Config;
 use crate::handlers::{
   AppState, delete_file_handler, list_handler, list_storages_handler, move_file_handler,
   proxy_handler, put_file_handler, raw_handler, raw_root_handler, server_info_handler,
-  stat_handler, static_handler, thumb_handler,
+  stat_handler, static_handler, thumb_handler, transcode_handler,
 };
 use crate::storage::factory::create_registry;
 use crate::thumbs::ThumbState;
+use crate::transcode::TranscodeState;
 
 /// Upper bound on a single file-write request body (`PUT /api/files`). Text
 /// and code files are small; the cap keeps a write from buffering an
@@ -97,6 +99,7 @@ async fn main() -> anyhow::Result<()> {
 
   let registry = create_registry(&cfg).await?;
   let thumb = ThumbState::build(&cfg.thumbnails).context("init thumbnail cache")?;
+  let transcode = TranscodeState::build(&cfg.transcoding).await;
   if let Some(t) = thumb.as_ref() {
     spawn_thumb_sweep(t.clone());
   }
@@ -142,6 +145,7 @@ async fn main() -> anyhow::Result<()> {
   let state = AppState::new(
     registry,
     thumb,
+    transcode,
     hostname,
     cfg.auth.enabled,
     cfg.auth.public_read,
@@ -170,6 +174,7 @@ async fn main() -> anyhow::Result<()> {
     .route("/api/list", get(list_handler).layer(catalog_timeout))
     .route("/api/stat/{*key}", get(stat_handler).layer(catalog_timeout))
     .route("/api/proxy/{*key}", get(proxy_handler))
+    .route("/api/transcode/{*key}", get(transcode_handler))
     .route(
       "/api/thumb/{*key}",
       get(thumb_handler).layer(catalog_timeout),
@@ -363,6 +368,7 @@ fn print_serve_help() {
   );
   println!();
   println!("  Config files and OMNI_* environment variables are not loaded.");
+  println!("  Compatible video transcoding is disabled; use a config file to opt in.");
 }
 
 /// Parsed form of `omni-stream serve <location> [-p PORT]`. `port` stays

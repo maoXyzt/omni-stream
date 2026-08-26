@@ -11,7 +11,7 @@
 目录、按需加载缩略图、就地预览文件。预览支持：
 
 - **图片** —— png / jpg / gif / webp / avif / bmp / svg / ico
-- **视频** —— mp4 / webm / mov / mkv / m4v / ogv，按 `Range` 流式拖拽
+- **视频** —— mp4 / webm / mov / mkv / m4v / ogv，按 `Range` 流式拖拽；可选用户主动触发的 FFmpeg 兼容播放，处理浏览器不支持的编码
 - **文本 / 代码** —— 按扩展名做语法高亮：json / yaml / toml / md /
   rs / ts / py / go / sql / shell / proto 等
 - **表格数据** —— Parquet（hyparquet 纯 JS 解码，可切换内嵌 **DuckDB SQL 查询 tab**）/ CSV / TSV；
@@ -27,10 +27,11 @@
 
 HTTP 接口（前端 SPA 都基于此调用，也可以直接用 curl / 自写客户端）：
 
-- `GET /api/server` / `GET /api/storages` —— 服务器信息（版本、auth_enabled、sql_enabled、public_read）与存储列表
+- `GET /api/server` / `GET /api/storages` —— 服务器信息（版本、auth_enabled、sql_enabled、transcode_enabled、public_read）与存储列表
 - `GET /api/list?prefix=&page_token=&skip_pages=` —— 浏览目录；可选 `skip_pages` 让后端服务端 walk N 页，响应会带回中间页的 token 数组，前端一次往返就能跳到第 N 页
 - `GET /api/stat/{*key}` —— 取文件元信息
 - `GET /api/proxy/{*key}` —— 流式拉取，全程透传 `Range`，自动 200 / 206
+- `GET /api/transcode/{*key}` —— 用户主动触发的 H.264/AAC 实时兼容流（需显式开启 `[transcoding] enabled = true`，不支持拖动定位）
 - `GET /api/thumb/{*key}` —— 按需生成 WebP 缩略图（需 `[thumbnails] enabled = true`）
 - `POST /api/query` —— DuckDB **只读** SQL（SELECT / DESCRIBE / EXPLAIN 等；COPY 及写语句被拒；需 `--features duckdb` 构建 + `auth.enabled = true`）
 - `POST /api/convert` —— JSONL / NDJSON / TSV / CSV → Parquet 转换（写操作，auth 开启时始终需 token）
@@ -151,6 +152,7 @@ s3 = { endpoint = "http://minio.local:9000", access_key = "...", secret_key = ".
 | `OMNI_AUTH_ENABLED` | 覆盖 `auth.enabled`（`true` / `false`） |
 | `OMNI_AUTH_TOKEN` | 覆盖 `auth.token`（建议把 secret 放这里而不是配置文件） |
 | `OMNI_AUTH_PUBLIC_READ` | 覆盖 `auth.public_read`（`true` / `false`） |
+| `OMNI_TRANSCODING_ENABLED` | 覆盖 `transcoding.enabled`（`true` / `false`） |
 | `OMNI_CONFIG` | 强制使用某个绝对路径的 `config.toml` |
 | `RUST_LOG` | tracing 过滤，例如 `info,tower_http=debug,aws=info` |
 
@@ -172,7 +174,7 @@ OMNI_AUTH_ENABLED=true OMNI_AUTH_TOKEN=$(openssl rand -hex 32) ./omni-stream
 
 启用后，**默认行为是读写分离**（`public_read = true`，默认值）：
 
-- **浏览 / 预览 / 下载**（`/api/list`、`/api/stat`、`/api/proxy`、`/api/thumb`、`/raw`）保持开放，无需 token。
+- **浏览 / 预览 / 下载**（`/api/list`、`/api/stat`、`/api/proxy`、`/api/transcode`、`/api/thumb`、`/raw`）保持开放，无需 token。
 - **写操作**（`/api/convert` 转 Parquet）始终需要 `Authorization: Bearer <token>`。
 - **SQL 查询**（`/api/query`）归入读组，默认也无需 token；但端点本身只在 `auth.enabled = true` 时才激活（不支持完全开放 API）。
 - 前端：写操作收到 `401` 时会弹出 token 输入框，存到 `localStorage` 后自动重试；
@@ -207,6 +209,42 @@ enabled = true
 ```
 
 完整选项见 `config.example.toml` 的 `[thumbnails]` 段。
+
+### 视频兼容播放
+
+浏览器无法解码 MP4 或 MOV 容器中的所有编码。原生播放失败时，前端仍会给出清晰的
+下载操作。设置 `[transcoding] enabled = true` 后，OmniStream 会探测带 `libx264`
+和 `aac` 编码器的 FFmpeg，并提供用户主动触发的兼容播放。该能力默认关闭，因为
+转码会消耗 CPU 和临时磁盘空间。探测失败时服务仍会启动并记录 warning，视频错误提示
+也会说明服务端兼容播放当前不可用。
+
+```toml
+[transcoding]
+enabled = true # 显式开启；默认关闭
+# ffmpeg_path = "ffmpeg"
+# max_concurrent = 1
+# timeout_secs = 1800
+# max_source_bytes = 2147483648  # 默认 2 GiB
+# max_width = 1920
+# max_height = 1080
+# max_video_bitrate_kbps = 4000
+```
+
+服务端通过 `StorageBackend` 读取原始流，管道输入 FFmpeg，再从 stdout 流式返回
+H.264/AAC fragmented MP4。它不会创建或保留转码成品文件，也不会把完整视频缓冲
+到内存。若输入文件的元数据必须随机读取，FFmpeg 可能在系统临时目录使用临时输入
+seek cache；FFmpeg 退出时会删除它。
+超过 `max_source_bytes`（或无法确认长度）的输入会在 FFmpeg 启动前被拒绝；请按系统
+临时磁盘容量设置该上限。
+
+转码不会自动启动：只有原生解码失败且用户点击 **Try compatible playback** 后才运行。
+设置 `transcoding.enabled = false` 可关闭该能力（默认已关闭）。默认全局只允许一个进程，超出的请求
+立即返回 HTTP 429；每个进程都有超时限制并只使用一个编码线程，浏览器断开时也会
+停止。实时输出不支持拖动定位。编码会消耗 CPU，只应暴露在资源合适的主机或可信访问
+控制之后。鉴权关闭或 `auth.public_read = true` 时，读组端点（包括转码）对匿名用户开放；
+面向公网部署前，建议先在反向代理增加鉴权或限流，再开启该能力。
+
+全部选项见 `config.example.toml` 的 `[transcoding]` 段。
 
 ### SQL 查询与格式转换（可选，需 duckdb 构建）
 
@@ -271,7 +309,8 @@ RUST_LOG=info,tower_http=debug omni-stream
 
 `omni-stream serve <location>` 监听 `127.0.0.1:28080`，使用只读本地后端和内置
 默认值，不读取 `config.toml` 或 `OMNI_*` 配置变量。唯一可覆盖的是端口
-（`-p` / `--port <PORT>`）。需要非回环地址、鉴权或其他存储后端时，继续使用原有的
+（`-p` / `--port <PORT>`）。该零配置命令不会启用视频兼容转码；需要 FFmpeg
+兼容播放时，请使用配置文件并设置 `[transcoding] enabled = true`。需要非回环地址、鉴权或其他存储后端时，继续使用原有的
 `omni-stream` 启动方式。
 
 GitHub Releases 下载的 tarball 解压后没自动入 `$PATH`，要么 `./omni-stream` 当前目录跑，要么自己挪到 `/usr/local/bin/` 之类的目录。
@@ -285,13 +324,14 @@ SIGTERM 触发优雅关停（`axum::serve` + `with_graceful_shutdown`）。
 | --- | --- | --- |
 | 鉴权开启但未带 / token 错误 | 401 | （middleware，不走 AppError） |
 | 文件不存在 | 404 | `NotFound` |
-| 凭据无 GetObject 权限 / S3 AccessDenied | 403 | `Forbidden` |
+| 凭据无 GetObject 权限 / S3 AccessDenied | 403 | `ObjectReadForbidden`（`code = OBJECT_READ_FORBIDDEN`） |
 | 越界 / 非法 Range | 416 | `InvalidRange` |
 | 路径含 `..` 等越权片段 / 把目录当文件请求 | 400 | `InvalidPath` / `Unsupported` |
 | SQL 执行报错 / 被只读校验拒绝（duckdb） | 400 | `Query` / `QueryRejected` |
 | convert 目标已存在且未带 `overwrite=true`（duckdb） | 409 | `Conflict` |
+| 视频转码器达到并发上限 | 429 | `Busy` |
 | SQL 查询超时（duckdb，`query_timeout_secs`） | 408 | `QueryTimeout` |
 | storage 配置存在但启动初始化失败 | 503 | `StorageInvalid` |
 | 其它 IO / SDK / 网络错误 | 500 | `Io` / `Backend` |
 
-错误体统一是 `{"error": "...", "message": "..."}` JSON。
+大多数错误体是 `{"error": "...", "message": "..."}` JSON。对象读取被拒绝时使用结构化的 `ObjectReadForbidden`：`{"error": "...", "code": "OBJECT_READ_FORBIDDEN", "message": "...", "hint": "..."}`。
