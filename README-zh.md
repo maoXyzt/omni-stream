@@ -31,7 +31,7 @@ HTTP 接口（前端 SPA 都基于此调用，也可以直接用 curl / 自写�
 - `GET /api/list?prefix=&page_token=&skip_pages=` —— 浏览目录；可选 `skip_pages` 让后端服务端 walk N 页，响应会带回中间页的 token 数组，前端一次往返就能跳到第 N 页
 - `GET /api/stat/{*key}` —— 取文件元信息
 - `GET /api/proxy/{*key}` —— 流式拉取，全程透传 `Range`，自动 200 / 206
-- `GET /api/transcode/{*key}` —— 用户主动触发的 H.264/AAC 实时兼容流（发现兼容 FFmpeg 时默认启用，不支持拖动定位）
+- `GET /api/transcode/{*key}` —— 用户主动触发的 H.264/AAC 实时兼容流（需显式开启 `[transcoding] enabled = true`，不支持拖动定位）
 - `GET /api/thumb/{*key}` —— 按需生成 WebP 缩略图（需 `[thumbnails] enabled = true`）
 - `POST /api/query` —— DuckDB **只读** SQL（SELECT / DESCRIBE / EXPLAIN 等；COPY 及写语句被拒；需 `--features duckdb` 构建 + `auth.enabled = true`）
 - `POST /api/convert` —— JSONL / NDJSON / TSV / CSV → Parquet 转换（写操作，auth 开启时始终需 token）
@@ -213,13 +213,14 @@ enabled = true
 ### 视频兼容播放
 
 浏览器无法解码 MP4 或 MOV 容器中的所有编码。原生播放失败时，前端仍会给出清晰的
-下载操作。OmniStream 默认尝试发现带 `libx264` 和 `aac` 编码器的 FFmpeg，并启用
-用户主动触发的兼容播放。探测失败时服务仍会启动并记录 warning，视频错误提示也会
-说明服务端兼容播放当前不可用。
+下载操作。设置 `[transcoding] enabled = true` 后，OmniStream 会探测带 `libx264`
+和 `aac` 编码器的 FFmpeg，并提供用户主动触发的兼容播放。该能力默认关闭，因为
+转码会消耗 CPU 和临时磁盘空间。探测失败时服务仍会启动并记录 warning，视频错误提示
+也会说明服务端兼容播放当前不可用。
 
 ```toml
 [transcoding]
-enabled = true
+enabled = true # 显式开启；默认关闭
 # ffmpeg_path = "ffmpeg"
 # max_concurrent = 1
 # timeout_secs = 1800
@@ -237,10 +238,11 @@ seek cache；FFmpeg 退出时会删除它。
 临时磁盘容量设置该上限。
 
 转码不会自动启动：只有原生解码失败且用户点击 **Try compatible playback** 后才运行。
-设置 `transcoding.enabled = false` 可关闭该能力。默认全局只允许一个进程，超出的请求
+设置 `transcoding.enabled = false` 可关闭该能力（默认已关闭）。默认全局只允许一个进程，超出的请求
 立即返回 HTTP 429；每个进程都有超时限制并只使用一个编码线程，浏览器断开时也会
 停止。实时输出不支持拖动定位。编码会消耗 CPU，只应暴露在资源合适的主机或可信访问
-控制之后。
+控制之后。鉴权关闭或 `auth.public_read = true` 时，读组端点（包括转码）对匿名用户开放；
+面向公网部署前，建议先在反向代理增加鉴权或限流，再开启该能力。
 
 全部选项见 `config.example.toml` 的 `[transcoding]` 段。
 
@@ -307,9 +309,8 @@ RUST_LOG=info,tower_http=debug omni-stream
 
 `omni-stream serve <location>` 监听 `127.0.0.1:28080`，使用只读本地后端和内置
 默认值，不读取 `config.toml` 或 `OMNI_*` 配置变量。唯一可覆盖的是端口
-（`-p` / `--port <PORT>`）。它会自动在 `PATH` 中探测 FFmpeg：若 FFmpeg
-包含 `libx264` 和 AAC 编码器，则自动启用视频兼容播放；否则打印警告并继续启动，
-不影响原生预览。需要非回环地址、鉴权或其他存储后端时，继续使用原有的
+（`-p` / `--port <PORT>`）。该零配置命令不会启用视频兼容转码；需要 FFmpeg
+兼容播放时，请使用配置文件并设置 `[transcoding] enabled = true`。需要非回环地址、鉴权或其他存储后端时，继续使用原有的
 `omni-stream` 启动方式。
 
 GitHub Releases 下载的 tarball 解压后没自动入 `$PATH`，要么 `./omni-stream` 当前目录跑，要么自己挪到 `/usr/local/bin/` 之类的目录。

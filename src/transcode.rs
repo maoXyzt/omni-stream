@@ -10,7 +10,7 @@ use bytes::Bytes;
 use futures::Stream;
 use tokio::io as tokio_io;
 use tokio::process::{Child, Command};
-use tokio::sync::{Semaphore, oneshot};
+use tokio::sync::{Semaphore, mpsc};
 use tokio::task::JoinHandle;
 use tokio_util::io::{ReaderStream, StreamReader};
 
@@ -65,12 +65,13 @@ impl TranscodeState {
     backend: Arc<dyn StorageBackend>,
     key: &str,
   ) -> Result<ByteStream, AppError> {
+    let source = backend.get_file(key, GetOptions::default()).await?;
+    check_source_size(source.content_length, self.config.max_source_bytes)?;
+
     let permit = Arc::clone(&self.slots)
       .try_acquire_owned()
       .map_err(|_| AppError::Busy("video transcoder is at capacity; try again later".into()))?;
 
-    let source = backend.get_file(key, GetOptions::default()).await?;
-    check_source_size(source.content_length, self.config.max_source_bytes)?;
     let mut command = ffmpeg_command(&self.config);
     let mut child = command.spawn().map_err(|error| {
       AppError::Backend(format!(
@@ -88,16 +89,22 @@ impl TranscodeState {
       .take()
       .ok_or_else(|| AppError::Backend("video transcoder stdout is unavailable".into()))?;
 
+    let (cancel_tx, cancel_rx) = mpsc::unbounded_channel();
+    let input_cancel_tx = cancel_tx.clone();
     let input_key = key.to_string();
     let input_task = tokio::spawn(async move {
       let mut reader = StreamReader::new(source.body);
       let mut writer = child_stdin;
       if let Err(error) = tokio_io::copy(&mut reader, &mut writer).await {
-        tracing::warn!(key = %input_key, %error, "video transcoder input stream failed");
+        if is_expected_disconnect(&error) {
+          tracing::debug!(key = %input_key, %error, "video transcoder input closed");
+        } else {
+          tracing::warn!(key = %input_key, %error, "video transcoder input stream failed");
+          let _ = input_cancel_tx.send(());
+        }
       }
     });
 
-    let (cancel_tx, cancel_rx) = oneshot::channel();
     let timeout = Duration::from_secs(self.config.timeout_secs);
     tokio::spawn(supervise_process(
       child,
@@ -113,6 +120,13 @@ impl TranscodeState {
       input_task,
     }))
   }
+}
+
+fn is_expected_disconnect(error: &io::Error) -> bool {
+  matches!(
+    error.kind(),
+    io::ErrorKind::BrokenPipe | io::ErrorKind::ConnectionReset
+  )
 }
 
 fn check_source_size(content_length: Option<u64>, max_source_bytes: u64) -> Result<(), AppError> {
@@ -237,7 +251,7 @@ fn ffmpeg_args(config: &TranscodeConfig) -> Vec<String> {
 
 async fn supervise_process(
   mut child: Child,
-  mut cancel_rx: oneshot::Receiver<()>,
+  mut cancel_rx: mpsc::UnboundedReceiver<()>,
   timeout: Duration,
   key: String,
   _permit: tokio::sync::OwnedSemaphorePermit,
@@ -258,7 +272,7 @@ async fn supervise_process(
       tracing::warn!(%key, timeout_secs = timeout.as_secs(), "video transcoder timed out");
       stop_process(&mut child, &key).await;
     },
-    _ = &mut cancel_rx => {
+    _ = cancel_rx.recv() => {
       stop_process(&mut child, &key).await;
     },
   }
@@ -280,7 +294,7 @@ async fn stop_process(child: &mut Child, key: &str) {
 /// input immediately and asks the supervisor to kill and reap FFmpeg.
 struct ManagedTranscodeStream {
   output: ReaderStream<tokio::process::ChildStdout>,
-  cancel_tx: Option<oneshot::Sender<()>>,
+  cancel_tx: Option<mpsc::UnboundedSender<()>>,
   input_task: JoinHandle<()>,
 }
 
@@ -354,6 +368,19 @@ mod tests {
       check_source_size(None, 1024),
       Err(AppError::Unsupported(_))
     ));
+  }
+
+  #[test]
+  fn expected_disconnect_errors_do_not_warn_or_cancel() {
+    assert!(is_expected_disconnect(&io::Error::from(
+      io::ErrorKind::BrokenPipe
+    )));
+    assert!(is_expected_disconnect(&io::Error::from(
+      io::ErrorKind::ConnectionReset
+    )));
+    assert!(!is_expected_disconnect(&io::Error::from(
+      io::ErrorKind::UnexpectedEof
+    )));
   }
 
   #[tokio::test]

@@ -291,8 +291,8 @@ impl Default for ThumbConfig {
   }
 }
 
-/// User-triggered video compatibility stream. Enabled by default when an
-/// external FFmpeg binary with the libx264 and AAC encoders is available.
+/// User-triggered video compatibility stream. Disabled by default because
+/// transcoding consumes bounded but significant CPU and temporary disk.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct TranscodeConfig {
@@ -313,7 +313,7 @@ pub struct TranscodeConfig {
 impl Default for TranscodeConfig {
   fn default() -> Self {
     Self {
-      enabled: true,
+      enabled: false,
       ffmpeg_path: "ffmpeg".to_string(),
       max_concurrent: 1,
       timeout_secs: 1800,
@@ -794,7 +794,7 @@ local = { root_path = "/tmp" }
     assert_eq!(cfg.server.port, 28080);
     assert!(!cfg.auth.enabled);
     assert!(!cfg.thumbnails.enabled);
-    assert!(cfg.transcoding.enabled);
+    assert!(!cfg.transcoding.enabled);
     assert_eq!(cfg.storages.len(), 1);
     assert_eq!(storage.name, "local");
     assert_eq!(storage.r#type, StorageType::Local);
@@ -869,7 +869,7 @@ local = { root_path = "/tmp" }
   }
 
   #[test]
-  fn transcoding_defaults_enabled_and_bounded() {
+  fn transcoding_defaults_disabled_and_bounded() {
     let raw = r#"
 [[storages]]
 name = "x"
@@ -878,7 +878,7 @@ active = true
 local = { root_path = "/tmp" }
 "#;
     let cfg = parse(raw);
-    assert!(cfg.transcoding.enabled);
+    assert!(!cfg.transcoding.enabled);
     assert_eq!(cfg.transcoding.ffmpeg_path, "ffmpeg");
     assert_eq!(cfg.transcoding.max_concurrent, 1);
     assert_eq!(cfg.transcoding.timeout_secs, 1800);

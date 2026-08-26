@@ -22,7 +22,7 @@ HTTP API (the bundled SPA is built on top of these — `curl` or your own client
 - `GET /api/list?prefix=&page_token=&skip_pages=` — browse a directory; optional `skip_pages` makes the server walk N pages internally and return the target page plus every intermediate token, so jumping to page N takes one round-trip instead of N
 - `GET /api/stat/{*key}` — fetch file metadata
 - `GET /api/proxy/{*key}` — stream the file, transparently forwarding `Range`, returning 200 / 206 as appropriate
-- `GET /api/transcode/{*key}` — user-triggered live H.264/AAC compatibility stream (enabled by default when compatible FFmpeg is available; no seeking)
+- `GET /api/transcode/{*key}` — user-triggered live H.264/AAC compatibility stream (when `[transcoding] enabled = true`; no seeking)
 - `GET /api/thumb/{*key}` — on-demand WebP thumbnail (requires `[thumbnails] enabled = true`)
 - `POST /api/query` — DuckDB **read-only** SQL (SELECT / DESCRIBE / EXPLAIN etc.; COPY and mutating statements are rejected; requires `--features duckdb` build + `auth.enabled = true`)
 - `POST /api/convert` — JSONL / NDJSON / TSV / CSV → Parquet conversion (write operation — always requires a token when auth is on)
@@ -207,14 +207,15 @@ For the full set of options see the `[thumbnails]` section in `config.example.to
 ### Compatible video playback
 
 Browsers cannot decode every codec that can be stored in an MP4 or MOV
-container. OmniStream tries to enable user-triggered compatible playback by
-default when FFmpeg with the `libx264` and `aac` encoders is available. If the
-probe fails, startup continues with a warning and the video error explains
-that server-side compatible playback is unavailable.
+container. OmniStream can offer user-triggered compatible playback when
+`[transcoding] enabled = true` and FFmpeg with the `libx264` and `aac` encoders
+is available. The capability is disabled by default because it consumes CPU
+and temporary disk. If the probe fails, startup continues with a warning and
+the video error explains that server-side compatible playback is unavailable.
 
 ```toml
 [transcoding]
-enabled = true
+enabled = true # opt in; default is false
 # ffmpeg_path = "ffmpeg"
 # max_concurrent = 1
 # timeout_secs = 1800
@@ -234,11 +235,15 @@ starts; set the limit according to available temporary disk.
 
 Transcoding never starts automatically: the user must click
 **Try compatible playback** after native decoding fails. Set
-`transcoding.enabled = false` to disable the capability. The default
+`transcoding.enabled = false` to disable the capability (it is already off by
+default). The default
 single-process limit rejects extra work with HTTP 429, each process has a
 timeout and one encoder thread, and disconnecting the browser stops it. Live
 output does not support seeking. Because encoding consumes CPU, expose it only
-on a suitably sized host or behind trusted access controls.
+on a suitably sized host or behind trusted access controls. With auth disabled,
+or with `auth.public_read = true`, the read endpoint is public; internet-facing
+deployments should put it behind proxy authentication or rate limiting before
+enabling it.
 
 For every option see the `[transcoding]` section in `config.example.toml`.
 
@@ -308,9 +313,8 @@ RUST_LOG=info,tower_http=debug omni-stream
 `omni-stream serve <location>` binds `127.0.0.1:28080` and uses a read-only
 local backend with the built-in defaults. `-p` / `--port <PORT>` is the only
 override; it does not load `config.toml` or `OMNI_*` configuration variables.
-It auto-detects FFmpeg on `PATH`: when FFmpeg has the `libx264` and AAC
-encoders, compatible video playback is enabled automatically; otherwise a
-warning is printed and startup continues without it.
+Compatible playback is disabled for this zero-config command; use a config
+file with `[transcoding] enabled = true` when you want FFmpeg playback.
 Use the existing `omni-stream` form when you need a non-loopback host,
 authentication, or other storage backends.
 

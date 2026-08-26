@@ -368,7 +368,7 @@ fn print_serve_help() {
   );
   println!();
   println!("  Config files and OMNI_* environment variables are not loaded.");
-  println!("  FFmpeg is auto-detected; if unavailable, the server continues without it.");
+  println!("  Compatible video transcoding is disabled; use a config file to opt in.");
 }
 
 /// Parsed form of `omni-stream serve <location> [-p PORT]`. `port` stays
