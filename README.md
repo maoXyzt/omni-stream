@@ -41,6 +41,12 @@ HTTP API (the bundled SPA is built on top of these — `curl` or your own client
 cargo install omni-stream    # requires Rust 1.91+
 ```
 
+To install the prebuilt GitHub Release binary with [cargo-binstall](https://github.com/cargo-bins/cargo-binstall):
+
+```bash
+cargo binstall omni-stream
+```
+
 **Python users** (no Rust toolchain required — install from PyPI):
 
 ```bash

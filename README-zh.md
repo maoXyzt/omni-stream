@@ -50,6 +50,12 @@ HTTP 接口（前端 SPA 都基于此调用，也可以直接用 curl / 自写�
 cargo install omni-stream    # 需 Rust 1.91+
 ```
 
+使用 [cargo-binstall](https://github.com/cargo-bins/cargo-binstall) 可直接安装 GitHub Release 中的预编译二进制：
+
+```bash
+cargo binstall omni-stream
+```
+
 **Python 用户**（无需 Rust 工具链，从 PyPI 安装）：
 
 ```bash
