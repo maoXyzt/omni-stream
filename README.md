@@ -47,13 +47,14 @@ Or compile from source (requires Rust 1.91+):
 cargo install omni-stream
 ```
 
-Python users can install the prebuilt wheel (no Rust toolchain required):
+For one-off use without a Rust toolchain, run the prebuilt wheel with `uvx`:
 
 ```bash
-pip install omni-stream
+uvx omni-stream --help
 ```
 
-For `uv`, see the [official documentation](https://docs.astral.sh/uv/).
+For a persistent Python installation, use `pip install omni-stream`. For `uv`,
+see the [official documentation](https://docs.astral.sh/uv/).
 
 Prebuilt binaries are also available from [GitHub Releases](https://github.com/maoXyzt/omni-stream/releases/latest).
 

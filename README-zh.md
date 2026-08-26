@@ -56,13 +56,13 @@ cargo binstall omni-stream
 cargo install omni-stream
 ```
 
-Python 用户可以安装预编译 wheel（无需 Rust 工具链）：
+无需 Rust 工具链时，推荐使用 `uvx` 一次性运行预编译 wheel：
 
 ```bash
-pip install omni-stream
+uvx omni-stream --help
 ```
 
-如使用 `uv`，请参阅[官方文档](https://docs.astral.sh/uv/)。
+如需长期安装，可使用 `pip install omni-stream`；如使用 `uv`，请参阅[官方文档](https://docs.astral.sh/uv/)。
 
 预编译二进制也可从 [GitHub Releases](https://github.com/maoXyzt/omni-stream/releases/latest) 下载。
 
