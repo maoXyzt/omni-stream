@@ -35,28 +35,15 @@ HTTP API (the bundled SPA is built on top of these — `curl` or your own client
 
 ## 1. Install
 
-**Recommended**: install the prebuilt binary with [cargo-binstall](https://github.com/cargo-bins/cargo-binstall):
+| Method | Use | Command |
+| --- | --- | --- |
+| [cargo-binstall](https://github.com/cargo-bins/cargo-binstall) | Prebuilt binary (recommended) | `cargo binstall omni-stream` |
+| Cargo | Build from source (Rust 1.91+) | `cargo install omni-stream` |
+| uvx | One-off prebuilt run, no Rust toolchain | `uvx omni-stream --help` |
+| pip | Persistent Python installation | `pip install omni-stream` |
+| GitHub Releases | Manual binary download | [Latest releases](https://github.com/maoXyzt/omni-stream/releases/latest) |
 
-```bash
-cargo binstall omni-stream
-```
-
-Or compile from source (requires Rust 1.91+):
-
-```bash
-cargo install omni-stream
-```
-
-For one-off use without a Rust toolchain, run the prebuilt wheel with `uvx`:
-
-```bash
-uvx omni-stream --help
-```
-
-For a persistent Python installation, use `pip install omni-stream`. For `uv`,
-see the [official documentation](https://docs.astral.sh/uv/).
-
-Prebuilt binaries are also available from [GitHub Releases](https://github.com/maoXyzt/omni-stream/releases/latest).
+For `uv`, see the [official documentation](https://docs.astral.sh/uv/).
 
 > For source builds, frontend/backend development, or release instructions, see
 > [docs/development_guide.md](docs/development_guide.md) and

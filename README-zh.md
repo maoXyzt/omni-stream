@@ -44,27 +44,15 @@ HTTP 接口（前端 SPA 都基于此调用，也可以直接用 curl / 自写�
 
 ## 1. 安装
 
-**推荐**：用 [cargo-binstall](https://github.com/cargo-bins/cargo-binstall) 安装预编译二进制：
+| 方式 | 用途 | 命令 |
+| --- | --- | --- |
+| [cargo-binstall](https://github.com/cargo-bins/cargo-binstall) | 预编译二进制（推荐） | `cargo binstall omni-stream` |
+| Cargo | 从源码编译（需要 Rust 1.91+） | `cargo install omni-stream` |
+| uvx | 一次性运行预编译 wheel，无需 Rust 工具链 | `uvx omni-stream --help` |
+| pip | 持久安装 Python wheel | `pip install omni-stream` |
+| GitHub Releases | 手动下载二进制 | [最新版本](https://github.com/maoXyzt/omni-stream/releases/latest) |
 
-```bash
-cargo binstall omni-stream
-```
-
-也可以从源码编译（需要 Rust 1.91+）：
-
-```bash
-cargo install omni-stream
-```
-
-无需 Rust 工具链时，推荐使用 `uvx` 一次性运行预编译 wheel：
-
-```bash
-uvx omni-stream --help
-```
-
-如需长期安装，可使用 `pip install omni-stream`；如使用 `uv`，请参阅[官方文档](https://docs.astral.sh/uv/)。
-
-预编译二进制也可从 [GitHub Releases](https://github.com/maoXyzt/omni-stream/releases/latest) 下载。
+如使用 `uv`，请参阅[官方文档](https://docs.astral.sh/uv/)。
 
 > 源码构建、前后端开发和发版说明见
 > [docs/development_guide.md](docs/development_guide.md) 与
