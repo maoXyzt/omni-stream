@@ -6,6 +6,11 @@ import {
   visualizeInvisibleChars,
 } from '@/lib/path'
 import { cn } from '@/lib/utils'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 
 interface Props {
   value: string
@@ -36,14 +41,18 @@ export function InvisiblePathLabel({ value, showInvisible, className }: Props) {
       <span className="min-w-0 truncate" title={display}>
         {display}
       </span>
-      <span
-        role="img"
-        className="inline-flex shrink-0 text-amber-600 dark:text-amber-400"
-        title={description}
-        aria-label={description}
-      >
-        <TriangleAlert className="size-3.5" aria-hidden="true" />
-      </span>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span
+            role="img"
+            className="inline-flex shrink-0 text-amber-600 dark:text-amber-400"
+            aria-label={description}
+          >
+            <TriangleAlert className="size-3.5" aria-hidden="true" />
+          </span>
+        </TooltipTrigger>
+        <TooltipContent>{description}</TooltipContent>
+      </Tooltip>
     </span>
   )
 }

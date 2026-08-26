@@ -34,15 +34,22 @@ export function FileDetailsDialog({
   isDir,
   onClose,
 }: Props) {
-  const { data: meta, isPending, isError, refetch } = useFileStat(fileKey, storageName)
   const { data: storagesData } = useStorages()
   const storage = storagesData?.storages.find((s) => s.name === storageName)
+  // Folders are listing prefixes on object storage, not stat-able objects.
+  // Their location is still useful below; metadata is fetched for files only.
+  const statEnabled = !isDir
+  const { data: meta, isPending, isError, refetch } = useFileStat(
+    fileKey,
+    storageName,
+    statEnabled,
+  )
   const absPath = storage ? absolutePathOf(storage, fileKey) : null
   const hasInvisibleChars = findInvisibleChars(fileKey).length > 0
 
   return (
     <Dialog open onOpenChange={(o) => { if (!o) onClose() }}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{isDir ? 'Folder details' : 'File details'}</DialogTitle>
           <DialogDescription className="break-all font-mono text-xs">
@@ -60,11 +67,11 @@ export function FileDetailsDialog({
           )}
         </DialogHeader>
 
-        {isPending ? (
+        {statEnabled && isPending ? (
           <div className="flex items-center justify-center py-8">
             <Loader2 className="size-5 animate-spin text-muted-foreground" />
           </div>
-        ) : isError ? (
+        ) : statEnabled && isError ? (
           <div className="flex flex-col items-center gap-3 py-6">
             <p className="text-sm text-destructive">Failed to load file metadata.</p>
             <Button variant="outline" size="sm" onClick={() => void refetch()}>
