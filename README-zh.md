@@ -25,21 +25,6 @@
 > 写操作（`/api/convert` 转 Parquet）还需要 **`s3:PutObject`** 权限。
 > 本地文件系统后端无此要求，但只能访问 `local.root_path` 配置的根目录。
 
-HTTP 接口（前端 SPA 都基于此调用，也可以直接用 curl / 自写客户端）：
-
-- `GET /api/server` / `GET /api/storages` —— 服务器信息（版本、auth_enabled、sql_enabled、transcode_enabled、public_read）与存储列表
-- `GET /api/list?prefix=&page_token=&skip_pages=` —— 浏览目录；可选 `skip_pages` 让后端服务端 walk N 页，响应会带回中间页的 token 数组，前端一次往返就能跳到第 N 页
-- `GET /api/stat/{*key}` —— 取文件元信息
-- `GET /api/proxy/{*key}` —— 流式拉取，全程透传 `Range`，自动 200 / 206
-- `GET /api/transcode/{*key}` —— 用户主动触发的 H.264/AAC 实时兼容流（需显式开启 `[transcoding] enabled = true`，不支持拖动定位）
-- `GET /api/thumb/{*key}` —— 按需生成 WebP 缩略图（需 `[thumbnails] enabled = true`）
-- `POST /api/query` —— DuckDB **只读** SQL（SELECT / DESCRIBE / EXPLAIN 等；COPY 及写语句被拒；需 `--features duckdb` 构建 + `auth.enabled = true`）
-- `POST /api/convert` —— JSONL / NDJSON / TSV / CSV → Parquet 转换（写操作，auth 开启时始终需 token）
-- `GET /raw/{storage}` / `GET /raw/{storage}/` / `GET /raw/{storage}/{*path}` —— 可导航文件挂载：inline 提供文件（HTML 直接在浏览器渲染），根路径或加 `?ls` 返回 JSON 目录列表，支持 copyparty 风格自包含 dashboard
-- 嵌入式 SPA fallback —— 任何非 `/api/*`、非 `/raw/*` 路径回落到 `index.html`，前端路由自洽
-
-> 写/SQL 功能的前置条件与完整用法见 [docs/edit_features_guide.md](docs/edit_features_guide.md)。
-
 ---
 
 ## 1. 安装
