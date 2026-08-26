@@ -1,6 +1,35 @@
 import { describe, expect, it } from 'vitest'
 
-import { basenameOf, encodeKey, extensionOf } from '@/lib/path'
+import {
+  basenameOf,
+  codePointLabel,
+  describeInvisibleChars,
+  encodeKey,
+  extensionOf,
+  findInvisibleChars,
+  visualizeInvisibleChars,
+} from '@/lib/path'
+
+describe('invisible path characters', () => {
+  it('detects zero-width and directional control characters', () => {
+    const value = 'info\u200b/\u202e.txt'
+    expect(findInvisibleChars(value).map((char) => codePointLabel(char.codePoint))).toEqual([
+      'U+200B',
+      'U+202E',
+    ])
+    expect(describeInvisibleChars(value)).toContain('U+200B ZERO WIDTH SPACE')
+  })
+
+  it('visualizes suspicious characters without changing the raw key', () => {
+    const value = 'info\u200b/'
+    expect(visualizeInvisibleChars(value)).toBe('info⟦U+200B⟧/')
+    expect(value).toBe('info\u200b/')
+  })
+
+  it('does not flag ordinary Unicode names', () => {
+    expect(findInvisibleChars('数据/报告.txt')).toEqual([])
+  })
+})
 
 describe('basenameOf', () => {
   it('returns the final segment of a file key', () => {

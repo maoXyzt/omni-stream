@@ -32,6 +32,8 @@ import {
   ChevronsUpDown,
   Download,
   ExternalLink,
+  Eye,
+  EyeOff,
   FilePlus,
   FolderPlus,
   KeyRound,
@@ -82,6 +84,7 @@ import {
 import { useSidebarCollapsed } from '@/hooks/use-sidebar-collapsed'
 import { useSortDir, useSortField } from '@/hooks/use-sort-dir'
 import { useGridFit } from '@/hooks/use-grid-fit'
+import { useLocalStorage } from '@/hooks/use-local-storage'
 import { useViewMode, type ViewMode } from '@/hooks/use-view-mode'
 import { cn } from '@/lib/utils'
 import { formatBytes, formatTime } from '@/lib/format'
@@ -145,12 +148,17 @@ import { useRecents } from '@/hooks/use-recents'
 import { useSelection } from '@/hooks/use-selection'
 import { useCommandItems } from '@/hooks/use-command-items'
 import { CommandPalette } from '@/components/CommandPalette'
+import { InvisiblePathLabel } from '@/components/InvisiblePathLabel'
 import type { FileEntry, StorageEntryRef } from '@/types/storage'
 
 const PREVIEW_PARAM = 'preview'
 const PAGE_PARAM = 'page'
 const VIEW_PARAM = 'view'
 const REPO_URL = 'https://github.com/maoXyzt/omni-stream'
+
+function validateBooleanPreference(value: unknown): boolean | null {
+  return typeof value === 'boolean' ? value : null
+}
 
 // Lazy-loaded so `marked` + `dompurify` stay out of the main bundle.
 const ReadmePanel = lazy(() => import('./preview/ReadmePanel'))
@@ -224,6 +232,13 @@ export function FileList() {
     return first || null
   }, [multiBucket, prefix])
   const [storedViewMode, setStoredViewMode] = useViewMode()
+  const invisiblePathPreference = useLocalStorage<boolean>({
+    key: 'omni-stream:show-invisible-path-chars',
+    version: 1,
+    defaultValue: false,
+    validate: validateBooleanPreference,
+  })
+  const showInvisiblePathChars = invisiblePathPreference.value
   const urlViewParam = searchParams.get(VIEW_PARAM)
   // Ref keeps the latest urlViewParam without closing over it in callbacks,
   // so goToPath / goToPathOrFile / switchStorage don't rebuild on view toggle.
@@ -1412,6 +1427,7 @@ export function FileList() {
                 prefix={prefix}
                 storageName={storageName}
                 multiBucket={multiBucket}
+                showInvisible={showInvisiblePathChars}
                 onNavigate={goToPath}
                 onNavigateEntry={goToSidebarEntry}
               />
@@ -1461,7 +1477,11 @@ export function FileList() {
                   </TooltipContent>
                 </Tooltip>
               )}
-              <PathBreadcrumb prefix={prefix} onNavigate={goToPath} />
+              <PathBreadcrumb
+                prefix={prefix}
+                showInvisible={showInvisiblePathChars}
+                onNavigate={goToPath}
+              />
               <PathNavigator prefix={prefix} activeStorage={activeStorage} onNavigate={goToPathOrFile} />
             </div>
             <div className="flex w-full shrink-0 flex-wrap items-center justify-between gap-2 @5xl/file-list:w-auto @5xl/file-list:justify-start">
@@ -1577,6 +1597,38 @@ export function FileList() {
                   </Tooltip>
                 </div>
               )}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    aria-label={
+                      showInvisiblePathChars
+                        ? 'Hide invisible path characters'
+                        : 'Show invisible path characters'
+                    }
+                    aria-pressed={showInvisiblePathChars}
+                    onClick={() =>
+                      invisiblePathPreference.set(!showInvisiblePathChars)
+                    }
+                    className="gap-1"
+                  >
+                    {showInvisiblePathChars ? (
+                      <EyeOff className="size-3.5" />
+                    ) : (
+                      <Eye className="size-3.5" />
+                    )}
+                    <span className="hidden sm:inline text-xs">
+                      Invisible chars
+                    </span>
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {showInvisiblePathChars
+                    ? 'Hide invisible path characters'
+                    : 'Show invisible path characters'}
+                </TooltipContent>
+              </Tooltip>
               <ViewToggle mode={viewMode} onChange={setViewMode} />
               {viewMode === 'grid' && (
                 <div className="hidden @5xl/file-list:block">
@@ -1841,6 +1893,7 @@ export function FileList() {
                       prefix={prefix}
                       storageName={storageName}
                       inBucketRoot={inBucketRoot}
+                      showInvisible={showInvisiblePathChars}
                       selected={previewState?.key === entry.key}
                       onSelect={handleEntry}
                       selectionChecked={selection.isSelected(entry.key)}
@@ -1879,7 +1932,10 @@ export function FileList() {
                   className="min-w-0 flex-1 truncate text-sm text-muted-foreground"
                   title={previewState!.key}
                 >
-                  {previewState!.key}
+                  <InvisiblePathLabel
+                    value={previewState!.key}
+                    showInvisible={showInvisiblePathChars}
+                  />
                 </span>
                 <div className="flex shrink-0 items-center gap-1">
                   <Tooltip>
@@ -1986,6 +2042,7 @@ export function FileList() {
                   prefix={prefix}
                   storageName={storageName}
                   inBucketRoot={inBucketRoot}
+                  showInvisible={showInvisiblePathChars}
                   fit={gridFit}
                   onSelect={handleEntry}
                   selectedKeys={selection.selectedKeys}
@@ -2021,6 +2078,7 @@ export function FileList() {
                         prefix={prefix}
                         storageName={storageName}
                         inBucketRoot={inBucketRoot}
+                        showInvisible={showInvisiblePathChars}
                         onSelect={handleEntry}
                         selectionChecked={selection.isSelected(entry.key)}
                         onSelectionToggle={handleSelectionToggle}
@@ -2145,6 +2203,7 @@ interface FileRowProps {
   entry: FileEntry
   prefix: string
   storageName: string
+  showInvisible: boolean
   /// True when the rendered listing is the root of an S3 multi-bucket
   /// storage — in that case every directory entry IS a bucket and gets
   /// the bucket visual instead of the folder one.
@@ -2159,6 +2218,7 @@ function FileRow({
   entry,
   prefix,
   storageName,
+  showInvisible,
   inBucketRoot,
   onSelect,
   selectionChecked,
@@ -2222,9 +2282,7 @@ function FileRow({
             isSymlink={entry.is_symlink}
             className="size-4 shrink-0"
           />
-          <span className="truncate" title={name}>
-            {name}
-          </span>
+          <InvisiblePathLabel value={name} showInvisible={showInvisible} />
         </TableCell>
         <TableCell className="hidden text-muted-foreground lg:table-cell">
           {typeLabel}
@@ -2300,6 +2358,7 @@ interface GalleryRowProps {
   entry: FileEntry
   prefix: string
   storageName: string
+  showInvisible: boolean
   /// See FileRowProps.inBucketRoot — same semantics.
   inBucketRoot: boolean
   selected: boolean
@@ -2312,6 +2371,7 @@ function GalleryRow({
   entry,
   prefix,
   storageName,
+  showInvisible,
   inBucketRoot,
   selected,
   onSelect,
@@ -2407,7 +2467,7 @@ function GalleryRow({
             isSymlink={entry.is_symlink}
             className="size-4 shrink-0"
           />
-          <span className="truncate">{name}</span>
+          <InvisiblePathLabel value={name} showInvisible={showInvisible} />
         </button>
       </div>
     </EntryContextMenu>

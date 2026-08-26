@@ -43,6 +43,15 @@ describe('cleanPathInput', () => {
       's3://bucket/path/file.txt',
     )
   })
+
+  it('preserves an invisible character as part of the path', () => {
+    const value = 's3://bucket/info\u200b/'
+    expect(cleanPathInput(value)).toBe(value)
+    expect(resolveStorageUri(value, singleBucket('bucket'))).toEqual({
+      ok: true,
+      path: 'info\u200b/',
+    })
+  })
 })
 
 describe('canSubmitResolvedPath', () => {

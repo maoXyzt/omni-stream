@@ -3,6 +3,7 @@ import { ImageOff, Link2 } from 'lucide-react'
 
 import { proxyUrl, thumbUrl } from '@/api/storage'
 import { EntryContextMenu } from '@/components/EntryContextMenu'
+import { InvisiblePathLabel } from '@/components/InvisiblePathLabel'
 import { Checkbox } from '@/components/ui/checkbox'
 import {
   colorForKey,
@@ -22,6 +23,7 @@ interface FileTileProps {
   entry: FileEntry
   prefix: string
   storageName: string
+  showInvisible: boolean
   /// True when the current listing is the root of an S3 multi-bucket
   /// storage. Directory tiles flip to the bucket visual at that depth.
   inBucketRoot: boolean
@@ -43,6 +45,7 @@ export const FileTile = memo(function FileTile({
   entry,
   prefix,
   storageName,
+  showInvisible,
   inBucketRoot,
   fit,
   onSelect,
@@ -131,7 +134,7 @@ export const FileTile = memo(function FileTile({
             )}
           </div>
           <div className="truncate px-1 text-xs text-muted-foreground transition-colors group-hover:text-foreground group-has-[:focus-visible]:text-foreground">
-            {name}
+            <InvisiblePathLabel value={name} showInvisible={showInvisible} />
           </div>
         </button>
         {/* Selection checkbox — top-left overlay, sibling to the tile button so
