@@ -46,10 +46,10 @@ HTTP 接口（前端 SPA 都基于此调用，也可以直接用 curl / 自写�
 
 | 方式 | 用途 | 命令 |
 | --- | --- | --- |
-| [cargo-binstall](https://github.com/cargo-bins/cargo-binstall) | 预编译二进制（推荐） | `cargo binstall omni-stream` |
-| Cargo | 从源码编译（需要 Rust 1.91+） | `cargo install omni-stream` |
-| uvx | 一次性运行预编译 wheel，无需 Rust 工具链 | `uvx omni-stream --help` |
+| uvx（推荐） | 一次性运行预编译 wheel，无需 Rust 工具链 | `uvx omni-stream --help` |
 | pip | 持久安装 Python wheel | `pip install omni-stream` |
+| [cargo-binstall](https://github.com/cargo-bins/cargo-binstall) | 预编译二进制 | `cargo binstall omni-stream` |
+| Cargo | 从源码编译（需要 Rust 1.91+） | `cargo install omni-stream` |
 | GitHub Releases | 手动下载二进制 | [最新版本](https://github.com/maoXyzt/omni-stream/releases/latest) |
 
 如使用 `uv`，请参阅[官方文档](https://docs.astral.sh/uv/)。

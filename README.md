@@ -22,10 +22,10 @@
 
 | Method | Use | Command |
 | --- | --- | --- |
-| [cargo-binstall](https://github.com/cargo-bins/cargo-binstall) | Prebuilt binary (recommended) | `cargo binstall omni-stream` |
-| Cargo | Build from source (Rust 1.91+) | `cargo install omni-stream` |
-| uvx | One-off prebuilt run, no Rust toolchain | `uvx omni-stream --help` |
+| uvx (recommended) | One-off prebuilt run, no Rust toolchain | `uvx omni-stream --help` |
 | pip | Persistent Python installation | `pip install omni-stream` |
+| [cargo-binstall](https://github.com/cargo-bins/cargo-binstall) | Prebuilt binary | `cargo binstall omni-stream` |
+| Cargo | Build from source (Rust 1.91+) | `cargo install omni-stream` |
 | GitHub Releases | Manual binary download | [Latest releases](https://github.com/maoXyzt/omni-stream/releases/latest) |
 
 For `uv`, see the [official documentation](https://docs.astral.sh/uv/).
