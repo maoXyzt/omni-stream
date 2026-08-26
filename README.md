@@ -50,9 +50,10 @@ cargo install omni-stream
 Python users can install the prebuilt wheel (no Rust toolchain required):
 
 ```bash
-uv tool install omni-stream
-# or: pip install omni-stream
+pip install omni-stream
 ```
+
+For `uv`, see the [official documentation](https://docs.astral.sh/uv/).
 
 Prebuilt binaries are also available from [GitHub Releases](https://github.com/maoXyzt/omni-stream/releases/latest).
 
