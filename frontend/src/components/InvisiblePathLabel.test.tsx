@@ -14,6 +14,7 @@ describe('InvisiblePathLabel', () => {
     expect(markup).toContain(
       'aria-label="Contains invisible characters: U+200B ZERO WIDTH SPACE"',
     )
+    expect(markup).toContain('tabindex="0"')
     expect(markup.match(/aria-label=/g)).toHaveLength(1)
   })
 

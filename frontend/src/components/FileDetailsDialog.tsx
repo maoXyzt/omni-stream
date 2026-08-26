@@ -5,13 +5,18 @@
 /// and DataTable). The `absolutePathOf` helper comes from `lib/path` so it's
 /// shared with other callers.
 
-import { Check, Copy, Loader2, RotateCw } from 'lucide-react'
+import { AlertCircle, Check, Copy, Loader2, RotateCw } from 'lucide-react'
 import { useState } from 'react'
 
 import { useFileStat, useStorages } from '@/hooks/use-storage'
 import { absolutePathOf, findInvisibleChars } from '@/lib/path'
 import { formatBytes, formatTime } from '@/lib/format'
 import { InvisiblePathLabel } from '@/components/InvisiblePathLabel'
+import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
+} from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -20,6 +25,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { Skeleton } from '@/components/ui/skeleton'
 
 interface Props {
   fileKey: string
@@ -39,7 +45,7 @@ export function FileDetailsDialog({
   // Folders are listing prefixes on object storage, not stat-able objects.
   // Their location is still useful below; metadata is fetched for files only.
   const statEnabled = !isDir
-  const { data: meta, isPending, isError, refetch } = useFileStat(
+  const { data: meta, isPending, isError, isFetching, refetch } = useFileStat(
     fileKey,
     storageName,
     statEnabled,
@@ -68,17 +74,36 @@ export function FileDetailsDialog({
         </DialogHeader>
 
         {statEnabled && isPending ? (
-          <div className="flex items-center justify-center py-8">
-            <Loader2 className="size-5 animate-spin text-muted-foreground" />
+          <div className="space-y-2 py-1" aria-label="Loading file metadata">
+            {[0, 1, 2].map((row) => (
+              <div key={row} className="flex items-center gap-2 px-1 py-1.5">
+                <Skeleton className="h-3 w-20 shrink-0" />
+                <Skeleton className="h-3 flex-1" />
+              </div>
+            ))}
           </div>
         ) : statEnabled && isError ? (
-          <div className="flex flex-col items-center gap-3 py-6">
-            <p className="text-sm text-destructive">Failed to load file metadata.</p>
-            <Button variant="outline" size="sm" onClick={() => void refetch()}>
-              <RotateCw className="size-3.5" />
-              Retry
-            </Button>
-          </div>
+          <Alert variant="destructive">
+            <AlertCircle className="size-4" />
+            <AlertTitle>Failed to load file metadata</AlertTitle>
+            <AlertDescription className="flex flex-col gap-3">
+              <span>The file metadata request failed.</span>
+              <Button
+                variant="outline"
+                size="sm"
+                className="self-start"
+                disabled={isFetching}
+                onClick={() => void refetch()}
+              >
+                {isFetching ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <RotateCw className="size-4" />
+                )}
+                Retry
+              </Button>
+            </AlertDescription>
+          </Alert>
         ) : (
           <div className="space-y-0.5">
             {absPath && (
@@ -96,7 +121,7 @@ export function FileDetailsDialog({
                 )}
               </>
             )}
-            {meta?.last_modified && (
+            {statEnabled && meta?.last_modified && (
               <DetailRow
                 label="Modified"
                 value={formatTime(meta.last_modified)}
