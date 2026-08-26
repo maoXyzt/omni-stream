@@ -16,21 +16,6 @@
 
 > Previewing files on S3 / S3-compatible storage requires the configured access key to hold both **`s3:GetObject`** (preview / download / HEAD) and **`s3:ListBucket`** (directory browsing / thumbnail listing). Missing either yields a 403 on the corresponding action. If you omit `s3.bucket` to use multi-bucket mode (see below), the credentials must additionally hold **`s3:ListAllMyBuckets`** so the root listing can enumerate every visible bucket. Write operations (`/api/convert` converting to Parquet) additionally require **`s3:PutObject`**. The local filesystem backend has no such requirement, but is restricted to the directory configured as `local.root_path`.
 
-HTTP API (the bundled SPA is built on top of these — `curl` or your own client works just as well):
-
-- `GET /api/server` / `GET /api/storages` — server info (version, auth_enabled, sql_enabled, transcode_enabled, public_read) and storage list
-- `GET /api/list?prefix=&page_token=&skip_pages=` — browse a directory; optional `skip_pages` makes the server walk N pages internally and return the target page plus every intermediate token, so jumping to page N takes one round-trip instead of N
-- `GET /api/stat/{*key}` — fetch file metadata
-- `GET /api/proxy/{*key}` — stream the file, transparently forwarding `Range`, returning 200 / 206 as appropriate
-- `GET /api/transcode/{*key}` — user-triggered live H.264/AAC compatibility stream (when `[transcoding] enabled = true`; no seeking)
-- `GET /api/thumb/{*key}` — on-demand WebP thumbnail (requires `[thumbnails] enabled = true`)
-- `POST /api/query` — DuckDB **read-only** SQL (SELECT / DESCRIBE / EXPLAIN etc.; COPY and mutating statements are rejected; requires `--features duckdb` build + `auth.enabled = true`)
-- `POST /api/convert` — JSONL / NDJSON / TSV / CSV → Parquet conversion (write operation — always requires a token when auth is on)
-- `GET /raw/{storage}` / `GET /raw/{storage}/` / `GET /raw/{storage}/{*path}` — navigable file mount: serves files inline (HTML renders live in the browser); the root and trailing-slash forms list the storage root as JSON; append `?ls` to any path for a directory listing; supports copyparty-style self-contained dashboards
-- Embedded SPA fallback — anything not under `/api/*` or `/raw/*` falls back to `index.html`, so client-side routing just works
-
-> For prerequisites and full usage of SQL queries and file conversion, see [docs/edit_features_guide.md](docs/edit_features_guide.md).
-
 ---
 
 ## 1. Install
@@ -305,7 +290,24 @@ Tarballs from GitHub Releases don't add themselves to `$PATH`, so either run `./
 
 After startup, opening `http://<host>:<port>/` in a browser lands you on the embedded SPA. `Ctrl-C` / SIGTERM triggers a graceful shutdown (`axum::serve` + `with_graceful_shutdown`).
 
-## 4. HTTP Error Semantics
+## 4. HTTP API
+
+The bundled SPA uses these endpoints; they are also available to `curl` and other clients:
+
+- `GET /api/server` / `GET /api/storages` — server info and storage list
+- `GET /api/list?prefix=&page_token=&skip_pages=` — browse a directory
+- `GET /api/stat/{*key}` — fetch file metadata
+- `GET /api/proxy/{*key}` — stream a file with transparent `Range` support
+- `GET /api/transcode/{*key}` — optional user-triggered H.264/AAC compatibility stream
+- `GET /api/thumb/{*key}` — on-demand WebP thumbnail
+- `POST /api/query` — DuckDB read-only SQL (requires the `duckdb` feature)
+- `POST /api/convert` — JSONL / NDJSON / TSV / CSV → Parquet conversion
+- `GET /raw/{storage}` / `GET /raw/{storage}/{*path}` — navigable file mount
+- Embedded SPA fallback — non-API paths fall back to `index.html`
+
+For endpoint prerequisites and full SQL / conversion usage, see [docs/edit_features_guide.md](docs/edit_features_guide.md).
+
+## 5. HTTP Error Semantics
 
 | Trigger | HTTP | AppError |
 | --- | --- | --- |

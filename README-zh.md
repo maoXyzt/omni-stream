@@ -300,7 +300,24 @@ GitHub Releases 下载的 tarball 解压后没自动入 `$PATH`，要么 `./omni
 启动后浏览器打开 `http://<host>:<port>/` 即是嵌入的前端 SPA。`Ctrl-C` /
 SIGTERM 触发优雅关停（`axum::serve` + `with_graceful_shutdown`）。
 
-## 4. HTTP 错误码语义
+## 4. HTTP API
+
+内嵌 SPA 使用以下接口，也可以直接用 `curl` 或其他客户端调用：
+
+- `GET /api/server` / `GET /api/storages` —— 服务器信息与存储列表
+- `GET /api/list?prefix=&page_token=&skip_pages=` —— 浏览目录
+- `GET /api/stat/{*key}` —— 获取文件元信息
+- `GET /api/proxy/{*key}` —— 支持 `Range` 的文件流式读取
+- `GET /api/transcode/{*key}` —— 可选的用户主动触发 H.264/AAC 兼容流
+- `GET /api/thumb/{*key}` —— 按需生成 WebP 缩略图
+- `POST /api/query` —— DuckDB 只读 SQL（需要 `duckdb` feature）
+- `POST /api/convert` —— JSONL / NDJSON / TSV / CSV → Parquet 转换
+- `GET /raw/{storage}` / `GET /raw/{storage}/{*path}` —— 可导航文件挂载
+- 嵌入式 SPA fallback —— 非 API 路径回落到 `index.html`
+
+接口前置条件与 SQL / 转换完整用法见 [docs/edit_features_guide.md](docs/edit_features_guide.md)。
+
+## 5. HTTP 错误码语义
 
 | 触发 | HTTP | AppError |
 | --- | --- | --- |
