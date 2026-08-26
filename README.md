@@ -35,43 +35,31 @@ HTTP API (the bundled SPA is built on top of these — `curl` or your own client
 
 ## 1. Install
 
-**Recommended**: install via cargo (lands in `~/.cargo/bin/`):
-
-```bash
-cargo install omni-stream    # requires Rust 1.91+
-```
-
-To install the prebuilt GitHub Release binary with [cargo-binstall](https://github.com/cargo-bins/cargo-binstall):
+**Recommended**: install the prebuilt binary with [cargo-binstall](https://github.com/cargo-bins/cargo-binstall):
 
 ```bash
 cargo binstall omni-stream
 ```
 
-**Python users** (no Rust toolchain required — install from PyPI):
+Or compile from source (requires Rust 1.91+):
 
 ```bash
-uv tool install omni-stream  # recommended: global CLI in an isolated venv
-# or run one-off without installing
-uvx omni-stream --help
-# without uv, install into the active venv with plain pip
-pip install omni-stream
+cargo install omni-stream
 ```
 
-The PyPI wheels bundle the prebuilt binary directly, so once installed
-`omni-stream` runs as a normal CLI — Python is not invoked. Same three
-platforms as the GitHub Releases tarballs: `x86_64-unknown-linux-gnu`
-(manylinux), `x86_64-unknown-linux-musl` (musllinux), `aarch64-apple-darwin`.
+Python users can install the prebuilt wheel (no Rust toolchain required):
 
-> Don't have uv yet? `curl -LsSf https://astral.sh/uv/install.sh | sh` (full
-> docs at <https://docs.astral.sh/uv/>). You can also use
-> `pipx install omni-stream` for an isolated global install — same wheel.
+```bash
+uv tool install omni-stream
+# or: pip install omni-stream
+```
 
-Or download a pre-built binary from GitHub Releases: <https://github.com/maoXyzt/omni-stream/releases/latest>.
-Three targets are published — `x86_64-unknown-linux-gnu` / `x86_64-unknown-linux-musl` /
-`aarch64-apple-darwin`. (Windows users can build from source). For pre-built binaries,
-extract, mark `omni-stream` executable, and put it on `$PATH` if you like.
+Prebuilt binaries are also available from [GitHub Releases](https://github.com/maoXyzt/omni-stream/releases/latest).
 
-> Building from source, hacking on the frontend / backend, or contributing? See [docs/development_guide.md](docs/development_guide.md). The release process lives in [docs/how_to_release.md](docs/how_to_release.md).
+> For source builds, frontend/backend development, or release instructions, see
+> [docs/development_guide.md](docs/development_guide.md) and
+> [docs/how_to_release.md](docs/how_to_release.md).
+
 
 ## 2. Configuration
 

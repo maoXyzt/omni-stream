@@ -44,44 +44,31 @@ HTTP 接口（前端 SPA 都基于此调用，也可以直接用 curl / 自写�
 
 ## 1. 安装
 
-**推荐**：用 cargo 装到 `~/.cargo/bin/`：
-
-```bash
-cargo install omni-stream    # 需 Rust 1.91+
-```
-
-使用 [cargo-binstall](https://github.com/cargo-bins/cargo-binstall) 可直接安装 GitHub Release 中的预编译二进制：
+**推荐**：用 [cargo-binstall](https://github.com/cargo-bins/cargo-binstall) 安装预编译二进制：
 
 ```bash
 cargo binstall omni-stream
 ```
 
-**Python 用户**（无需 Rust 工具链，从 PyPI 安装）：
+也可以从源码编译（需要 Rust 1.91+）：
 
 ```bash
-uv tool install omni-stream  # 推荐：装到独立隔离环境里的全局 CLI
-# 或者一次性运行不安装
-uvx omni-stream --help
-# 不用 uv 的话，直接 pip 装到当前 venv 里
-pip install omni-stream
+cargo install omni-stream
 ```
 
-PyPI 上的 wheel 直接打包了预编译二进制，装完即可像普通命令行工具
-那样直接运行 `omni-stream`，不会启动 Python 解释器。同样覆盖 3 个平台：
-`x86_64-unknown-linux-gnu`（manylinux）、`x86_64-unknown-linux-musl`
-（musllinux）、`aarch64-apple-darwin`。
+Python 用户可以安装预编译 wheel（无需 Rust 工具链）：
 
-> 没装过 uv：`curl -LsSf https://astral.sh/uv/install.sh | sh`（详见
-> <https://docs.astral.sh/uv/>）。也可以用 `pipx install omni-stream` 把 CLI
-> 装到隔离环境，wheel 是同一份。
+```bash
+uv tool install omni-stream
+# 或：pip install omni-stream
+```
 
-或从 GitHub Releases 下载已编译二进制：<https://github.com/maoXyzt/omni-stream/releases/latest>。
-覆盖 3 个平台 —— `x86_64-unknown-linux-gnu` / `x86_64-unknown-linux-musl` /
-`aarch64-apple-darwin` (Windows 用户可自行编译)。对于预编译二进制，解压后给 `omni-stream` 加可执行权限即可，自行决定
-要不要把它放进 `$PATH`。
+预编译二进制也可从 [GitHub Releases](https://github.com/maoXyzt/omni-stream/releases/latest) 下载。
 
-> 想从源码构建、修改前后端、参与开发，见 [docs/development_guide.md](docs/development_guide.md)；
-> 发版流程见 [docs/how_to_release.md](docs/how_to_release.md)。
+> 源码构建、前后端开发和发版说明见
+> [docs/development_guide.md](docs/development_guide.md) 与
+> [docs/how_to_release.md](docs/how_to_release.md)。
+
 
 ## 2. 配置
 
