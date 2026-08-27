@@ -45,8 +45,7 @@ export function InvisiblePathLabel({ value, showInvisible, className }: Props) {
         <TooltipTrigger asChild>
           <span
             role="img"
-            tabIndex={0}
-            className="inline-flex shrink-0 rounded-sm text-amber-600 outline-none focus-visible:ring-1 focus-visible:ring-ring dark:text-amber-400"
+            className="inline-flex shrink-0 text-amber-600 dark:text-amber-400"
             aria-label={description}
           >
             <TriangleAlert className="size-3.5" aria-hidden="true" />

@@ -42,9 +42,9 @@ export function FileDetailsDialog({
 }: Props) {
   const { data: storagesData } = useStorages()
   const storage = storagesData?.storages.find((s) => s.name === storageName)
-  // Folders are listing prefixes on object storage, not stat-able objects.
-  // Their location is still useful below; metadata is fetched for files only.
-  const statEnabled = !isDir
+  // S3 folders are virtual prefixes, not stat-able objects. Wait for the
+  // descriptor before deciding so LocalFS directories keep their metadata.
+  const statEnabled = !isDir || (storage !== undefined && storage.type !== 's3')
   const { data: meta, isPending, isError, isFetching, refetch } = useFileStat(
     fileKey,
     storageName,
