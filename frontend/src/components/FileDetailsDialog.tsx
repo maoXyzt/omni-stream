@@ -74,7 +74,11 @@ export function FileDetailsDialog({
         </DialogHeader>
 
         {statEnabled && isPending ? (
-          <div className="space-y-2 py-1" aria-label="Loading file metadata">
+          <div
+            role="status"
+            aria-label="Loading file metadata"
+            className="space-y-2 py-1"
+          >
             {[0, 1, 2].map((row) => (
               <div key={row} className="flex items-center gap-2 px-1 py-1.5">
                 <Skeleton className="h-3 w-20 shrink-0" />
