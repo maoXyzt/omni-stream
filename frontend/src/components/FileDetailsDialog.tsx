@@ -40,7 +40,12 @@ export function FileDetailsDialog({
   isDir,
   onClose,
 }: Props) {
-  const { data: storagesData } = useStorages()
+  const {
+    data: storagesData,
+    isPending: isStoragesPending,
+    isFetching: isStoragesFetching,
+    refetch: refetchStorages,
+  } = useStorages()
   const storage = storagesData?.storages.find((s) => s.name === storageName)
   // S3 folders are virtual prefixes, not stat-able objects. Wait for the
   // descriptor before deciding so LocalFS directories keep their metadata.
@@ -52,6 +57,9 @@ export function FileDetailsDialog({
   )
   const absPath = storage ? absolutePathOf(storage, fileKey) : null
   const hasInvisibleChars = findInvisibleChars(fileKey).length > 0
+  const entity = isDir ? 'folder' : 'file'
+  const storagePending = isDir && storage === undefined && isStoragesPending
+  const storageUnavailable = isDir && storage === undefined && !isStoragesPending
 
   return (
     <Dialog open onOpenChange={(o) => { if (!o) onClose() }}>
@@ -73,10 +81,10 @@ export function FileDetailsDialog({
           )}
         </DialogHeader>
 
-        {statEnabled && isPending ? (
+        {storagePending || (statEnabled && isPending) ? (
           <div
             role="status"
-            aria-label="Loading file metadata"
+            aria-label={`Loading ${entity} metadata`}
             className="space-y-2 py-1"
           >
             {[0, 1, 2].map((row) => (
@@ -86,12 +94,34 @@ export function FileDetailsDialog({
               </div>
             ))}
           </div>
-        ) : statEnabled && isError ? (
+        ) : storageUnavailable ? (
           <Alert variant="destructive">
             <AlertCircle className="size-4" />
-            <AlertTitle>Failed to load file metadata</AlertTitle>
+            <AlertTitle>Storage details unavailable</AlertTitle>
             <AlertDescription className="flex flex-col gap-3">
-              <span>The file metadata request failed.</span>
+              <span>Unable to determine how this folder stores metadata.</span>
+              <Button
+                variant="outline"
+                size="sm"
+                className="self-start"
+                disabled={isStoragesFetching}
+                onClick={() => void refetchStorages()}
+              >
+                {isStoragesFetching ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <RotateCw className="size-4" />
+                )}
+                Retry
+              </Button>
+            </AlertDescription>
+          </Alert>
+        ) : statEnabled && isError && !meta ? (
+          <Alert variant="destructive">
+            <AlertCircle className="size-4" />
+            <AlertTitle>Failed to load {entity} metadata</AlertTitle>
+            <AlertDescription className="flex flex-col gap-3">
+              <span>The {entity} metadata request failed.</span>
               <Button
                 variant="outline"
                 size="sm"
@@ -109,32 +139,66 @@ export function FileDetailsDialog({
             </AlertDescription>
           </Alert>
         ) : (
-          <div className="space-y-0.5">
-            {absPath && (
-              <DetailRow label="Location" value={absPath} copyable />
+          <div className="space-y-3">
+            {statEnabled && meta && isError && (
+              <Alert variant="destructive">
+                <AlertCircle className="size-4" />
+                <AlertTitle>Failed to refresh {entity} metadata</AlertTitle>
+                <AlertDescription className="flex flex-col gap-3">
+                  <span>Showing the last available metadata.</span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="self-start"
+                    disabled={isFetching}
+                    onClick={() => void refetch()}
+                  >
+                    {isFetching ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : (
+                      <RotateCw className="size-4" />
+                    )}
+                    Retry
+                  </Button>
+                </AlertDescription>
+              </Alert>
             )}
-            {!isDir && meta && (
-              <>
+            {statEnabled && meta && isFetching && (
+              <div
+                role="status"
+                className="flex items-center gap-2 text-xs text-muted-foreground"
+              >
+                <Loader2 className="size-4 animate-spin" />
+                Refreshing metadata
+              </div>
+            )}
+            <div className="space-y-0.5">
+              {absPath && (
+                <DetailRow label="Location" value={absPath} copyable />
+              )}
+              {!isDir && meta && (
+                <>
+                  <DetailRow
+                    label="Size"
+                    value={`${formatBytes(meta.size)} (${meta.size.toLocaleString()} bytes)`}
+                    copyValue={String(meta.size)}
+                  />
+                  {meta.content_type && (
+                    <DetailRow label="Type" value={meta.content_type} copyable />
+                  )}
+                </>
+              )}
+              {statEnabled && meta?.last_modified && (
                 <DetailRow
-                  label="Size"
-                  value={`${formatBytes(meta.size)} (${meta.size.toLocaleString()} bytes)`}
-                  copyValue={String(meta.size)}
+                  label="Modified"
+                  value={formatTime(meta.last_modified)}
+                  copyValue={meta.last_modified}
                 />
-                {meta.content_type && (
-                  <DetailRow label="Type" value={meta.content_type} copyable />
-                )}
-              </>
-            )}
-            {statEnabled && meta?.last_modified && (
-              <DetailRow
-                label="Modified"
-                value={formatTime(meta.last_modified)}
-                copyValue={meta.last_modified}
-              />
-            )}
-            {!isDir && meta?.etag && (
-              <DetailRow label="ETag" value={meta.etag} copyable />
-            )}
+              )}
+              {!isDir && meta?.etag && (
+                <DetailRow label="ETag" value={meta.etag} copyable />
+              )}
+            </div>
           </div>
         )}
       </DialogContent>
