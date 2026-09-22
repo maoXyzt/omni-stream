@@ -210,26 +210,25 @@ function WidgetBody({
   ctx: RenderContext
 }) {
   const show = node.show ?? 'default'
-  const widgetCtx = node.storage
-    ? {
-        ...ctx,
-        storage: node.storage,
-        storageDescriptor: ctx.storageDescriptors?.find(
-          (descriptor) => descriptor.name === node.storage,
-        ),
-      }
-    : ctx
-
-  // Once the roster has loaded, reject an explicit unknown storage before a
-  // widget can construct proxy/stat/fetch URLs for it. While the roster is
-  // still loading, preserve the existing behavior and let the descriptor
-  // arrive on the next render.
-  if (
-    node.storage &&
-    ctx.storageDescriptors &&
-    !ctx.storageDescriptors.some((descriptor) => descriptor.name === node.storage)
-  ) {
-    return <StorageError storage={node.storage} />
+  let widgetCtx = ctx
+  if (node.storage) {
+    if (ctx.storageRoster.status === 'loading') {
+      return <StorageRosterLoading />
+    }
+    if (ctx.storageRoster.status === 'error') {
+      return <StorageRosterError message={ctx.storageRoster.message} />
+    }
+    const descriptor = ctx.storageRoster.descriptors.find(
+      (candidate) => candidate.name === node.storage,
+    )
+    if (!descriptor) {
+      return <StorageError storage={node.storage} />
+    }
+    widgetCtx = {
+      ...ctx,
+      storage: node.storage,
+      storageDescriptor: descriptor,
+    }
   }
   switch (show) {
     case 'default':
@@ -271,6 +270,18 @@ function StorageError({ storage }: { storage: string }) {
   return (
     <div className="rounded-md border border-dashed border-destructive/40 bg-destructive/5 px-3 py-2 text-xs italic text-destructive">
       unknown storage: <span className="font-mono not-italic">{storage}</span>
+    </div>
+  )
+}
+
+function StorageRosterLoading() {
+  return <Skeleton className="h-16 w-full" />
+}
+
+function StorageRosterError({ message }: { message: string }) {
+  return (
+    <div className="rounded-md border border-dashed border-destructive/40 bg-destructive/5 px-3 py-2 text-xs italic text-destructive">
+      unable to validate storage: <span className="font-mono not-italic">{message}</span>
     </div>
   )
 }

@@ -53,15 +53,31 @@ export function RowsView({ fileKey, source, storage }: RowsViewProps) {
     () => storagesQuery.data?.storages.find((s) => s.name === storage),
     [storagesQuery.data, storage],
   )
+  const storageRoster = useMemo(() => {
+    if (storagesQuery.isPending) return { status: 'loading' as const }
+    if (storagesQuery.isError) {
+      return {
+        status: 'error' as const,
+        message:
+          storagesQuery.error instanceof Error
+            ? storagesQuery.error.message
+            : 'failed to load storage list',
+      }
+    }
+    return {
+      status: 'ready' as const,
+      descriptors: storagesQuery.data?.storages ?? [],
+    }
+  }, [storagesQuery.data, storagesQuery.error, storagesQuery.isError, storagesQuery.isPending])
 
   const renderCtx = useMemo(
     () => ({
       fileKey,
       storage,
       storageDescriptor,
-      storageDescriptors: storagesQuery.data?.storages,
+      storageRoster,
     }),
-    [fileKey, storage, storageDescriptor, storagesQuery.data?.storages],
+    [fileKey, storage, storageDescriptor, storageRoster],
   )
   const columns = source.columns
   const [dialogOpen, setDialogOpen] = useState(false)
