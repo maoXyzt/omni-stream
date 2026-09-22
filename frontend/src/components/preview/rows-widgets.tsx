@@ -41,6 +41,9 @@ export interface RenderContext {
   /// Optional — absent while the storage roster is still loading; s3:// srcs
   /// will surface a clear error rather than silently producing a broken key.
   storageDescriptor?: StorageDescriptor
+  /// All configured storages, used to validate per-widget storage overrides
+  /// and resolve the selected descriptor for s3:// sources.
+  storageDescriptors?: readonly StorageDescriptor[]
 }
 
 // -----------------------------------------------------------------------

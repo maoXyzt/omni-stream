@@ -55,8 +55,13 @@ export function RowsView({ fileKey, source, storage }: RowsViewProps) {
   )
 
   const renderCtx = useMemo(
-    () => ({ fileKey, storage, storageDescriptor }),
-    [fileKey, storage, storageDescriptor],
+    () => ({
+      fileKey,
+      storage,
+      storageDescriptor,
+      storageDescriptors: storagesQuery.data?.storages,
+    }),
+    [fileKey, storage, storageDescriptor, storagesQuery.data?.storages],
   )
   const columns = source.columns
   const [dialogOpen, setDialogOpen] = useState(false)

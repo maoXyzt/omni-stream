@@ -45,6 +45,9 @@ export interface AtomNode extends BaseNode {
   /// paths anchor at the source file's directory, '..' walks up, absolute
   /// paths start with '/'.
   src?: string
+  /// Storage name used to resolve this widget's src. Defaults to the storage
+  /// containing the current rows file.
+  storage?: string
   /// Allowed on default/highlight/markdown only.
   maxHeight?: string
   /// Only meaningful when the selector contains `.[*]` (fan-out). Validates
@@ -102,6 +105,7 @@ const ATOM_ALLOWED = new Set([
   'show',
   'lang',
   'src',
+  'storage',
   'maxHeight',
   'layout',
   'columns',
@@ -334,6 +338,15 @@ function buildAtom(obj: Record<string, unknown>, path: string): AtomNode {
     }
   }
 
+  if ('storage' in obj) {
+    if (!SRC_WIDGETS.has(show)) {
+      throw new SchemaError(path, `"storage" not allowed on show="${show}"`)
+    }
+    if (typeof obj.storage !== 'string' || obj.storage.length === 0) {
+      throw new SchemaError(path, '"storage" must be a non-empty string')
+    }
+  }
+
   if ('maxHeight' in obj) {
     if (!MAX_HEIGHT_WIDGETS.has(show)) {
       throw new SchemaError(path, `"maxHeight" not allowed on show="${show}"`)
@@ -394,6 +407,7 @@ function buildAtom(obj: Record<string, unknown>, path: string): AtomNode {
   if (show !== 'default') node.show = show
   if (typeof obj.lang === 'string') node.lang = obj.lang
   if (typeof obj.src === 'string') node.src = obj.src
+  if (typeof obj.storage === 'string') node.storage = obj.storage
   if (typeof obj.maxHeight === 'string') node.maxHeight = obj.maxHeight
   if (
     obj.layout === 'flow' ||

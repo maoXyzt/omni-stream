@@ -111,7 +111,7 @@ images.[abc:5]: slice bounds must be integers (col 8)
 
 ## 2. Widget — 渲染器
 
-封闭集合，7 个。
+封闭集合，8 个。
 
 | widget | 描述 | 选项 |
 |--------|------|------|
@@ -121,12 +121,14 @@ images.[abc:5]: slice bounds must be integers (col 8)
 | `video` | `<video controls>`，支持 Range | `src` |
 | `audio` | `<audio controls>` | `src` |
 | `link` | `<a href>`，URL 与显示文本一致 | `src` |
+| `text` | 按 storage 路径渐进读取并显示文本文件 | `src` |
 | `markdown` | 最小 markdown 子集（粗/斜/标题/列表/inline code/链接），渲染前 DOMPurify 净化 | `maxHeight` |
 
 * `default` 覆盖纯文本 / 原始字符串 / 美化 JSON 三种用例：对 object/array value 自动走 `formatCellExpanded`。
 * `highlight` 的 `lang` 必填，typical values：`json`, `python`, `typescript`, `sql`, `bash`, `yaml`, `markdown`, `html`。未注册的 `lang` 退化为纯文本。
 * `markdown` 实现约束：使用 `marked` (或等价) 解析 → `DOMPurify` 净化 → 注入 DOM。**GFM 表格 / fenced code 语法高亮均不启用**（要语法高亮请直接用 `highlight` widget；要表格暂时用 `default` 看 raw JSON）；不允许 raw HTML、`<script>` / `<iframe>` / 事件属性等任何脚本注入面。
-* **`src` URL 模板**（image/video/audio/link 共用）：字符串里的 `{value}` 在渲染期替换成 cell 值，其余字符原样；其他 `{...}` 序列不识别，留作字面量。缺省 `src` 是 `"{value}"`（cell 值直接当路径）。渲染好的字符串再走 `resolveStorageKey`，锚到**源数据文件所在目录**（无论 parquet / jsonl / 其他行式格式），`..` 弹栈不可越过 storage root。
+* **`src` URL 模板**（image/video/audio/link/text 共用）：字符串里的 `{value}` 在渲染期替换成 cell 值，其余字符原样；其他 `{...}` 序列不识别，留作字面量。缺省 `src` 是 `"{value}"`（cell 值直接当路径）。渲染好的字符串再走 `resolveStorageKey`，锚到**源数据文件所在目录**（无论 parquet / jsonl / 其他行式格式），`..` 弹栈不可越过 storage root。
+* **`storage` 覆盖**：image/video/audio/link/text 可选配置 `storage` storage name；省略时使用当前浏览的 parquet/jsonl 所属 storage。配置后只切换请求使用的 storage，`src` 相对路径仍以当前源数据文件目录为基准。名称不在 storage roster 中时渲染为错误，不发起请求。
   典型用法：`{value}` 直用 / `./images/{value}` 移到 sibling 目录 / `https://cdn/{value}.png` 拼远程 URL。
 
 ---
@@ -154,6 +156,7 @@ type Widget =
   | 'audio'
   | 'link'
   | 'markdown'
+  | 'text'
 
 interface AtomNode extends BaseNode {
   /// Selector 字符串，见 §1
@@ -162,7 +165,8 @@ interface AtomNode extends BaseNode {
   show?: Widget
   /// widget 选项
   lang?: string        // highlight (必填)
-  src?: string         // image / video / audio / link — URL/path 模板，{value} 占位，缺省 "{value}"
+  src?: string         // image / video / audio / link / text — URL/path 模板，{value} 占位，缺省 "{value}"
+  storage?: string      // src widget 使用的 storage；缺省为当前数据文件的 storage
   maxHeight?: string   // default / highlight / markdown
   /// selector 含 `.[*]` 时，多元素之间怎么排
   layout?: 'column' | 'row' | 'grid'
@@ -209,7 +213,8 @@ interface ContainerNode extends BaseNode {
 1. **`lang` 仅且必须**在 `show: "highlight"` 时出现。换言之：
    * 用了 highlight → 必须给 `lang`；
    * 没用 highlight → 不许给 `lang`。
-2. **`src` 仅** `show ∈ {image, video, audio, link}` 时允许。其他 widget（含 default / highlight / markdown）写 `src` 直接报错。
+2. **`src` 仅** `show ∈ {image, video, audio, link, text}` 时允许。其他 widget（含 default / highlight / markdown）写 `src` 直接报错。
+3. **`storage` 与 `src` 同范围**：仅 `show ∈ {image, video, audio, link, text}` 时允许；必须是非空字符串，且运行时必须匹配已配置的 storage name。
 3. **`layout` / `columns` / `gap` / `empty` 要求 selector 里含 `.[*]`**。没有遍历步意味着 atom 只产出一个值，谈不上"多元素排布"，写这些字段会被 parse-time 拒。
 
 #### 3.2.2 其他字段级校验

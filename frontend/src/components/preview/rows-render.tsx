@@ -210,6 +210,27 @@ function WidgetBody({
   ctx: RenderContext
 }) {
   const show = node.show ?? 'default'
+  const widgetCtx = node.storage
+    ? {
+        ...ctx,
+        storage: node.storage,
+        storageDescriptor: ctx.storageDescriptors?.find(
+          (descriptor) => descriptor.name === node.storage,
+        ),
+      }
+    : ctx
+
+  // Once the roster has loaded, reject an explicit unknown storage before a
+  // widget can construct proxy/stat/fetch URLs for it. While the roster is
+  // still loading, preserve the existing behavior and let the descriptor
+  // arrive on the next render.
+  if (
+    node.storage &&
+    ctx.storageDescriptors &&
+    !ctx.storageDescriptors.some((descriptor) => descriptor.name === node.storage)
+  ) {
+    return <StorageError storage={node.storage} />
+  }
   switch (show) {
     case 'default':
       return <WidgetDefault value={value} maxHeight={node.maxHeight} />
@@ -224,13 +245,13 @@ function WidgetBody({
         />
       )
     case 'image':
-      return <WidgetImage value={value} src={node.src ?? '{value}'} ctx={ctx} />
+      return <WidgetImage value={value} src={node.src ?? '{value}'} ctx={widgetCtx} />
     case 'video':
-      return <WidgetVideo value={value} src={node.src ?? '{value}'} ctx={ctx} />
+      return <WidgetVideo value={value} src={node.src ?? '{value}'} ctx={widgetCtx} />
     case 'audio':
-      return <WidgetAudio value={value} src={node.src ?? '{value}'} ctx={ctx} />
+      return <WidgetAudio value={value} src={node.src ?? '{value}'} ctx={widgetCtx} />
     case 'link':
-      return <WidgetLink value={value} src={node.src ?? '{value}'} ctx={ctx} />
+      return <WidgetLink value={value} src={node.src ?? '{value}'} ctx={widgetCtx} />
     case 'markdown':
       return <WidgetMarkdown value={value} maxHeight={node.maxHeight} />
     case 'text':
@@ -240,10 +261,18 @@ function WidgetBody({
           src={node.src ?? '{value}'}
           lang={node.lang}
           maxHeight={node.maxHeight}
-          ctx={ctx}
+          ctx={widgetCtx}
         />
       )
   }
+}
+
+function StorageError({ storage }: { storage: string }) {
+  return (
+    <div className="rounded-md border border-dashed border-destructive/40 bg-destructive/5 px-3 py-2 text-xs italic text-destructive">
+      unknown storage: <span className="font-mono not-italic">{storage}</span>
+    </div>
+  )
 }
 
 function WidgetFallback() {

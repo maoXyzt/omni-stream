@@ -113,9 +113,10 @@
 | `video` | 视频（带控件、支持 Range） | — | `src` |
 | `audio` | 音频 | — | `src` |
 | `link` | 超链接 | — | `src` |
+| `text` | 文本文件 | — | `src` |
 | `markdown` | Markdown 渲染（不支持 raw HTML） | — | `maxHeight` |
 
-**`src` 是什么**：image/video/audio/link 的 URL/路径模板。字符串里的 `{value}` 在渲染时替换成 cell 的值；其他字符原样。例：
+**`src` 是什么**：image/video/audio/link/text 的 URL/路径模板。字符串里的 `{value}` 在渲染时替换成 cell 的值；其他字符原样。例：
 
 | `src` | 效果 |
 |-------|------|
@@ -124,6 +125,17 @@
 | `"../edits/{value}"` | 在上一级的 `edits/` 目录 |
 | `"https://cdn.example.com/{value}.png"` | 从 ID 列拼远程 CDN URL |
 | `"/static/logo.png"` | 不含 `{value}`：所有行都展示这张固定图（cell 值被忽略）|
+
+如果资源位于另一个已配置的 storage，可在支持 `src` 的组件上指定 `storage`；相对路径仍相对于当前浏览的数据文件解析：
+
+```json5
+[
+  { "image": "thumbnail", "storage": "media" },
+  { "text": "caption_file", "storage": "documents", "src": "texts/{value}.md" }
+]
+```
+
+省略 `storage` 时使用当前 jsonl/parquet 的 storage。指定不存在的 storage name 会在卡片中显示错误，并不会发出文件请求。
 
 **`lang` 取值**：常见的 `json` / `python` / `typescript` / `sql` / `bash` / `yaml` / `markdown` / `html` 都支持，没注册的 lang 退化为纯文本。
 
@@ -151,7 +163,7 @@
 | 列表全部展示 | `{ "image": "images.[:]" }` | `{ "image": "images.[*]" }` |
 | 第一张图 | `{ "image": "images[0]" }`（缺前面的 `.`） | `{ "image": "images.[0]" }` |
 | 给单值加 layout | `{ "image": "thumb", "layout": "grid" }` | 单值用不上 layout；想多个就把 selector 改成 `.[*]` 结尾 |
-| 给文字加 src | `{ "from": "prompt", "src": "../{value}" }` | `src` 只能在 image/video/audio/link 上用 |
+| 给文字加 src | `{ "from": "prompt", "src": "../{value}" }` | `src` 只能在 image/video/audio/link/text 上用 |
 | 把 layout 写在容器里给 atom | `{ "row": [...], "layout": "grid" }` | row 是容器，不接 layout；要网格用 `{ "grid": [...], "columns": 3 }` |
 | 列名含 `.` 时直接写 | `{ "from": "weird.col" }`（会被解析成"列 weird → 字段 col"） | `` { "from": "`weird.col`" } ``（反引号包起来） |
 
