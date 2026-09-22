@@ -170,7 +170,7 @@
 **3 条 cross-field 规则**（最容易漏，AI 体外校验时重点看）：
 
 - `lang` **仅且必须**在 `show: "highlight"` 时出现。
-- `src` 只能在 image / video / audio / link 上出现。
+- `src` 只能在 image / video / audio / link / text 上出现。
 - `layout` / `columns` / `gap` / `empty` **要求 selector 里写了 `.[*]`**，否则报错（因为只有一个值，谈不上排布）。
 
 ---

@@ -13,6 +13,8 @@ import { Suspense, useMemo } from 'react'
 import type { AtomNode, Node } from '@/lib/rows-schema'
 import { parseSelector, selectorRootColumn } from '@/lib/rows-selector'
 import { evalSelector } from '@/lib/rows-selector-eval'
+import { resolveWidgetStorage } from '@/lib/rows-storage'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   EmptyHint,
@@ -210,25 +212,18 @@ function WidgetBody({
   ctx: RenderContext
 }) {
   const show = node.show ?? 'default'
-  let widgetCtx = ctx
-  if (node.storage) {
-    if (ctx.storageRoster.status === 'loading') {
-      return <StorageRosterLoading />
-    }
-    if (ctx.storageRoster.status === 'error') {
-      return <StorageRosterError message={ctx.storageRoster.message} />
-    }
-    const descriptor = ctx.storageRoster.descriptors.find(
-      (candidate) => candidate.name === node.storage,
-    )
-    if (!descriptor) {
-      return <StorageError storage={node.storage} />
-    }
-    widgetCtx = {
-      ...ctx,
-      storage: node.storage,
-      storageDescriptor: descriptor,
-    }
+  const storage = resolveWidgetStorage(node.storage, ctx)
+  if (storage.status === 'loading') return <StorageRosterLoading />
+  if (storage.status === 'error') {
+    return <StorageRosterError message={storage.message} />
+  }
+  if (storage.status === 'unknown') {
+    return <StorageError storage={storage.storage} />
+  }
+  const widgetCtx = {
+    ...ctx,
+    storage: storage.storage,
+    storageDescriptor: storage.descriptor,
   }
   switch (show) {
     case 'default':
@@ -280,9 +275,10 @@ function StorageRosterLoading() {
 
 function StorageRosterError({ message }: { message: string }) {
   return (
-    <div className="rounded-md border border-dashed border-destructive/40 bg-destructive/5 px-3 py-2 text-xs italic text-destructive">
-      unable to validate storage: <span className="font-mono not-italic">{message}</span>
-    </div>
+    <Alert variant="destructive" className="text-xs">
+      <AlertTitle>Unable to validate storage</AlertTitle>
+      <AlertDescription className="font-mono break-all">{message}</AlertDescription>
+    </Alert>
   )
 }
 

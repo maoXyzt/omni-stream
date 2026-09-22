@@ -68,7 +68,12 @@ export function RowsView({ fileKey, source, storage }: RowsViewProps) {
       status: 'ready' as const,
       descriptors: storagesQuery.data?.storages ?? [],
     }
-  }, [storagesQuery.data, storagesQuery.error, storagesQuery.isError, storagesQuery.isPending])
+  }, [
+    storagesQuery.data,
+    storagesQuery.error,
+    storagesQuery.isError,
+    storagesQuery.isPending,
+  ])
 
   const renderCtx = useMemo(
     () => ({
