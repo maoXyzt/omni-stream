@@ -55,6 +55,12 @@ describe('atom — widget tag sugar', () => {
     ).toEqual([{ from: 'clip', show: 'video', src: '../clips/{value}' }])
   })
 
+  it('{ image: "x", storage: "assets" } preserves the storage override', () => {
+    expect(ok([{ image: 'thumb', storage: 'assets' }])).toEqual([
+      { from: 'thumb', show: 'image', storage: 'assets' },
+    ])
+  })
+
   it('{ highlight: "x", lang: "py" }', () => {
     expect(ok([{ highlight: 'code', lang: 'py' }])).toEqual([
       { from: 'code', show: 'highlight', lang: 'py' },
@@ -142,6 +148,42 @@ describe('atom — widget option constraints', () => {
   it('empty src is rejected', () => {
     expect(fail([{ from: 'x', show: 'image', src: '' }])).toMatch(
       /"src" must be a non-empty string/,
+    )
+  })
+
+  it('storage is allowed on every src widget', () => {
+    expect(
+      ok([
+        { from: 'image', show: 'image', storage: 'assets' },
+        { from: 'video', show: 'video', storage: 'assets' },
+        { from: 'audio', show: 'audio', storage: 'assets' },
+        { from: 'link', show: 'link', storage: 'assets' },
+        { from: 'text', show: 'text', storage: 'assets' },
+      ]),
+    ).toEqual([
+      { from: 'image', show: 'image', storage: 'assets' },
+      { from: 'video', show: 'video', storage: 'assets' },
+      { from: 'audio', show: 'audio', storage: 'assets' },
+      { from: 'link', show: 'link', storage: 'assets' },
+      { from: 'text', show: 'text', storage: 'assets' },
+    ])
+  })
+
+  it('storage must be a non-empty string', () => {
+    expect(fail([{ from: 'x', show: 'image', storage: '' }])).toMatch(
+      /"storage" must be a non-empty string/,
+    )
+    expect(fail([{ from: 'x', show: 'image', storage: 42 }])).toMatch(
+      /"storage" must be a non-empty string/,
+    )
+  })
+
+  it('storage is rejected on widgets without src support', () => {
+    expect(fail([{ from: 'x', storage: 'assets' }])).toMatch(
+      /"storage" not allowed on show="default"/,
+    )
+    expect(fail([{ from: 'x', show: 'markdown', storage: 'assets' }])).toMatch(
+      /"storage" not allowed on show="markdown"/,
     )
   })
 

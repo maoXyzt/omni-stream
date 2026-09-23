@@ -49,14 +49,52 @@ export function RowsView({ fileKey, source, storage }: RowsViewProps) {
   // the same bucket-layout rules as the "Go to path" navigator. Mirrors the
   // pattern in FileList (`storages.find(s => s.name === storageName)`).
   const storagesQuery = useStorages()
+  const {
+    data: storagesData,
+    error: storagesError,
+    isError: storagesIsError,
+    isPending: storagesIsPending,
+    isFetching: storagesIsFetching,
+    refetch: refetchStorages,
+  } = storagesQuery
   const storageDescriptor = useMemo(
-    () => storagesQuery.data?.storages.find((s) => s.name === storage),
-    [storagesQuery.data, storage],
+    () => storagesData?.storages.find((s) => s.name === storage),
+    [storagesData, storage],
   )
+  const storageRoster = useMemo(() => {
+    if (storagesIsPending) return { status: 'loading' as const }
+    if (storagesIsError) {
+      return {
+        status: 'error' as const,
+        message:
+          storagesError instanceof Error
+            ? storagesError.message
+            : 'failed to load storage list',
+        retry: () => void refetchStorages(),
+        retrying: storagesIsFetching,
+      }
+    }
+    return {
+      status: 'ready' as const,
+      descriptors: storagesData?.storages ?? [],
+    }
+  }, [
+    storagesData,
+    storagesError,
+    storagesIsError,
+    storagesIsPending,
+    storagesIsFetching,
+    refetchStorages,
+  ])
 
   const renderCtx = useMemo(
-    () => ({ fileKey, storage, storageDescriptor }),
-    [fileKey, storage, storageDescriptor],
+    () => ({
+      fileKey,
+      storage,
+      storageDescriptor,
+      storageRoster,
+    }),
+    [fileKey, storage, storageDescriptor, storageRoster],
   )
   const columns = source.columns
   const [dialogOpen, setDialogOpen] = useState(false)
