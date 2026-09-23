@@ -46,7 +46,7 @@ export interface RenderContext {
   storageRoster:
     | { status: 'loading' }
     | { status: 'ready'; descriptors: readonly StorageDescriptor[] }
-    | { status: 'error'; message: string }
+    | { status: 'error'; message: string; retry: () => void; retrying: boolean }
 }
 
 // -----------------------------------------------------------------------

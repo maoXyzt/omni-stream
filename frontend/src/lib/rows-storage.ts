@@ -3,7 +3,7 @@ import type { StorageDescriptor } from '@/types/storage'
 
 export type WidgetStorageResolution =
   | { status: 'loading' }
-  | { status: 'error'; message: string }
+  | { status: 'error'; message: string; retry: () => void; retrying: boolean }
   | { status: 'unknown'; storage: string }
   | {
       status: 'ready'
@@ -24,7 +24,12 @@ export function resolveWidgetStorage(
   }
   if (ctx.storageRoster.status === 'loading') return { status: 'loading' }
   if (ctx.storageRoster.status === 'error') {
-    return { status: 'error', message: ctx.storageRoster.message }
+    return {
+      status: 'error',
+      message: ctx.storageRoster.message,
+      retry: ctx.storageRoster.retry,
+      retrying: ctx.storageRoster.retrying,
+    }
   }
   const descriptor = ctx.storageRoster.descriptors.find(
     (candidate) => candidate.name === requestedStorage,

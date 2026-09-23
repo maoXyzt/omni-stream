@@ -40,9 +40,14 @@ describe('resolveWidgetStorage', () => {
     expect(
       resolveWidgetStorage(
         'media',
-        context({ status: 'error', message: 'network unavailable' }),
+        context({
+          status: 'error',
+          message: 'network unavailable',
+          retry: () => undefined,
+          retrying: false,
+        }),
       ),
-    ).toEqual({ status: 'error', message: 'network unavailable' })
+    ).toMatchObject({ status: 'error', message: 'network unavailable', retrying: false })
   })
 
   it('rejects unknown storage names', () => {

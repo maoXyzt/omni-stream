@@ -9,12 +9,14 @@
 // so the same string isn't re-parsed across rows.
 
 import { Suspense, useMemo } from 'react'
+import { Loader2 } from 'lucide-react'
 
 import type { AtomNode, Node } from '@/lib/rows-schema'
 import { parseSelector, selectorRootColumn } from '@/lib/rows-selector'
 import { evalSelector } from '@/lib/rows-selector-eval'
 import { resolveWidgetStorage } from '@/lib/rows-storage'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   EmptyHint,
@@ -215,7 +217,13 @@ function WidgetBody({
   const storage = resolveWidgetStorage(node.storage, ctx)
   if (storage.status === 'loading') return <StorageRosterLoading />
   if (storage.status === 'error') {
-    return <StorageRosterError message={storage.message} />
+    return (
+      <StorageRosterError
+        message={storage.message}
+        retry={storage.retry}
+        retrying={storage.retrying}
+      />
+    )
   }
   if (storage.status === 'unknown') {
     return <StorageError storage={storage.storage} />
@@ -273,11 +281,32 @@ function StorageRosterLoading() {
   return <Skeleton className="h-16 w-full" />
 }
 
-function StorageRosterError({ message }: { message: string }) {
+function StorageRosterError({
+  message,
+  retry,
+  retrying,
+}: {
+  message: string
+  retry: () => void
+  retrying: boolean
+}) {
   return (
     <Alert variant="destructive" className="text-xs">
       <AlertTitle>Unable to validate storage</AlertTitle>
-      <AlertDescription className="font-mono break-all">{message}</AlertDescription>
+      <AlertDescription className="flex flex-col gap-3">
+        <span className="font-mono break-all">{message}</span>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={retry}
+          disabled={retrying}
+          className="self-start"
+        >
+          {retrying && <Loader2 className="size-4 animate-spin" />}
+          {retrying ? 'Retrying' : 'Retry'}
+        </Button>
+      </AlertDescription>
     </Alert>
   )
 }

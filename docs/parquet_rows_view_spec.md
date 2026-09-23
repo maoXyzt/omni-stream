@@ -121,7 +121,7 @@ images.[abc:5]: slice bounds must be integers (col 8)
 | `video` | `<video controls>`，支持 Range | `src` |
 | `audio` | `<audio controls>` | `src` |
 | `link` | `<a href>`，URL 与显示文本一致 | `src` |
-| `text` | 按 storage 路径渐进读取并显示文本文件 | `src` |
+| `text` | 按 storage 路径渐进读取并显示文本文件 | `lang`, `src`, `maxHeight` |
 | `markdown` | 最小 markdown 子集（粗/斜/标题/列表/inline code/链接），渲染前 DOMPurify 净化 | `maxHeight` |
 
 * `default` 覆盖纯文本 / 原始字符串 / 美化 JSON 三种用例：对 object/array value 自动走 `formatCellExpanded`。
@@ -210,9 +210,10 @@ interface ContainerNode extends BaseNode {
 
 #### 3.2.1 三条 cross-field 规则（**最容易漏，AI 体外校验也应重点检查**）
 
-1. **`lang` 仅且必须**在 `show: "highlight"` 时出现。换言之：
+1. **`lang`** 仅允许在 `show: "highlight"` 或 `show: "text"` 时出现。换言之：
    * 用了 highlight → 必须给 `lang`；
-   * 没用 highlight → 不许给 `lang`。
+   * 用了 text → `lang` 可选；
+   * 其他 widget → 不许给 `lang`。
 2. **`src` 仅** `show ∈ {image, video, audio, link, text}` 时允许。其他 widget（含 default / highlight / markdown）写 `src` 直接报错。
 3. **`storage` 与 `src` 同范围**：仅 `show ∈ {image, video, audio, link, text}` 时允许；必须是非空字符串，且运行时必须匹配已配置的 storage name。
 4. **`layout` / `columns` / `gap` / `empty` 要求 selector 里含 `.[*]`**。没有遍历步意味着 atom 只产出一个值，谈不上"多元素排布"，写这些字段会被 parse-time 拒。
@@ -223,7 +224,7 @@ interface ContainerNode extends BaseNode {
 |------|------|
 | atom 的 `from` 必须是非空字符串且通过 §1 parser | `"from": <parser error>` |
 | atom 的 `show` 必须在 widget 集合内 | `"show" must be one of [default, highlight, ...]` |
-| `maxHeight` 仅 `show ∈ {default, highlight, markdown}` 允许 | `"maxHeight" not allowed on show="<x>"` |
+| `maxHeight` 仅 `show ∈ {default, highlight, markdown, text}` 允许 | `"maxHeight" not allowed on show="<x>"` |
 | `columns` 仅当 `layout='grid'`（atom）或 `kind='grid'`（container）时允许 | `"columns" only allowed on grid layout` |
 | `columns` 必须是正整数 | `"columns" must be a positive integer` |
 | container 的 `children` 必须是数组 | `"children" must be an array` |

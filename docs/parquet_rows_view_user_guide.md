@@ -113,7 +113,7 @@
 | `video` | 视频（带控件、支持 Range） | — | `src` |
 | `audio` | 音频 | — | `src` |
 | `link` | 超链接 | — | `src` |
-| `text` | 文本文件 | — | `src` |
+| `text` | 文本文件 | — | `lang`, `src`, `maxHeight` |
 | `markdown` | Markdown 渲染（不支持 raw HTML） | — | `maxHeight` |
 
 **`src` 是什么**：image/video/audio/link/text 的 URL/路径模板。字符串里的 `{value}` 在渲染时替换成 cell 的值；其他字符原样。例：
@@ -169,7 +169,7 @@
 
 **3 条 cross-field 规则**（最容易漏，AI 体外校验时重点看）：
 
-- `lang` **仅且必须**在 `show: "highlight"` 时出现。
+- `lang` 仅允许在 `show: "highlight"` 或 `show: "text"` 时出现；highlight 必填，text 可选。
 - `src` 只能在 image / video / audio / link / text 上出现。
 - `layout` / `columns` / `gap` / `empty` **要求 selector 里写了 `.[*]`**，否则报错（因为只有一个值，谈不上排布）。
 
