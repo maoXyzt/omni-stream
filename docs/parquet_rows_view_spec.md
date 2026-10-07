@@ -167,7 +167,7 @@ interface AtomNode extends BaseNode {
   lang?: string        // highlight (必填)
   src?: string         // image / video / audio / link / text — URL/path 模板，{value} 占位，缺省 "{value}"
   storage?: string      // src widget 使用的 storage；缺省为当前数据文件的 storage
-  maxHeight?: string   // default / highlight / markdown
+  maxHeight?: string   // default / highlight / markdown / text
   /// selector 含 `.[*]` 时，多元素之间怎么排
   layout?: 'column' | 'row' | 'grid'
   /// layout='grid' 时的列数
