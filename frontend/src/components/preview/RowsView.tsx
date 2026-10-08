@@ -49,14 +49,52 @@ export function RowsView({ fileKey, source, storage }: RowsViewProps) {
   // the same bucket-layout rules as the "Go to path" navigator. Mirrors the
   // pattern in FileList (`storages.find(s => s.name === storageName)`).
   const storagesQuery = useStorages()
+  const {
+    data: storagesData,
+    error: storagesError,
+    isError: storagesIsError,
+    isPending: storagesIsPending,
+    isFetching: storagesIsFetching,
+    refetch: refetchStorages,
+  } = storagesQuery
   const storageDescriptor = useMemo(
-    () => storagesQuery.data?.storages.find((s) => s.name === storage),
-    [storagesQuery.data, storage],
+    () => storagesData?.storages.find((s) => s.name === storage),
+    [storagesData, storage],
   )
+  const storageRoster = useMemo(() => {
+    if (storagesIsPending) return { status: 'loading' as const }
+    if (storagesIsError && storagesData === undefined) {
+      return {
+        status: 'error' as const,
+        message:
+          storagesError instanceof Error
+            ? storagesError.message
+            : 'failed to load storage list',
+        retry: () => void refetchStorages(),
+        retrying: storagesIsFetching,
+      }
+    }
+    return {
+      status: 'ready' as const,
+      descriptors: storagesData?.storages ?? [],
+    }
+  }, [
+    storagesData,
+    storagesError,
+    storagesIsError,
+    storagesIsPending,
+    storagesIsFetching,
+    refetchStorages,
+  ])
 
   const renderCtx = useMemo(
-    () => ({ fileKey, storage, storageDescriptor }),
-    [fileKey, storage, storageDescriptor],
+    () => ({
+      fileKey,
+      storage,
+      storageDescriptor,
+      storageRoster,
+    }),
+    [fileKey, storage, storageDescriptor, storageRoster],
   )
   const columns = source.columns
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -204,6 +242,8 @@ export function RowsView({ fileKey, source, storage }: RowsViewProps) {
     source.totalRows !== 0 && rowsQuery.isPending && rowsQuery.isFetching
   const isFetching = rowsQuery.isFetching
   const errorMessage = rowsQuery.error ? describeError(rowsQuery.error) : null
+  const storageRosterRefreshError =
+    storagesIsError && storagesData !== undefined
 
   // Page count is `null` while a streaming source hasn't surfaced the
   // total yet — PageControls switches the cap-display to `?` for that.
@@ -298,6 +338,33 @@ export function RowsView({ fileKey, source, storage }: RowsViewProps) {
           <AlertCircle className="size-4" />
           <AlertTitle>Couldn't read rules from URL</AlertTitle>
           <AlertDescription>{decodeError}</AlertDescription>
+        </Alert>
+      )}
+
+      {storageRosterRefreshError && (
+        <Alert variant="destructive">
+          <AlertCircle className="size-4" />
+          <AlertTitle>Storage list refresh failed</AlertTitle>
+          <AlertDescription className="flex flex-wrap items-center gap-3">
+            <span>
+              {storagesError instanceof Error
+                ? storagesError.message
+                : 'using the last known storage list'}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void refetchStorages()}
+              disabled={storagesIsFetching}
+            >
+              {storagesIsFetching ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <RotateCw className="size-4" />
+              )}
+              {storagesIsFetching ? 'Retrying' : 'Retry'}
+            </Button>
+          </AlertDescription>
         </Alert>
       )}
 
