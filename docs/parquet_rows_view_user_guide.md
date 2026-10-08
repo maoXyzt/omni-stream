@@ -124,7 +124,9 @@
 | `"./images/{value}"` | 图片实际在源数据文件的 `images/` 子目录 |
 | `"../edits/{value}"` | 在上一级的 `edits/` 目录 |
 | `"https://cdn.example.com/{value}.png"` | 从 ID 列拼远程 CDN URL |
-| `"/static/logo.png"` | 不含 `{value}`：所有行都展示这张固定图（cell 值被忽略）|
+| `"/static/logo.png"` | 不含 `{value}`：所有行都展示同一路径（解析方式见下方 local / 非 local 规则，cell 值被忽略）|
+
+路径以 `/` 开头时，当前 storage 是 local 的话会按 `local.root_path` 解释为宿主机绝对路径，再转换成 storage 内的相对 key；路径在 root 外会被拒绝。非 local storage 则去掉首斜杠后，按源数据文件所在目录解析。
 
 如果资源位于另一个已配置的 storage，可在支持 `src` 的组件上指定 `storage`；相对路径仍相对于当前浏览的数据文件解析：
 

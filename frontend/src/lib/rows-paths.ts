@@ -9,7 +9,8 @@
 //        * s3:// / s3a:// / s3n:// URI → resolved via resolveStorageUri,
 //          same rules as the "Go to path" navigator (bucket matched against
 //          the active storage descriptor), then proxied
-//        * leading-`/` storage key → proxied via `proxyUrl`
+//        * leading-`/` local host path → resolved against `root_path`; other
+//          storages resolve it relative to the source file directory
 //        * everything else        → resolved relative to the source data
 //          file's directory (`..` walks up, escape past root rejected),
 //          then proxied
@@ -111,12 +112,32 @@ export function resolveSrc(
   }
 
   if (rendered.startsWith('/')) {
-    // Absolute from storage root — strip the leading slash and proxy.
-    const key = rendered.slice(1)
-    if (key.length === 0) {
-      return { ok: false, reason: 'path resolves to storage root with no file' }
+    if (storageDescriptor?.type === 'local') {
+      // Local card values may contain the host path returned by a pipeline.
+      if (!storageDescriptor.local?.root_path) {
+        return { ok: false, reason: 'local storage has no root path' }
+      }
+      const resolved = resolveStorageUri(rendered, storageDescriptor)
+      if (!resolved.ok) return resolved
+      if (resolved.path.length === 0) {
+        return { ok: false, reason: 'path resolves to storage root with no file' }
+      }
+      return {
+        ok: true,
+        url: proxyUrl(resolved.path, storage),
+        key: resolved.path,
+        rendered,
+      }
     }
-    return { ok: true, url: proxyUrl(key, storage), key, rendered }
+    // Other storages treat /... as relative to the source file directory.
+    const resolved = resolveStorageKey(fileKey, rendered.slice(1))
+    if (!resolved.ok) return resolved
+    return {
+      ok: true,
+      url: proxyUrl(resolved.key, storage),
+      key: resolved.key,
+      rendered,
+    }
   }
 
   // Relative — anchor at the source file's directory.

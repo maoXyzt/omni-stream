@@ -57,12 +57,33 @@ export function hasUriScheme(input: string): boolean {
 // inverse operation in `absolutePathOf` (EntryContextMenu). Paths outside the
 // root are rejected like a mismatched S3 bucket.
 function resolveLocalAbsolute(input: string, rootPath: string): ResolvedUri {
-  const root = rootPath.replace(/\/+$/, '')
+  const root = rootPath.replace(/\/+$/, '') || '/'
   if (input === root || input === `${root}/`) {
     return { ok: true, path: '' }
   }
-  if (input.startsWith(`${root}/`)) {
-    return { ok: true, path: input.slice(root.length + 1) }
+  const prefix = root === '/' ? '/' : `${root}/`
+  if (input.startsWith(prefix)) {
+    const suffix = input.slice(root === '/' ? 1 : root.length + 1)
+    const parts: string[] = []
+    for (const segment of suffix.split('/')) {
+      if (segment === '' || segment === '.') continue
+      if (segment === '..') {
+        if (parts.length === 0) {
+          return {
+            ok: false,
+            reason: `That path is outside this storage's root "${rootPath}".`,
+          }
+        }
+        parts.pop()
+      } else {
+        parts.push(segment)
+      }
+    }
+    const path = parts.join('/')
+    return {
+      ok: true,
+      path: path.length > 0 && suffix.endsWith('/') ? `${path}/` : path,
+    }
   }
   return {
     ok: false,
