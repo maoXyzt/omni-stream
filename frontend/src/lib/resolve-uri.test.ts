@@ -215,6 +215,19 @@ describe('resolveStorageUri — local absolute paths', () => {
     })
   })
 
+  it('normalizes parent-directory components within the root', () => {
+    expect(resolveStorageUri('/data/images/../foo.png', local)).toEqual({
+      ok: true,
+      path: 'foo.png',
+    })
+  })
+
+  it('rejects parent-directory components that leave the root', () => {
+    const r = resolveStorageUri('/data/../etc/passwd', local)
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.reason).toContain('/data')
+  })
+
   it('rejects paths outside root', () => {
     const r = resolveStorageUri('/etc/passwd', local)
     expect(r.ok).toBe(false)

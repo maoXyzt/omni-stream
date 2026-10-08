@@ -141,8 +141,8 @@ describe('resolveSrc — template handling', () => {
     const r = resolveSrc('/static/logo.png', 'ignored', FILE, undefined)
     expect(r).toEqual({
       ok: true,
-      url: '/api/proxy/static/logo.png',
-      key: 'static/logo.png',
+      url: '/api/proxy/datasets/imagenet/static/logo.png',
+      key: 'datasets/imagenet/static/logo.png',
       rendered: '/static/logo.png',
     })
   })
@@ -184,8 +184,8 @@ describe('resolveSrc — template handling', () => {
     const r = resolveSrc('/static/logo.png', null, FILE, undefined)
     expect(r).toEqual({
       ok: true,
-      url: '/api/proxy/static/logo.png',
-      key: 'static/logo.png',
+      url: '/api/proxy/datasets/imagenet/static/logo.png',
+      key: 'datasets/imagenet/static/logo.png',
       rendered: '/static/logo.png',
     })
   })
@@ -209,9 +209,47 @@ describe('resolveSrc — template handling', () => {
     const r = resolveSrc('/foo/bar.png', 'ignored', FILE, 'mybucket')
     expect(r).toEqual({
       ok: true,
-      url: '/api/proxy/foo/bar.png?storage=mybucket',
-      key: 'foo/bar.png',
+      url: '/api/proxy/datasets/imagenet/foo/bar.png?storage=mybucket',
+      key: 'datasets/imagenet/foo/bar.png',
       rendered: '/foo/bar.png',
+    })
+  })
+
+  it('local absolute path is resolved relative to the storage root', () => {
+    const r = resolveSrc(
+      '{value}',
+      '/data/images/foo.png',
+      FILE,
+      'local',
+      LOCAL_STORAGE,
+    )
+    expect(r).toEqual({
+      ok: true,
+      url: '/api/proxy/images/foo.png?storage=local',
+      key: 'images/foo.png',
+      rendered: '/data/images/foo.png',
+    })
+  })
+
+  it('rejects local absolute paths outside the storage root', () => {
+    const r = resolveSrc(
+      '{value}',
+      '/etc/passwd',
+      FILE,
+      'local',
+      LOCAL_STORAGE,
+    )
+    expect(r).toEqual({
+      ok: false,
+      reason: `That path is outside this storage's root "/data".`,
+    })
+  })
+
+  it('rejects the local storage root itself', () => {
+    const r = resolveSrc('{value}', '/data/', FILE, 'local', LOCAL_STORAGE)
+    expect(r).toEqual({
+      ok: false,
+      reason: 'path resolves to storage root with no file',
     })
   })
 
@@ -406,12 +444,12 @@ describe('resolveSrc — s3:// URI handling', () => {
 
   // -- regression: existing branches unaffected by new s3:// branch ----------
 
-  it('regression: /absolute path still works without descriptor', () => {
+  it('regression: /path resolves relative to the source file without descriptor', () => {
     const r = resolveSrc('/foo/bar.png', 'ignored', FILE, 'mybucket-storage')
     expect(r).toEqual({
       ok: true,
-      url: '/api/proxy/foo/bar.png?storage=mybucket-storage',
-      key: 'foo/bar.png',
+      url: '/api/proxy/datasets/imagenet/foo/bar.png?storage=mybucket-storage',
+      key: 'datasets/imagenet/foo/bar.png',
       rendered: '/foo/bar.png',
     })
   })
