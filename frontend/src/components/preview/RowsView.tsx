@@ -342,7 +342,7 @@ export function RowsView({ fileKey, source, storage }: RowsViewProps) {
       )}
 
       {storageRosterRefreshError && (
-        <Alert>
+        <Alert variant="destructive">
           <AlertCircle className="size-4" />
           <AlertTitle>Storage list refresh failed</AlertTitle>
           <AlertDescription className="flex flex-wrap items-center gap-3">
