@@ -30,7 +30,10 @@ export async function readPreviewBytes({
     maxContentLength: size,
     signal,
   })
-  const reader = response.data.getReader()
+  const reader = response.data?.getReader?.()
+  if (!reader) {
+    throw new Error('The response body is not a readable stream.')
+  }
   const bytes = new Uint8Array(size)
   let offset = 0
   try {

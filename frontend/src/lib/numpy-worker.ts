@@ -10,7 +10,7 @@ self.onmessage = (event: MessageEvent<{ bytes: ArrayBuffer; fileKey: string; arc
     }
     const transfers = new Set<ArrayBuffer>()
     for (const array of Object.values(result.arrays)) {
-      if (array.data.buffer instanceof ArrayBuffer) transfers.add(array.data.buffer)
+      if (array?.data?.buffer instanceof ArrayBuffer) transfers.add(array.data.buffer)
     }
     self.postMessage({ result }, { transfer: [...transfers] })
   } catch (error) {

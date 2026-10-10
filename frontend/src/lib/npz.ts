@@ -71,6 +71,9 @@ export function parseNpy(bytes: ArrayBuffer): NpyArray {
       .split(',').map((part) => part.trim()).filter(Boolean).map(Number),
     fortranOrder: /'fortran_order'\s*:\s*True/.test(header),
   } : parse(bytes, { convertFloat16: false })
+  if (!array || !Array.isArray(array.shape) || !array.data) {
+    throw new Error('Invalid NPY data structure.')
+  }
   if (array.shape.some((dimension) => !Number.isSafeInteger(dimension) || dimension < 0)) {
     throw new NpzLimitError('NPY shape contains an invalid dimension.')
   }
