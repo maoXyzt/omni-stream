@@ -248,7 +248,7 @@ export function ThreeViewportControls({
         <Search className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
         <Input
           type="search"
-          value={searchQuery}
+          value={searchQuery ?? ''}
           placeholder="Search model parts"
           aria-label="Search model parts"
           title="Search model parts"

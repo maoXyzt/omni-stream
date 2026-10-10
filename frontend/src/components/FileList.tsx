@@ -100,6 +100,7 @@ import { FileGrid } from '@/components/FileGrid'
 import { PathBreadcrumb } from '@/components/PathBreadcrumb'
 import { PathNavigator } from '@/components/PathNavigator'
 import { PreviewModal } from '@/components/PreviewModal'
+import { LargePreviewGate } from '@/components/preview/LargePreviewGate'
 import { Sidebar } from '@/components/Sidebar'
 import {
   colorForKey,
@@ -598,8 +599,10 @@ export function FileList() {
     if (!previewName) return null
     const kind = previewableKind(previewName)
     if (!kind) return null
-    return { key: prefix + previewName, kind }
-  }, [previewName, prefix])
+    const key = prefix + previewName
+    const size = listQuery.data?.entries.find((entry) => entry.key === key)?.size
+    return { key, kind, size }
+  }, [listQuery.data, previewName, prefix])
 
   // Look up the entry currently being previewed so we can pass its
   // last_modified into the previewer as a cache buster. Falls back to null
@@ -1976,6 +1979,7 @@ export function FileList() {
                 fileKey={previewState!.key}
                 kind={previewState!.kind}
                 storage={storageName || undefined}
+                size={previewState!.size}
                 version={previewVersion}
               />
             </div>
@@ -2127,6 +2131,7 @@ export function FileList() {
           fileKey={previewState.key}
           kind={previewState.kind}
           storage={storageName || undefined}
+          size={previewState.size}
           version={previewVersion}
           onClose={closePreview}
           onNavigate={navigatePreview}
@@ -2478,11 +2483,12 @@ interface InlinePreviewProps {
   fileKey: string
   kind: PreviewKind
   storage?: string
+  size?: number
   /// See PreviewModal — same cache-busting role for the inline split view.
   version?: string | null
 }
 
-function InlinePreview({ fileKey, kind, storage, version }: InlinePreviewProps) {
+function InlinePreview({ fileKey, kind, storage, size, version }: InlinePreviewProps) {
   const src = proxyUrl(fileKey, storage, version)
   const Previewer = getPreviewType(kind)?.Component
   if (!Previewer) {
@@ -2494,7 +2500,19 @@ function InlinePreview({ fileKey, kind, storage, version }: InlinePreviewProps) 
   }
   return (
     <div className="flex h-full w-full min-h-0">
-      <Previewer fileKey={fileKey} src={src} storage={storage} />
+      {kind === 'model3d' || kind === 'numpy' ? (
+        <LargePreviewGate
+          key={`${kind}:${fileKey}:${src}`}
+          fileKey={fileKey}
+          src={src}
+          storage={storage}
+          size={size}
+          kind={kind}
+          previewer={Previewer}
+        />
+      ) : (
+        <Previewer fileKey={fileKey} src={src} storage={storage} />
+      )}
     </div>
   )
 }
