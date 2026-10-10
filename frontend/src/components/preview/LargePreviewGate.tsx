@@ -55,7 +55,7 @@ function LargePreviewCard({
         </div>
 
         <Alert className="text-left">
-          <TriangleAlert className="size-4" />
+          <TriangleAlert />
           <AlertTitle>Preview may use significant browser resources</AlertTitle>
           <AlertDescription>
             Rendering this file can use substantial memory and CPU. Continue only if you are comfortable with the possible impact on this browser tab.
