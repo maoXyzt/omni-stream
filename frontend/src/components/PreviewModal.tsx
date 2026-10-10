@@ -5,6 +5,7 @@ import { proxyUrl } from '@/api/storage'
 import { useGlobalShortcut } from '@/hooks/use-global-shortcut'
 import { getPreviewType } from '@/components/preview/registry'
 import type { PreviewKind } from '@/components/preview/types'
+import { LargePreviewGate } from '@/components/preview/LargePreviewGate'
 import { Button } from '@/components/ui/button'
 import { getPreviewReturnFocus } from '@/lib/accessibility'
 import {
@@ -22,6 +23,7 @@ interface Props {
   fileKey: string
   kind: PreviewKind
   storage?: string
+  size?: number
   /// Optional cache-buster — typically `entry.last_modified` from the
   /// listing. When the user clicks Refresh and the listing returns new
   /// mtimes, this changes and the browser refetches instead of serving the
@@ -36,6 +38,7 @@ export function PreviewModal({
   fileKey,
   kind,
   storage,
+  size,
   version,
   onClose,
   onNavigate,
@@ -109,7 +112,19 @@ export function PreviewModal({
 
         <div className="flex min-h-0 flex-1">
           {Previewer ? (
-            <Previewer fileKey={fileKey} src={src} storage={storage} />
+            kind === 'model3d' || kind === 'numpy' ? (
+              <LargePreviewGate
+                key={`${kind}:${fileKey}:${src}`}
+                fileKey={fileKey}
+                src={src}
+                storage={storage}
+                size={size}
+                kind={kind}
+                previewer={Previewer}
+              />
+            ) : (
+              <Previewer fileKey={fileKey} src={src} storage={storage} />
+            )
           ) : (
             <div className="flex h-full w-full items-center justify-center text-sm text-muted-foreground">
               No previewer registered for this file.
