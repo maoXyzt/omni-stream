@@ -93,6 +93,11 @@ export function ThreeViewport({
     }
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
     renderer.outputColorSpace = THREE.SRGBColorSpace
+    // setSize(..., false) changes the drawing buffer only. Without CSS sizing,
+    // high-DPI buffers become oversized layout boxes and crop the view. Keep
+    // the canvas out of flex sizing so it cannot resize its own container.
+    renderer.domElement.className =
+      'absolute inset-0 block size-full cursor-grab active:cursor-grabbing'
     container.appendChild(renderer.domElement)
 
     const controls = new OrbitControls(camera, renderer.domElement)
@@ -175,7 +180,7 @@ export function ThreeViewport({
   return (
     <div
       ref={containerRef}
-      className="relative min-h-0 w-full flex-1 overflow-hidden rounded-md"
+      className="relative min-h-0 min-w-0 w-full flex-1 overflow-hidden rounded-md"
       aria-label="3D preview"
     >
       {status === 'loading' && (
