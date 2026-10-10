@@ -174,6 +174,8 @@ URL 是单一事实源：当前页 (`?page=`)、分屏选中的文件、过滤�
 * 大文件别一次性拉：参考 `TextPreview` 的 chunked Range 加载、`VideoPreview`
   让浏览器 `<video>` 自己处理 Range、`ParquetPreview` 用 `hyparquet`
   按 row-group 解码。
+* 3D 与 NumPy 预览先通过 `statFile()` 做大小门禁，再使用 TanStack Query
+  管理可取消的二进制请求；模型外部资源必须通过安全的相对 key 解析。
 
 `VISUAL_GROUPS`（同文件靠下）给文件列表提供图标 + 颜色映射，覆盖面比
 `PREVIEW_TYPES` 更广（音频/压缩包等显示图标但不可预览）。

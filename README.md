@@ -12,6 +12,9 @@
   rs / ts / py / go / sql / shell / proto, and many more
 - **Tabular data** — Parquet (pure-JS decode via hyparquet, with an embedded **DuckDB SQL query tab**) / CSV / TSV;
   also supports Rows View card rendering (see [docs/parquet_rows_view_user_guide.md](docs/parquet_rows_view_user_guide.md))
+- **3D models** — glb / gltf / obj / ply / stl / pcd / fbx with orbit, grid, and axis controls
+  (FBX external textures must be embedded; GLTF sidecars are loaded from the same storage)
+- **NumPy arrays** — npy / npz metadata and sampled `(N, 3)` / `(N, 6)` point-cloud rendering
 - **Anything else** — generic fallback: icon + metadata + the browser's built-in viewer
 
 > Previewing files on S3 / S3-compatible storage requires the configured access key to hold both **`s3:GetObject`** (preview / download / HEAD) and **`s3:ListBucket`** (directory browsing / thumbnail listing). Missing either yields a 403 on the corresponding action. If you omit `s3.bucket` to use multi-bucket mode (see below), the credentials must additionally hold **`s3:ListAllMyBuckets`** so the root listing can enumerate every visible bucket. Write operations (`/api/convert` converting to Parquet) additionally require **`s3:PutObject`**. The local filesystem backend has no such requirement, but is restricted to the directory configured as `local.root_path`.

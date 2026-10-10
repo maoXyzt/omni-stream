@@ -1,4 +1,5 @@
 import {
+  Box,
   Code,
   Database,
   File as FileIcon,
@@ -22,6 +23,7 @@ import { AudioPreview } from './AudioPreview'
 import { CsvPreview } from './CsvPreview'
 import { GenericPreview } from './GenericPreview'
 import { ImagePreview } from './ImagePreview'
+import { LazyModel3DPreview, LazyNpzPreview } from './LazyPreviewers'
 import { ParquetPreview } from './ParquetPreview'
 import { PdfPreview } from './PdfPreview'
 import { TextPreview } from './TextPreview'
@@ -97,6 +99,18 @@ export const PREVIEW_TYPES: readonly PreviewType[] = [
     icon: FileSpreadsheet,
     Component: CsvPreview,
   },
+  {
+    kind: 'model3d',
+    extensions: ['glb', 'gltf', 'obj', 'ply', 'stl', 'pcd', 'fbx'],
+    icon: Box,
+    Component: LazyModel3DPreview,
+  },
+  {
+    kind: 'numpy',
+    extensions: ['npy', 'npz'],
+    icon: Database,
+    Component: LazyNpzPreview,
+  },
   // Fallback for any file the browser can't preview inline — shows the file
   // icon + metadata, plus an iframe for PDF/similar. Has no `extensions` of
   // its own because `previewableKind` returns 'generic' as the catch-all.
@@ -120,7 +134,7 @@ export function previewTypeForKey(key: string): PreviewType | null {
 }
 
 /// Returns the preview kind for any non-empty file key. Known extensions
-/// route to image / video / text; everything else falls back to 'generic'
+/// route to their registered preview; everything else falls back to 'generic'
 /// (file icon + metadata + optional iframe). Returns null only for the empty
 /// string, which never represents a real entry.
 export function previewableKind(key: string): PreviewKind | null {
@@ -158,6 +172,18 @@ const VISUAL_GROUPS: readonly VisualGroup[] = [
     color: 'text-purple-500',
     label: 'Video',
     exts: ['mp4', 'webm', 'mov', 'mkv', 'm4v', 'ogv', 'avi', 'wmv', 'flv'],
+  },
+  {
+    Icon: Box,
+    color: 'text-indigo-500',
+    label: '3D Model',
+    exts: ['glb', 'gltf', 'obj', 'ply', 'stl', 'pcd', 'fbx'],
+  },
+  {
+    Icon: Database,
+    color: 'text-cyan-600',
+    label: 'NumPy',
+    exts: ['npy', 'npz'],
   },
   {
     Icon: FileAudio,
