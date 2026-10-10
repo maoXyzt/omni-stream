@@ -114,7 +114,12 @@ export function LargePreviewGate({
   )
   const effectiveSize = size ?? statQuery.data?.size
 
-  if (size === undefined && storage !== undefined && statQuery.isPending) {
+  if (
+    size === undefined &&
+    storage !== undefined &&
+    statQuery.isPending &&
+    statQuery.isFetching
+  ) {
     return <Skeleton className="min-h-0 w-full flex-1 rounded-md" />
   }
 
