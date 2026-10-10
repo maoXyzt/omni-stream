@@ -53,6 +53,8 @@ function handleTreeItemKeyDown(
   onSelect: (id: string) => void,
   onToggleExpand?: (id: string) => void,
 ): void {
+  // Let nested expand and visibility buttons handle their own activation keys.
+  if (event.target !== event.currentTarget) return
   if (event.key === 'Enter' || event.key === ' ') {
     event.preventDefault()
     onSelect(node.id)

@@ -43,15 +43,18 @@ function makePointCloud(
   const labelRange = labelMax > labelMin ? labelMax - labelMin : 1
   const color = new THREE.Color()
 
+  let written = 0
   for (let index = 0; index < pointCount; index += 1) {
     const pointOffset = index * dimensions
-    const outputOffset = index * 3
-    positions[outputOffset] = points[pointOffset] ?? 0
-    positions[outputOffset + 1] = points[pointOffset + 1] ?? 0
-    positions[outputOffset + 2] = points[pointOffset + 2] ?? 0
-    if (![positions[outputOffset], positions[outputOffset + 1], positions[outputOffset + 2]].every(Number.isFinite)) {
-      throw new Error('The selected point cloud contains non-finite coordinates.')
-    }
+    const x = points[pointOffset] ?? 0
+    const y = points[pointOffset + 1] ?? 0
+    const z = points[pointOffset + 2] ?? 0
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) continue
+    const outputOffset = written * 3
+    written += 1
+    positions[outputOffset] = x
+    positions[outputOffset + 1] = y
+    positions[outputOffset + 2] = z
 
     if (labels && Number.isFinite(labels[index])) {
       const normalized = (labels[index] - labelMin) / labelRange
@@ -74,9 +77,11 @@ function makePointCloud(
     }
   }
 
+  if (written === 0) throw new Error('The selected point cloud has no finite points.')
+
   const geometry = new THREE.BufferGeometry()
-  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
-  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3))
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions.subarray(0, written * 3), 3))
+  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors.subarray(0, written * 3), 3))
   const material = new THREE.PointsMaterial({
     size: 3,
     sizeAttenuation: false,

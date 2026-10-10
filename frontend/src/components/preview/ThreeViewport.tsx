@@ -439,13 +439,23 @@ export function ThreeViewport({
       }
       return null
     }
+    const isEffectivelyVisible = (object: THREE.Object3D): boolean => {
+      let current: THREE.Object3D | null = object
+      while (current) {
+        if (!current.visible) return false
+        current = current.parent
+      }
+      return true
+    }
     const selectAtPointer = (event: MouseEvent, focus: boolean) => {
       if (!modelRoot) return
       const rect = renderer.domElement.getBoundingClientRect()
       pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1
       pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1
       raycaster.setFromCamera(pointer, activeCamera)
-      const hit = raycaster.intersectObject(modelRoot, true)[0]
+      const hit = raycaster
+        .intersectObject(modelRoot, true)
+        .find((intersection) => isEffectivelyVisible(intersection.object))
       selectNode(hit ? nodeForObject(hit.object) : null, focus)
     }
     const handlePointerDown = (event: PointerEvent) => {
@@ -538,6 +548,7 @@ export function ThreeViewport({
   const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     const target = event.target as HTMLElement
     if (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON'].includes(target.tagName)) return
+    if (event.ctrlKey || event.metaKey || event.altKey) return
     const key = event.key.toLowerCase()
     if (key === 'f') actionsRef.current?.fit()
     else if (key === 'r') actionsRef.current?.reset()

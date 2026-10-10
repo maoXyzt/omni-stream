@@ -28,6 +28,9 @@ export async function readPreviewBytes({
     adapter: 'fetch',
     responseType: 'stream',
     maxContentLength: size,
+    // The materialized data is bounded by `size` and cancelled via `signal`;
+    // a wall-clock timeout would abort large previews on slow links.
+    timeout: 0,
     signal,
   })
   const reader = response.data?.getReader?.()

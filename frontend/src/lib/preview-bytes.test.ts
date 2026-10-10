@@ -40,7 +40,7 @@ describe('bounded preview reads', () => {
     serve(4, [[1, 2], [3, 4]])
     expect(new Uint8Array(await readPreviewBytes(request()))).toEqual(Uint8Array.of(1, 2, 3, 4))
     expect(apiClient.get).toHaveBeenCalledWith('/api/proxy/points.npy', expect.objectContaining({
-      adapter: 'fetch', responseType: 'stream', maxContentLength: 4,
+      adapter: 'fetch', responseType: 'stream', maxContentLength: 4, timeout: 0,
     }))
     expect(statFile).toHaveBeenCalledWith('points.npy', 'private')
   })
