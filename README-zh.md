@@ -16,6 +16,9 @@
   rs / ts / py / go / sql / shell / proto 等
 - **表格数据** —— Parquet（hyparquet 纯 JS 解码，可切换内嵌 **DuckDB SQL 查询 tab**）/ CSV / TSV；
   另支持 Rows View 卡片渲染（详见 [docs/parquet_rows_view_user_guide.md](docs/parquet_rows_view_user_guide.md)）
+- **3D 模型** —— glb / gltf / obj / ply / stl / pcd / fbx，支持轨道旋转、网格和坐标轴
+  （FBX 外部纹理需嵌入文件；GLTF sidecar 从同一存储加载）
+- **NumPy 数组** —— npy / npz 元数据，以及抽样 `(N, 3)` / `(N, 6)` 点云渲染
 - **其它格式** —— 通用 fallback：图标 + 元信息 + 浏览器内置 viewer
 
 > 预览 S3 / S3-兼容存储上的文件时，所配 access key 必须有 **`s3:GetObject`**
