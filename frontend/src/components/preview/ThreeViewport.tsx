@@ -9,6 +9,7 @@ import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 
 import { Skeleton } from '@/components/ui/skeleton'
+import { cn } from '@/lib/utils'
 
 import {
   ThreeSceneTree,
@@ -20,6 +21,10 @@ import {
   type ThreeViewportProjection,
   type ThreeViewportView,
 } from './ThreeViewportControls'
+import {
+  ThreeViewportGizmo,
+  type ThreeViewportGizmoHandle,
+} from './ThreeViewportGizmo'
 import {
   collectSceneTree,
   isSameSceneBranch,
@@ -154,6 +159,7 @@ export function ThreeViewport({
   emptyLabel = 'No renderable geometry was found.',
 }: ThreeViewportProps) {
   const containerRef = useRef<HTMLDivElement>(null)
+  const gizmoRef = useRef<ThreeViewportGizmoHandle>(null)
   const actionsRef = useRef<ViewportActions | null>(null)
   const nodeObjectsRef = useRef<Map<string, THREE.Object3D>>(new Map())
   const selectedIdRef = useRef<string | null>(null)
@@ -165,12 +171,14 @@ export function ThreeViewport({
   const [error, setError] = useState<string | null>(null)
   const [projection, setProjection] = useState<ThreeViewportProjection>('perspective')
   const [displayMode, setDisplayMode] = useState<ThreeViewportDisplayMode>(DISPLAY_MODE_SOLID)
+  const [currentView, setCurrentView] = useState<ThreeViewportView>('front')
   const [showGrid, setShowGrid] = useState(true)
   const [showAxes, setShowAxes] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [hiddenNodeIds, setHiddenNodeIds] = useState<ReadonlySet<string>>(() => new Set())
   const [expandedIds, setExpandedIds] = useState<ReadonlySet<string>>(() => new Set())
+  const [sceneTreeCollapsed, setSceneTreeCollapsed] = useState(true)
   const [sceneEntries, setSceneEntries] = useState<SceneTreeEntry[]>([])
   const [selectedObject, setSelectedObject] = useState<THREE.Object3D | null>(null)
 
@@ -232,7 +240,7 @@ export function ThreeViewport({
     renderer.domElement.setAttribute('aria-label', '3D model canvas')
     container.appendChild(renderer.domElement)
 
-    const controls = new OrbitControls<THREE.Camera>(activeCamera, renderer.domElement)
+    let controls = new OrbitControls<THREE.Camera>(activeCamera, renderer.domElement)
     controls.enableDamping = true
     controls.dampingFactor = 0.08
 
@@ -258,12 +266,50 @@ export function ThreeViewport({
     let animationFrame = 0
 
     const requestRender = () => { needsRender = true }
+    const replaceControls = (camera: ViewportCamera, target: THREE.Vector3) => {
+      const previous = controls
+      const settings = {
+        enableDamping: previous.enableDamping,
+        dampingFactor: previous.dampingFactor,
+        minDistance: previous.minDistance,
+        maxDistance: previous.maxDistance,
+        minZoom: previous.minZoom,
+        maxZoom: previous.maxZoom,
+        minTargetRadius: previous.minTargetRadius,
+        maxTargetRadius: previous.maxTargetRadius,
+        minPolarAngle: previous.minPolarAngle,
+        maxPolarAngle: previous.maxPolarAngle,
+        minAzimuthAngle: previous.minAzimuthAngle,
+        maxAzimuthAngle: previous.maxAzimuthAngle,
+        enableZoom: previous.enableZoom,
+        zoomSpeed: previous.zoomSpeed,
+        enableRotate: previous.enableRotate,
+        rotateSpeed: previous.rotateSpeed,
+        keyRotateSpeed: previous.keyRotateSpeed,
+        enablePan: previous.enablePan,
+        panSpeed: previous.panSpeed,
+        keyPanSpeed: previous.keyPanSpeed,
+        screenSpacePanning: previous.screenSpacePanning,
+        zoomToCursor: previous.zoomToCursor,
+        autoRotate: previous.autoRotate,
+        autoRotateSpeed: previous.autoRotateSpeed,
+      }
+      controls.removeEventListener('change', requestRender)
+      controls.dispose()
+      controls = new OrbitControls<THREE.Camera>(camera, renderer.domElement)
+      Object.assign(controls, settings)
+      controls.target.copy(target)
+      controls.addEventListener('change', requestRender)
+    }
     const currentBounds = () => {
       if (!modelRoot) return null
       const bounds = new THREE.Box3().setFromObject(modelRoot)
       return bounds.isEmpty() ? null : bounds
     }
     const configureCamera = (camera: ViewportCamera, bounds: THREE.Box3, direction: THREE.Vector3) => {
+      const dampingEnabled = controls.enableDamping
+      controls.enableDamping = false
+      controls.update()
       const size = bounds.getSize(new THREE.Vector3())
       const center = bounds.getCenter(new THREE.Vector3())
       const maxDimension = Math.max(size.x, size.y, size.z, 0.001)
@@ -288,19 +334,28 @@ export function ThreeViewport({
       controls.minZoom = 0.1
       controls.maxZoom = 100
       controls.update()
+      controls.enableDamping = dampingEnabled
       requestRender()
     }
     const frameObject = (object: THREE.Object3D) => {
       const bounds = new THREE.Box3().setFromObject(object)
       if (bounds.isEmpty()) return
+      const center = bounds.getCenter(new THREE.Vector3())
       activeCamera.up.set(0, 1, 0)
+      replaceControls(activeCamera, center)
       configureCamera(activeCamera, bounds, new THREE.Vector3(1, 0.75, 1))
     }
     const setStandardView = (view: ThreeViewportView) => {
       const bounds = currentBounds()
       if (!bounds) return
-      const isTopDownView = view === 'top' || view === 'bottom'
-      activeCamera.up.set(0, isTopDownView ? 0 : 1, view === 'top' ? 1 : view === 'bottom' ? -1 : 0)
+      activeCamera.up.copy(
+        view === 'top'
+          ? new THREE.Vector3(0, 0, -1)
+          : view === 'bottom'
+            ? new THREE.Vector3(0, 0, 1)
+            : new THREE.Vector3(0, 1, 0),
+      )
+      replaceControls(activeCamera, bounds.getCenter(new THREE.Vector3()))
       configureCamera(activeCamera, bounds, directionForView(view))
     }
     const setProjectionMode = (nextProjection: ThreeViewportProjection) => {
@@ -310,16 +365,16 @@ export function ThreeViewport({
       ) return
       const target = controls.target.clone()
       const offset = activeCamera.position.clone().sub(target)
+      const up = activeCamera.up.clone()
       const distance = Math.max(offset.length(), 0.001)
       const direction = offset.lengthSq() > 1e-12
         ? offset.normalize()
         : new THREE.Vector3(1, 0.75, 1).normalize()
       activeCamera = nextProjection === 'perspective' ? perspectiveCamera : orthographicCamera
-      activeCamera.up.copy(Math.abs(direction.y) > 0.9
-        ? new THREE.Vector3(0, 0, direction.y > 0 ? 1 : -1)
-        : new THREE.Vector3(0, 1, 0))
+      activeCamera.up.copy(up)
       activeCamera.position.copy(target).addScaledVector(direction, distance)
-      controls.object = activeCamera
+      activeCamera.lookAt(target)
+      replaceControls(activeCamera, target)
       if (activeCamera instanceof THREE.PerspectiveCamera) {
         activeCamera.aspect = viewportAspect
         activeCamera.updateProjectionMatrix()
@@ -331,7 +386,6 @@ export function ThreeViewport({
           : orthographicHalfHeight
         updateOrthographicFrustum(activeCamera, viewportAspect, orthographicHalfHeight)
       }
-      activeCamera.lookAt(target)
       controls.update()
       requestRender()
     }
@@ -475,8 +529,11 @@ export function ThreeViewport({
     renderer.domElement.addEventListener('contextmenu', preventContextMenu)
 
     const render = () => {
-      controls.update()
+      const orbitChanged = controls.update()
       if (selectionHelper?.visible) selectionHelper.update()
+      if (orbitChanged || needsRender) {
+        gizmoRef.current?.updateOrientation(activeCamera.quaternion)
+      }
       if (needsRender) {
         renderer.render(scene, activeCamera)
         needsRender = false
@@ -491,8 +548,10 @@ export function ThreeViewport({
     setSelectedId(null)
     selectedIdRef.current = null
     setSelectedObject(null)
+    setCurrentView('front')
     setHiddenNodeIds(new Set())
     setExpandedIds(new Set())
+    setSceneTreeCollapsed(true)
     nodeObjectsRef.current = new Map()
 
     void loadObject(abortController.signal)
@@ -510,6 +569,13 @@ export function ThreeViewport({
           return
         }
         const tree = collectSceneTree(object)
+        const modelSize = bounds.getSize(new THREE.Vector3())
+        const maxDimension = Math.max(modelSize.x, modelSize.y, modelSize.z, 0.001)
+        // Keep the reference helpers useful for models with very different scales.
+        // The viewport uses Y-up, so the grid sits at the model's lowest Y bound.
+        grid.scale.setScalar(maxDimension * 0.4)
+        grid.position.y = bounds.min.y
+        axes.scale.setScalar(maxDimension * 0.5)
         modelRoot = object
         nodeObjectsRef.current = tree.objects
         for (const [id, node] of tree.objects) objectNodeIds.set(node, id)
@@ -545,6 +611,11 @@ export function ThreeViewport({
     }
   }, [emptyLabel, loadObject])
 
+  const applyViewChange = (view: ThreeViewportView) => {
+    setCurrentView(view)
+    actionsRef.current?.setView(view)
+  }
+
   const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     const target = event.target as HTMLElement
     if (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON'].includes(target.tagName)) return
@@ -552,12 +623,12 @@ export function ThreeViewport({
     const key = event.key.toLowerCase()
     if (key === 'f') actionsRef.current?.fit()
     else if (key === 'r') actionsRef.current?.reset()
-    else if (key === '1') actionsRef.current?.setView('front')
-    else if (key === '2') actionsRef.current?.setView('back')
-    else if (key === '3') actionsRef.current?.setView('left')
-    else if (key === '4') actionsRef.current?.setView('right')
-    else if (key === '5') actionsRef.current?.setView('top')
-    else if (key === '6') actionsRef.current?.setView('bottom')
+    else if (key === '1') applyViewChange('front')
+    else if (key === '2') applyViewChange('back')
+    else if (key === '3') applyViewChange('left')
+    else if (key === '4') applyViewChange('right')
+    else if (key === '5') applyViewChange('top')
+    else if (key === '6') applyViewChange('bottom')
     else return
     event.preventDefault()
   }
@@ -583,7 +654,7 @@ export function ThreeViewport({
             disabled={status !== 'ready'}
             onFitToView={() => actionsRef.current?.fit()}
             onResetView={() => actionsRef.current?.reset()}
-            onViewChange={(view) => actionsRef.current?.setView(view)}
+            onViewChange={applyViewChange}
             onProjectionChange={(next) => {
               setProjection(next)
               actionsRef.current?.setProjection(next)
@@ -606,7 +677,14 @@ export function ThreeViewport({
       </div>
       {sceneEntries.length > 0 && (
         <div className="pointer-events-none absolute inset-x-3 bottom-3 top-28 z-10">
-          <div className="pointer-events-auto flex h-full w-72 max-w-[42%] flex-col">
+          <div
+            className={cn(
+              'pointer-events-auto flex flex-col',
+              sceneTreeCollapsed
+                ? 'h-auto w-auto'
+                : 'h-full w-72 max-w-[42%]',
+            )}
+          >
             <ThreeSceneTree
               nodes={treeNodes}
               searchQuery={searchQuery}
@@ -623,13 +701,15 @@ export function ThreeViewport({
                   return next
                 })
               }}
+              collapsed={sceneTreeCollapsed}
+              onToggleCollapse={() => setSceneTreeCollapsed((current) => !current)}
               showSearch={false}
               hasSelection={selectedId !== null}
-              className="min-h-0 flex-1"
+              className={sceneTreeCollapsed ? 'min-h-0 w-auto self-start' : 'min-h-0 flex-1'}
             />
           </div>
           {selectedEntry && selectedObject && (
-            <div className="pointer-events-auto absolute bottom-0 right-0 max-w-64 rounded-md border bg-background/95 p-3 text-xs shadow-sm backdrop-blur">
+            <div className="pointer-events-auto absolute bottom-60 right-0 max-w-64 rounded-md border bg-background/95 p-3 text-xs shadow-sm backdrop-blur">
               <p className="truncate font-medium" title={selectedEntry.name}>{selectedEntry.name}</p>
               <p className="text-muted-foreground">{selectedEntry.kind}</p>
               <p className="text-muted-foreground">{selectedObject.children.length} child object(s)</p>
@@ -637,6 +717,14 @@ export function ThreeViewport({
           )}
         </div>
       )}
+      <div className="pointer-events-none absolute bottom-3 right-3 z-20">
+        <ThreeViewportGizmo
+          ref={gizmoRef}
+          view={currentView}
+          disabled={status !== 'ready'}
+          onViewChange={applyViewChange}
+        />
+      </div>
       {status === 'error' && (
         <div className="absolute inset-0 z-20 flex items-center justify-center bg-background/90 p-6">
           <div role="alert" className="max-w-lg space-y-2 text-center">
