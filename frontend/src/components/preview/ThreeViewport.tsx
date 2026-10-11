@@ -27,6 +27,7 @@ import {
 } from './ThreeViewportGizmo'
 import {
   collectSceneTree,
+  gridPositionForBounds,
   isSameSceneBranch,
   visibleSceneTreeEntries,
 } from './three-viewport-utils'
@@ -572,9 +573,9 @@ export function ThreeViewport({
         const modelSize = bounds.getSize(new THREE.Vector3())
         const maxDimension = Math.max(modelSize.x, modelSize.y, modelSize.z, 0.001)
         // Keep the reference helpers useful for models with very different scales.
-        // The viewport uses Y-up, so the grid sits at the model's lowest Y bound.
+        // The grid follows the model's X/Z center and lowest Y bound.
         grid.scale.setScalar(maxDimension * 0.4)
-        grid.position.y = bounds.min.y
+        grid.position.copy(gridPositionForBounds(bounds))
         axes.scale.setScalar(maxDimension * 0.5)
         modelRoot = object
         nodeObjectsRef.current = tree.objects

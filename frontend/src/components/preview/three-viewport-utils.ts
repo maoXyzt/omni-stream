@@ -14,6 +14,12 @@ export interface SceneTreeData {
   objects: Map<string, THREE.Object3D>
 }
 
+/** Place the viewport grid below the model and center it on the model's X/Z bounds. */
+export function gridPositionForBounds(bounds: THREE.Box3): THREE.Vector3 {
+  const center = bounds.getCenter(new THREE.Vector3())
+  return new THREE.Vector3(center.x, bounds.min.y, center.z)
+}
+
 function objectLabel(object: THREE.Object3D, index: number): string {
   const name = object.name.trim()
   if (name) return name

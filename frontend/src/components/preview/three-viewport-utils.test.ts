@@ -1,9 +1,22 @@
 import { describe, expect, it } from 'vitest'
 import * as THREE from 'three'
 
-import { collectSceneTree, visibleSceneTreeEntries } from './three-viewport-utils'
+import {
+  collectSceneTree,
+  gridPositionForBounds,
+  visibleSceneTreeEntries,
+} from './three-viewport-utils'
 
 describe('three viewport scene tree helpers', () => {
+  it('centers the grid under translated model bounds', () => {
+    const bounds = new THREE.Box3(
+      new THREE.Vector3(10, -4, 20),
+      new THREE.Vector3(18, 6, 32),
+    )
+
+    expect(gridPositionForBounds(bounds).toArray()).toEqual([14, -4, 26])
+  })
+
   it('collects named and unnamed objects with their hierarchy', () => {
     const root = new THREE.Group()
     root.name = 'Assembly'
