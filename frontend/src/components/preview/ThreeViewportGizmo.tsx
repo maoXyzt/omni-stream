@@ -95,7 +95,7 @@ function pointStyle(point: GizmoAxisPoint, size: number): CSSProperties {
     borderColor: axisColors[point.axis],
     ...(point.positive && !point.center
       ? { backgroundColor: axisColors[point.axis], color: '#0f172a' }
-      : { backgroundColor: '#111827' }),
+      : { backgroundColor: 'transparent' }),
     ...(point.center
       ? { color: axisColors[point.axis], boxShadow: `0 0 0 2px ${axisColors[point.axis]}` }
       : {}),

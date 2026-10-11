@@ -55,5 +55,7 @@ describe('ThreeViewportGizmo', () => {
     expect(markup.match(/<line\b/g)).toHaveLength(4)
     expect(markup).toContain('title="−X · 左视"')
     expect(markup).toContain('title="−Y · 底视"')
+    expect(markup).toMatch(/style="[^"]*background-color:#fb7185/)
+    expect(markup).toMatch(/style="[^"]*background-color:transparent/)
   })
 })
