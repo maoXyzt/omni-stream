@@ -197,7 +197,7 @@ export function ThreeSceneTree({
           className="min-h-0 flex-1 overflow-y-auto"
         >
           {filteredNodes.length > 0 ? (
-            <div className="space-y-0.5">
+            <div role="none" className="space-y-0.5">
               {filteredNodes.map((node) => {
                 const depth = Math.max(0, Math.floor(node.depth ?? 0))
                 const hasChildren = node.hasChildren === true
