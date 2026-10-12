@@ -23,6 +23,9 @@ pub enum AppError {
   #[error("invalid range: {0}")]
   InvalidRange(String),
 
+  #[error("invalid model metadata: {0}")]
+  InvalidModel(String),
+
   #[error("invalid path: {0}")]
   InvalidPath(String),
 
@@ -92,7 +95,9 @@ impl AppError {
       AppError::NotFound(_) => StatusCode::NOT_FOUND,
       AppError::Forbidden(_) | AppError::ObjectReadForbidden(_) => StatusCode::FORBIDDEN,
       AppError::InvalidRange(_) => StatusCode::RANGE_NOT_SATISFIABLE,
-      AppError::InvalidPath(_) | AppError::Unsupported(_) => StatusCode::BAD_REQUEST,
+      AppError::InvalidPath(_) | AppError::InvalidModel(_) | AppError::Unsupported(_) => {
+        StatusCode::BAD_REQUEST
+      }
       AppError::Io(e) if e.kind() == io::ErrorKind::NotFound => StatusCode::NOT_FOUND,
       AppError::StorageInvalid(_) => StatusCode::SERVICE_UNAVAILABLE,
       AppError::Io(_) | AppError::Backend(_) => StatusCode::INTERNAL_SERVER_ERROR,

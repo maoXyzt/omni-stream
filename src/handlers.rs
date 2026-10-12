@@ -6,12 +6,13 @@ use axum::body::{Body, Bytes};
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
+use futures::StreamExt;
 use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
 
 use crate::error::AppError;
 use crate::storage::factory::{BackendRegistry, InvalidStorageEntry, NamedBackend, StorageDetails};
-use crate::storage::{FileMeta, GetOptions, ListResult, PutOptions, StorageBackend};
+use crate::storage::{ByteStream, FileMeta, GetOptions, ListResult, PutOptions, StorageBackend};
 use crate::thumbs::ThumbState;
 use crate::transcode::TranscodeState;
 
@@ -151,6 +152,9 @@ pub struct ListQuery {
 /// one request advance ~100k entries; large enough for any realistic jump,
 /// small enough that a misuse can't run away with the server.
 const MAX_SKIP_PAGES: u32 = 100;
+
+const SAFETENSORS_HEADER_PREFIX_BYTES: usize = 8;
+const MAX_SAFETENSORS_HEADER_BYTES: u64 = 4 * 1024 * 1024;
 
 /// Used by `stat` and `proxy` — both take the key in the path and only need
 /// to pick which backend to talk to.
@@ -363,6 +367,99 @@ pub async fn stat_handler(
   let backend = state.resolve(q.storage.as_deref())?;
   let meta = backend.stat(&key).await?;
   Ok(Json(meta))
+}
+
+/// `GET /api/safetensors/{*key}` — inspect a Safetensors file by reading only
+/// its 8-byte header length and bounded JSON header. Tensor data is never
+/// downloaded or materialised in memory.
+#[tracing::instrument(skip_all, fields(storage = ?q.storage, key = %key))]
+pub async fn safetensors_handler(
+  State(state): State<AppState>,
+  Query(q): Query<StorageSelector>,
+  Path(key): Path<String>,
+) -> Result<Json<crate::safetensors::SafetensorsMetadata>, AppError> {
+  let backend = state.resolve(q.storage.as_deref())?;
+  let meta = backend.stat(&key).await?;
+  if meta.is_dir {
+    return Err(AppError::InvalidModel(
+      "Safetensors preview requires a file".to_string(),
+    ));
+  }
+  if meta.size < SAFETENSORS_HEADER_PREFIX_BYTES as u64 {
+    return Err(AppError::InvalidModel(
+      "file is too small to contain a Safetensors header".to_string(),
+    ));
+  }
+
+  let prefix = backend
+    .get_file(
+      &key,
+      GetOptions {
+        range: Some("bytes=0-7".to_string()),
+      },
+    )
+    .await?;
+  let prefix = read_bounded_stream(prefix.body, SAFETENSORS_HEADER_PREFIX_BYTES).await?;
+  let header_len = u64::from_le_bytes(
+    prefix
+      .as_slice()
+      .try_into()
+      .map_err(|_| AppError::InvalidModel("invalid Safetensors header prefix".to_string()))?,
+  );
+  if header_len > MAX_SAFETENSORS_HEADER_BYTES {
+    return Err(AppError::InvalidModel(format!(
+      "Safetensors header exceeds the {} MiB limit",
+      MAX_SAFETENSORS_HEADER_BYTES / (1024 * 1024)
+    )));
+  }
+  if header_len == 0 {
+    return Err(AppError::InvalidModel(
+      "Safetensors header cannot be empty".to_string(),
+    ));
+  }
+  let header_end = (SAFETENSORS_HEADER_PREFIX_BYTES as u64)
+    .checked_add(header_len)
+    .and_then(|value| value.checked_sub(1))
+    .ok_or_else(|| AppError::InvalidModel("Safetensors header range overflows".to_string()))?;
+  if header_end >= meta.size {
+    return Err(AppError::InvalidModel(
+      "Safetensors header extends past the end of the file".to_string(),
+    ));
+  }
+
+  let header = backend
+    .get_file(
+      &key,
+      GetOptions {
+        range: Some(format!("bytes=8-{header_end}")),
+      },
+    )
+    .await?;
+  let header_len = usize::try_from(header_len).map_err(|_| {
+    AppError::InvalidModel("Safetensors header length does not fit in memory".to_string())
+  })?;
+  let header = read_bounded_stream(header.body, header_len).await?;
+  Ok(Json(crate::safetensors::parse_header(&header, meta.size)?))
+}
+
+async fn read_bounded_stream(mut body: ByteStream, expected: usize) -> Result<Vec<u8>, AppError> {
+  let mut bytes = Vec::with_capacity(expected);
+  while let Some(chunk) = body.next().await {
+    let chunk = chunk?;
+    if bytes.len().saturating_add(chunk.len()) > expected {
+      return Err(AppError::InvalidModel(
+        "storage returned more bytes than the requested Safetensors range".to_string(),
+      ));
+    }
+    bytes.extend_from_slice(&chunk);
+  }
+  if bytes.len() != expected {
+    return Err(AppError::InvalidModel(format!(
+      "storage returned {} bytes, expected {expected}",
+      bytes.len()
+    )));
+  }
+  Ok(bytes)
 }
 
 #[derive(Debug, Deserialize)]
@@ -794,6 +891,8 @@ mod tests {
   use super::*;
   use crate::storage::{ByteStream, FileEntry, FileMeta, GetOptions, StorageResponse};
   use async_trait::async_trait;
+  use bytes::Bytes;
+  use futures::stream;
   use std::sync::Mutex;
 
   /// Stub backend that paginates a fixed key list in `page_size` chunks.
@@ -871,6 +970,38 @@ mod tests {
   // type-checked. (Keeping the explicit import documents the dependency.)
   #[allow(dead_code)]
   fn _ensure_bytestream_in_scope(_s: ByteStream) {}
+
+  fn byte_stream(chunks: Vec<&'static [u8]>) -> ByteStream {
+    Box::pin(stream::iter(
+      chunks
+        .into_iter()
+        .map(|chunk| Ok(Bytes::from_static(chunk))),
+    ))
+  }
+
+  #[tokio::test]
+  async fn bounded_header_reader_accepts_exact_stream() {
+    let bytes = read_bounded_stream(byte_stream(vec![b"{\"a\"", b":1}"]), 7)
+      .await
+      .unwrap();
+    assert_eq!(bytes, br#"{"a":1}"#);
+  }
+
+  #[tokio::test]
+  async fn bounded_header_reader_rejects_truncated_stream() {
+    let error = read_bounded_stream(byte_stream(vec![b"{}"]), 3)
+      .await
+      .unwrap_err();
+    assert!(error.to_string().contains("expected 3"));
+  }
+
+  #[tokio::test]
+  async fn bounded_header_reader_rejects_oversized_stream() {
+    let error = read_bounded_stream(byte_stream(vec![b"{}"]), 1)
+      .await
+      .unwrap_err();
+    assert!(error.to_string().contains("more bytes"));
+  }
 
   #[tokio::test]
   async fn walk_skip_zero_is_a_single_list_call() {

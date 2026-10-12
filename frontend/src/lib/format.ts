@@ -12,6 +12,35 @@ export function formatBytes(n: number): string {
   return `${v.toFixed(v >= 10 ? 0 : 1)} ${units[i]}`
 }
 
+/// Format an integer returned as a decimal string without passing it through
+/// JavaScript's 53-bit Number range.
+export function formatDecimalInteger(value: string): string {
+  try {
+    return BigInt(value).toLocaleString()
+  } catch {
+    return value
+  }
+}
+
+/// Format a decimal byte count using binary units while retaining exact
+/// integer arithmetic for large model files.
+export function formatDecimalBytes(value: string): string {
+  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB']
+  try {
+    let scaled = BigInt(value) * 10n
+    let unit = 0
+    while (scaled >= 10240n && unit < units.length - 1) {
+      scaled = (scaled + 512n) / 1024n
+      unit += 1
+    }
+    const whole = scaled / 10n
+    const fraction = scaled % 10n
+    return `${whole}${fraction === 0n ? '' : `.${fraction}`} ${units[unit]}`
+  } catch {
+    return `${value} B`
+  }
+}
+
 /// Compact a slash-separated path for a header label: shows the last two
 /// segments prefixed with `…/` once it would otherwise be longer than
 /// that. Callers should still hand the full path to the surrounding

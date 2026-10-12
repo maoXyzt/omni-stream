@@ -1,5 +1,6 @@
 import {
   Box,
+  Binary,
   Code,
   Database,
   File as FileIcon,
@@ -26,6 +27,7 @@ import { ImagePreview } from './ImagePreview'
 import { LazyModel3DPreview, LazyNpzPreview } from './LazyPreviewers'
 import { ParquetPreview } from './ParquetPreview'
 import { PdfPreview } from './PdfPreview'
+import { SafetensorsPreview } from './SafetensorsPreview'
 import { TextPreview } from './TextPreview'
 import { VideoPreview } from './VideoPreview'
 import type { PreviewKind, PreviewType } from './types'
@@ -98,6 +100,12 @@ export const PREVIEW_TYPES: readonly PreviewType[] = [
     extensions: ['csv', 'tsv'],
     icon: FileSpreadsheet,
     Component: CsvPreview,
+  },
+  {
+    kind: 'safetensors',
+    extensions: ['safetensors'],
+    icon: Binary,
+    Component: SafetensorsPreview,
   },
   {
     kind: 'model3d',
@@ -184,6 +192,12 @@ const VISUAL_GROUPS: readonly VisualGroup[] = [
     color: 'text-cyan-600',
     label: 'NumPy',
     exts: ['npy', 'npz'],
+  },
+  {
+    Icon: Binary,
+    color: 'text-violet-600',
+    label: 'Model weights',
+    exts: ['safetensors'],
   },
   {
     Icon: FileAudio,

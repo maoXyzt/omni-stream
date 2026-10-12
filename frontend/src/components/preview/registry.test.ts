@@ -3,6 +3,12 @@ import { describe, expect, it } from 'vitest'
 import { previewTypeForKey, previewableKind } from './registry'
 
 describe('visual file preview registry', () => {
+  it('routes Safetensors files to a header-only preview', () => {
+    expect(previewableKind('weights/model.SAFETENSORS')).toBe('safetensors')
+    expect(previewTypeForKey('weights/model.safetensors')?.kind).toBe('safetensors')
+    expect(previewableKind('weights/model.bin')).toBe('generic')
+  })
+
   it('routes supported 3D formats to the model previewer', () => {
     for (const key of ['model.GLB', 'mesh.ply', 'cloud.PCD', 'scene.fbx']) {
       expect(previewableKind(key)).toBe('model3d')

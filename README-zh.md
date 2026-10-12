@@ -19,6 +19,7 @@
 - **3D 模型** —— glb / gltf / obj / ply / stl / pcd / fbx，支持轨道旋转、网格和坐标轴
   （FBX 外部纹理需嵌入文件；GLTF sidecar 从同一存储加载）
 - **NumPy 数组** —— npy / npz 元数据，以及抽样 `(N, 3)` / `(N, 6)` 点云渲染
+- **Safetensors 权重** —— 只读取 Header 展示 Tensor key / shape / dtype，并估算元素数量和存储体积；预览不会下载大块权重数据
 - **其它格式** —— 通用 fallback：图标 + 元信息 + 浏览器内置 viewer
 
 > 预览 S3 / S3-兼容存储上的文件时，所配 access key 必须有 **`s3:GetObject`**

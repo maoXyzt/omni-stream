@@ -6,6 +6,7 @@ import type {
   ServerInfo,
   StoragesResponse,
 } from '@/types/storage'
+import type { SafetensorsMetadata } from '@/types/safetensors'
 
 export async function listStorages(): Promise<StoragesResponse> {
   const { data } = await apiClient.get<StoragesResponse>('/api/storages')
@@ -45,6 +46,19 @@ export async function statFile(
   const { data } = await apiClient.get<FileMeta>(`/api/stat/${encodeKey(key)}`, {
     params,
   })
+  return data
+}
+
+export async function getSafetensorsMetadata(
+  key: string,
+  storage?: string,
+): Promise<SafetensorsMetadata> {
+  const params: Record<string, string> = {}
+  if (storage) params.storage = storage
+  const { data } = await apiClient.get<SafetensorsMetadata>(
+    `/api/safetensors/${encodeKey(key)}`,
+    { params },
+  )
   return data
 }
 

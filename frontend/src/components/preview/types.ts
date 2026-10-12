@@ -9,6 +9,7 @@ export type PreviewKind =
   | 'text'
   | 'parquet'
   | 'csv'
+  | 'safetensors'
   | 'model3d'
   | 'numpy'
   | 'generic'

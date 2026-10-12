@@ -3,6 +3,7 @@ mod cli_style;
 mod config;
 mod error;
 mod handlers;
+mod safetensors;
 #[cfg(feature = "duckdb")]
 mod sql;
 mod storage;
@@ -31,8 +32,8 @@ use crate::auth::{AuthLayer, auth_middleware};
 use crate::config::Config;
 use crate::handlers::{
   AppState, delete_file_handler, list_handler, list_storages_handler, move_file_handler,
-  proxy_handler, put_file_handler, raw_handler, raw_root_handler, server_info_handler,
-  stat_handler, static_handler, thumb_handler, transcode_handler,
+  proxy_handler, put_file_handler, raw_handler, raw_root_handler, safetensors_handler,
+  server_info_handler, stat_handler, static_handler, thumb_handler, transcode_handler,
 };
 use crate::storage::factory::create_registry;
 use crate::thumbs::ThumbState;
@@ -173,6 +174,10 @@ async fn main() -> anyhow::Result<()> {
     .route("/api/storages", get(list_storages_handler))
     .route("/api/list", get(list_handler).layer(catalog_timeout))
     .route("/api/stat/{*key}", get(stat_handler).layer(catalog_timeout))
+    .route(
+      "/api/safetensors/{*key}",
+      get(safetensors_handler).layer(catalog_timeout),
+    )
     .route("/api/proxy/{*key}", get(proxy_handler))
     .route("/api/transcode/{*key}", get(transcode_handler))
     .route(
