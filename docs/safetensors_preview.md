@@ -2,7 +2,7 @@
 
 ## 范围
 
-在文件列表的内联预览和弹窗预览中查看单个 `.safetensors` 文件：文件元数据、Tensor key、shape、dtype、元素数量、权重字节数、按 dtype 汇总，以及 key 搜索、前缀导航和分页。大文件只读取 Header，不下载或加载权重，不需要 Python、GPU 或独立服务。
+在文件列表的内联预览和弹窗预览中查看单个 `.safetensors` 文件：文件元数据、Tensor key、shape、dtype、元素数量、权重字节数、按 dtype 汇总，以及 key / dtype 搜索和分页。大文件只读取 Header，不下载或加载权重，不需要 Python、GPU 或独立服务。
 
 预览反映当前文件（可能仅是一个分片、Embedding 或适配器），不自动聚合分片。存储元素总数不等同于模型可训练参数总数，尤其在权重量化或包含 buffer 时。权重体积不等同于运行显存；KV Cache、激活、计算缓冲区和加载后的精度转换不在本次估算范围内。Tensor 名称也不能证明模型身份或质量。
 

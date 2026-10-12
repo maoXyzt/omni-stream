@@ -141,6 +141,13 @@ pub fn parse_header(header: &[u8], file_bytes: u64) -> Result<SafetensorsMetadat
       )));
     }
     let bytes = end - start;
+    let bits = dtype_bits(dtype).ok_or_else(|| invalid("unsupported dtype"))?;
+    let expected_bits = u128::from(elements) * u128::from(bits);
+    if expected_bits != u128::from(bytes) * 8 {
+      return Err(invalid(format!(
+        "tensor '{name}' shape and dtype disagree with data_offsets"
+      )));
+    }
     tensors.push(TensorMetadata {
       name: name.clone(),
       dtype: dtype.to_owned(),
@@ -151,7 +158,7 @@ pub fn parse_header(header: &[u8], file_bytes: u64) -> Result<SafetensorsMetadat
     ranges.push((start, end, name.clone()));
   }
 
-  ranges.sort_by_key(|(start, _, _)| *start);
+  ranges.sort_by_key(|(start, end, _)| (*start, *end));
   let mut cursor = 0_u64;
   for (start, end, name) in &ranges {
     if *start != cursor {
@@ -264,6 +271,18 @@ mod tests {
     let report = parse_header(header, 8 + header.len() as u64 + 4).unwrap();
     assert_eq!(report.tensors[0].shape, Vec::<String>::new());
     assert_eq!(report.tensors[0].elements, "1");
+  }
+
+  #[test]
+  fn accepts_empty_tensor_before_data_at_same_offset() {
+    let header = br#"{"a":{"dtype":"U8","shape":[1],"data_offsets":[0,1]},"z":{"dtype":"U8","shape":[0],"data_offsets":[0,0]}}"#;
+    assert!(parse_header(header, 8 + header.len() as u64 + 1).is_ok());
+  }
+
+  #[test]
+  fn rejects_shape_byte_mismatch() {
+    let header = br#"{"a":{"dtype":"F32","shape":[2],"data_offsets":[0,4]}}"#;
+    assert!(parse_header(header, 8 + header.len() as u64 + 4).is_err());
   }
 
   #[test]

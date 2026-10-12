@@ -27,7 +27,7 @@ export function SafetensorsPreview({ fileKey, storage }: PreviewerProps) {
   const query = useQuery({
     queryKey: ['safetensors-metadata', fileKey, storage] as const,
     queryFn: () => getSafetensorsMetadata(fileKey, storage),
-    staleTime: Infinity,
+    staleTime: 0,
     retry: false,
   })
 
@@ -88,12 +88,21 @@ export function SafetensorsPreview({ fileKey, storage }: PreviewerProps) {
     <div className="flex h-full w-full flex-col gap-3 overflow-hidden p-4">
       <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
         <Summary label="Tensors" value={formatDecimalInteger(String(report.tensor_count))} />
-        <Summary label="Parameters" value={formatDecimalInteger(report.total_elements)} />
+        <Summary label="Stored elements" value={formatDecimalInteger(report.total_elements)} />
         <Summary label="Weights" value={formatDecimalBytes(report.weight_bytes)} />
         <Summary label="File" value={formatDecimalBytes(report.file_bytes)} />
         <Summary label="Header" value={formatDecimalBytes(String(report.header_bytes))} />
       </div>
 
+      <p className="text-xs text-muted-foreground">Weight storage only; runtime memory also includes caches and activations.</p>
+      <div className="flex flex-wrap gap-2 text-xs">
+        {report.dtypes.map((summary) => (
+          <span key={summary.dtype} className="rounded-md bg-muted px-2 py-1">
+            {summary.dtype}: {summary.tensor_count} tensors · {formatDecimalBytes(summary.bytes)}
+          </span>
+        ))}
+
+      </div>
       {Object.keys(report.metadata).length > 0 && (
         <div className="flex flex-wrap gap-1.5 text-xs text-muted-foreground">
           {Object.entries(report.metadata).map(([key, value]) => (
