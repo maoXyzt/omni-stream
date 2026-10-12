@@ -275,7 +275,7 @@ fn generate_webp(src: Bytes, width: u32, quality: u8, output: &Path) -> Result<(
       output.display()
     ))
   })?;
-  std::fs::create_dir_all(parent).map_err(AppError::Io)?;
+  std::fs::create_dir_all(parent).map_err(AppError::ThumbnailCacheIo)?;
 
   // Atomic publish: write to tmp + rename. Without this, a partial write
   // visible to a sibling task would be served as a corrupt thumbnail.
@@ -288,12 +288,12 @@ fn generate_webp(src: Bytes, width: u32, quality: u8, output: &Path) -> Result<(
       .unwrap_or(0),
   ));
 
-  if let Err(e) = std::fs::write(&tmp, &*encoded).map_err(AppError::Io) {
+  if let Err(e) = std::fs::write(&tmp, &*encoded).map_err(AppError::ThumbnailCacheIo) {
     let _ = std::fs::remove_file(&tmp);
     return Err(e);
   }
 
-  std::fs::rename(&tmp, output).map_err(AppError::Io)?;
+  std::fs::rename(&tmp, output).map_err(AppError::ThumbnailCacheIo)?;
   Ok(())
 }
 

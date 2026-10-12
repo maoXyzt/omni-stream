@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::io;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -176,12 +177,30 @@ pub async fn create_registry(cfg: &Config) -> anyhow::Result<BackendRegistry> {
         // anyhow's Display walks the chain, which we want here so the warn
         // log captures both the top-level summary and the root cause.
         let reason = format!("{e:#}");
-        tracing::warn!(
-          storage.name = entry.name.as_str(),
-          storage.r#type = ?entry.r#type,
-          reason = %reason,
-          "skipping invalid storage; UI will mark it [invalid] and requests targeting it return 503",
-        );
+        // A storage whose root cannot be read is an operator-level outage,
+        // rather than a single forbidden object. Keep that at error level so
+        // it is visible in backend monitoring. Other optional-storage init
+        // failures remain warnings because the server can still operate.
+        let root_permission_denied = e.chain().any(|cause| {
+          cause
+            .downcast_ref::<io::Error>()
+            .is_some_and(|io_error| io_error.kind() == io::ErrorKind::PermissionDenied)
+        });
+        if root_permission_denied {
+          tracing::error!(
+            storage.name = entry.name.as_str(),
+            storage.r#type = ?entry.r#type,
+            reason = %reason,
+            "storage is unavailable because its root cannot be read; UI will mark it [invalid] and requests targeting it return 503",
+          );
+        } else {
+          tracing::warn!(
+            storage.name = entry.name.as_str(),
+            storage.r#type = ?entry.r#type,
+            reason = %reason,
+            "skipping invalid storage; UI will mark it [invalid] and requests targeting it return 503",
+          );
+        }
         invalid.insert(
           entry.name.clone(),
           InvalidStorageEntry {

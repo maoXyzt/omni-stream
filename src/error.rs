@@ -32,6 +32,12 @@ pub enum AppError {
   #[error(transparent)]
   Io(#[from] io::Error),
 
+  /// IO failure in the derived thumbnail cache. Kept separate from storage
+  /// IO so a cache permission problem is not reported as a storage-path
+  /// permission denial to API clients.
+  #[error("thumbnail cache error: {0}")]
+  ThumbnailCacheIo(#[source] io::Error),
+
   #[error("storage backend error: {0}")]
   Backend(String),
 
@@ -99,8 +105,13 @@ impl AppError {
         StatusCode::BAD_REQUEST
       }
       AppError::Io(e) if e.kind() == io::ErrorKind::NotFound => StatusCode::NOT_FOUND,
+      // A configured local storage can be reachable while an individual
+      // path is unreadable. Expose that as a client-visible authorization
+      // failure instead of leaking it as an opaque 500.
+      AppError::Io(e) if e.kind() == io::ErrorKind::PermissionDenied => StatusCode::FORBIDDEN,
       AppError::StorageInvalid(_) => StatusCode::SERVICE_UNAVAILABLE,
       AppError::Io(_) | AppError::Backend(_) => StatusCode::INTERNAL_SERVER_ERROR,
+      AppError::ThumbnailCacheIo(_) => StatusCode::INTERNAL_SERVER_ERROR,
       AppError::Conflict(_) => StatusCode::CONFLICT,
       AppError::Busy(_) => StatusCode::TOO_MANY_REQUESTS,
       #[cfg(feature = "duckdb")]
@@ -125,6 +136,19 @@ impl IntoResponse for AppError {
           "code":    "OBJECT_READ_FORBIDDEN",
           "message": message,
           "hint":    "Check s3:GetObject for the object (and kms:Decrypt for SSE-KMS); s3:ListBucket only permits listing object names.",
+      }));
+      return (status, body).into_response();
+    }
+
+    if let AppError::Io(error) = &self
+      && error.kind() == io::ErrorKind::PermissionDenied
+    {
+      tracing::warn!(error = %error, "access to a storage path was denied");
+      let body = Json(json!({
+          "error": "Forbidden",
+          "code": "FILESYSTEM_PERMISSION_DENIED",
+          "message": "The server does not have permission to access this path.",
+          "hint": "Check the storage root and file permissions, then try again.",
       }));
       return (status, body).into_response();
     }
@@ -176,5 +200,38 @@ mod tests {
         .as_str()
         .is_some_and(|hint| { hint.contains("s3:GetObject") && hint.contains("s3:ListBucket") })
     );
+  }
+
+  #[tokio::test]
+  async fn filesystem_permission_denied_is_forbidden_with_actionable_hint() {
+    let response = AppError::Io(io::Error::from(io::ErrorKind::PermissionDenied)).into_response();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+    let body = to_bytes(response.into_body(), usize::MAX)
+      .await
+      .expect("read error response body");
+    let body: serde_json::Value = serde_json::from_slice(&body).expect("parse error response body");
+    assert_eq!(body["code"], "FILESYSTEM_PERMISSION_DENIED");
+    assert!(
+      body["hint"]
+        .as_str()
+        .is_some_and(|hint| hint.contains("permissions"))
+    );
+  }
+
+  #[tokio::test]
+  async fn thumbnail_cache_permission_is_not_reported_as_storage_forbidden() {
+    let response =
+      AppError::ThumbnailCacheIo(io::Error::from(io::ErrorKind::PermissionDenied)).into_response();
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+
+    let body = to_bytes(response.into_body(), usize::MAX)
+      .await
+      .expect("read error response body");
+    let body: serde_json::Value = serde_json::from_slice(&body).expect("parse error response body");
+    assert!(body.get("code").is_none());
+    assert!(body["message"].as_str().is_some_and(|message| {
+      message.contains("thumbnail cache") && !message.contains("storage root")
+    }));
   }
 }

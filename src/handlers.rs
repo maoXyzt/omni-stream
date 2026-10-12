@@ -836,8 +836,8 @@ pub async fn thumb_handler(
 
   let file = tokio::fs::File::open(&cache_path)
     .await
-    .map_err(AppError::Io)?;
-  let meta = file.metadata().await.map_err(AppError::Io)?;
+    .map_err(AppError::ThumbnailCacheIo)?;
+  let meta = file.metadata().await.map_err(AppError::ThumbnailCacheIo)?;
   let stream = tokio_util::io::ReaderStream::new(file);
 
   // URL is content-addressed when `v` is supplied → safe to mark immutable.

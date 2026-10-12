@@ -7,7 +7,7 @@ export class ApiError extends Error {
   payload?: unknown
 
   constructor(status: number, message: string, payload?: unknown) {
-    super(message)
+    super(formatApiErrorMessage(status, message, payload))
     this.name = 'ApiError'
     this.status = status
     this.payload = payload
@@ -20,6 +20,22 @@ export class ApiError extends Error {
   get isUnauthorized(): boolean {
     return this.status === 401 || this.status === 403
   }
+}
+
+/**
+ * Turn structured backend errors into messages that are useful in a toast or
+ * inline form error. Keep the server's payload intact so richer components
+ * can still render `hint` separately when they want to.
+ */
+export function formatApiErrorMessage(status: number, message: string, payload?: unknown): string {
+  if (status === 403 && isApiErrorBody(payload, 'FILESYSTEM_PERMISSION_DENIED')) {
+    return 'Access denied: the server cannot read this path. Check the storage root and file permissions.'
+  }
+  return message
+}
+
+function isApiErrorBody(payload: unknown, code: string): boolean {
+  return typeof payload === 'object' && payload !== null && 'code' in payload && payload.code === code
 }
 
 const TOKEN_STORAGE_KEY = 'omni-stream:auth-token'
