@@ -35,7 +35,12 @@ export function formatApiErrorMessage(status: number, message: string, payload?:
 }
 
 function isApiErrorBody(payload: unknown, code: string): boolean {
-  return typeof payload === 'object' && payload !== null && 'code' in payload && payload.code === code
+  return (
+    typeof payload === 'object' &&
+    payload !== null &&
+    'code' in payload &&
+    (payload as Record<string, unknown>).code === code
+  )
 }
 
 const TOKEN_STORAGE_KEY = 'omni-stream:auth-token'
