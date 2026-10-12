@@ -655,7 +655,6 @@ export function ThreeViewport({
             disabled={status !== 'ready'}
             onFitToView={() => actionsRef.current?.fit()}
             onResetView={() => actionsRef.current?.reset()}
-            onViewChange={applyViewChange}
             onProjectionChange={(next) => {
               setProjection(next)
               actionsRef.current?.setProjection(next)

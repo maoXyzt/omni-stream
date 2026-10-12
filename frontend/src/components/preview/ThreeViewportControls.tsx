@@ -1,7 +1,5 @@
 import type { ReactNode } from 'react'
 import {
-  ArrowDown,
-  ArrowUp,
   Axis3D,
   Box,
   Focus,
@@ -9,10 +7,6 @@ import {
   Layers,
   Maximize2,
   MousePointer2,
-  PanelBottom,
-  PanelLeft,
-  PanelRight,
-  PanelTop,
   RotateCcw,
   ScanLine,
   Search,
@@ -58,7 +52,6 @@ export interface ThreeViewportControlsProps {
   disabled?: boolean
   onFitToView?: () => void
   onResetView?: () => void
-  onViewChange?: (view: ThreeViewportView) => void
   onProjectionChange?: (projection: ThreeViewportProjection) => void
   onDisplayModeChange?: (mode: ThreeViewportDisplayMode) => void
   onGridVisibilityChange?: (visible: boolean) => void
@@ -104,21 +97,6 @@ function ControlButton({
   )
 }
 
-interface ViewButtonDefinition {
-  view: ThreeViewportView
-  label: string
-  icon: LucideIcon
-}
-
-const standardViews: ViewButtonDefinition[] = [
-  { view: 'front', label: 'Front view', icon: PanelTop },
-  { view: 'back', label: 'Back view', icon: PanelBottom },
-  { view: 'left', label: 'Left view', icon: PanelLeft },
-  { view: 'right', label: 'Right view', icon: PanelRight },
-  { view: 'top', label: 'Top view', icon: ArrowUp },
-  { view: 'bottom', label: 'Bottom view', icon: ArrowDown },
-]
-
 /**
  * Presentational controls for a 3D preview. ThreeViewport owns the camera,
  * scene, and materials; this component only renders controls and emits the
@@ -135,7 +113,6 @@ export function ThreeViewportControls({
   disabled = false,
   onFitToView,
   onResetView,
-  onViewChange,
   onProjectionChange,
   onDisplayModeChange,
   onGridVisibilityChange,
@@ -164,20 +141,6 @@ export function ThreeViewportControls({
           disabled={disabled}
           onClick={() => onResetView?.()}
         />
-
-        <span className="mx-0.5 h-5 w-px bg-border" aria-hidden="true" />
-
-        <div className="flex items-center gap-1" role="group" aria-label="Standard views">
-          {standardViews.map(({ view, label, icon }) => (
-            <ControlButton
-              key={view}
-              icon={icon}
-              label={label}
-              disabled={disabled}
-              onClick={() => onViewChange?.(view)}
-            />
-          ))}
-        </div>
 
         <span className="mx-0.5 h-5 w-px bg-border" aria-hidden="true" />
 
