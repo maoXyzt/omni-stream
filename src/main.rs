@@ -148,10 +148,18 @@ async fn main() -> anyhow::Result<()> {
   }
   #[cfg(not(feature = "duckdb"))]
   if cfg.sql.enabled {
-    tracing::warn!(
-      "SQL query endpoint disabled: binary was built without the `duckdb` feature; \
-       rebuild with `--features duckdb` to enable it",
-    );
+    if cfg.auth.enabled {
+      tracing::warn!(
+        "SQL query endpoint disabled: binary was built without the `duckdb` feature; \
+         rebuild with `--features duckdb` to enable it",
+      );
+    } else {
+      tracing::warn!(
+        "SQL query endpoint disabled: binary was built without the `duckdb` feature and \
+         auth.enabled is false; rebuild with `--features duckdb` and set \
+         `auth.enabled = true` to enable it",
+      );
+    }
   }
   let state = AppState::new(
     registry,
