@@ -143,7 +143,12 @@ pub fn parse_header(header: &[u8], file_bytes: u64) -> Result<SafetensorsMetadat
     let bytes = end - start;
     let bits = dtype_bits(dtype).ok_or_else(|| invalid("unsupported dtype"))?;
     let expected_bits = u128::from(elements) * u128::from(bits);
-    if expected_bits != u128::from(bytes) * 8 {
+    let expected_bytes = if bits < 8 {
+      expected_bits.div_ceil(8)
+    } else {
+      expected_bits / 8
+    };
+    if expected_bytes != u128::from(bytes) {
       return Err(invalid(format!(
         "tensor '{name}' shape and dtype disagree with data_offsets"
       )));
@@ -283,6 +288,12 @@ mod tests {
   fn rejects_shape_byte_mismatch() {
     let header = br#"{"a":{"dtype":"F32","shape":[2],"data_offsets":[0,4]}}"#;
     assert!(parse_header(header, 8 + header.len() as u64 + 4).is_err());
+  }
+
+  #[test]
+  fn accepts_packed_low_bit_tensor_with_partial_byte() {
+    let header = br#"{"a":{"dtype":"F4","shape":[3],"data_offsets":[0,2]}}"#;
+    assert!(parse_header(header, 8 + header.len() as u64 + 2).is_ok());
   }
 
   #[test]
