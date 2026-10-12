@@ -54,7 +54,7 @@ export function SafetensorsPreview({ fileKey, storage }: PreviewerProps) {
     return (
       <div className="flex h-full w-full items-center justify-center p-8">
         <Alert variant="destructive" className="max-w-xl">
-          <AlertCircle className="size-4" />
+          <AlertCircle />
           <AlertTitle>Failed to read Safetensors header</AlertTitle>
           <AlertDescription className="flex flex-col gap-3">
             <span>{errorMessage(query.error)}</span>
@@ -74,11 +74,11 @@ export function SafetensorsPreview({ fileKey, storage }: PreviewerProps) {
     )
   }
 
-  if (!query.data || query.data.tensors.length === 0) {
+  if (!query.data) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 p-8 text-center text-muted-foreground">
         <Binary className="size-8" />
-        <p>No tensors were found in this Safetensors file.</p>
+        <p>No metadata was returned for this Safetensors file.</p>
       </div>
     )
   }
@@ -134,7 +134,7 @@ export function SafetensorsPreview({ fileKey, storage }: PreviewerProps) {
 
       {filteredTensors.length === 0 ? (
         <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-          No tensors match this filter.
+          {filter.trim() ? 'No tensors match this filter.' : 'No tensors were found in this Safetensors file.'}
         </div>
       ) : (
         <>
@@ -172,7 +172,7 @@ export function SafetensorsPreview({ fileKey, storage }: PreviewerProps) {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => setPageIndex((value) => Math.max(0, value - 1))}
+                onClick={() => setPageIndex(currentPage - 1)}
                 disabled={currentPage === 0}
                 aria-label="Previous tensor page"
               >
@@ -181,7 +181,7 @@ export function SafetensorsPreview({ fileKey, storage }: PreviewerProps) {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => setPageIndex((value) => Math.min(pageCount - 1, value + 1))}
+                onClick={() => setPageIndex(currentPage + 1)}
                 disabled={currentPage >= pageCount - 1}
                 aria-label="Next tensor page"
               >
