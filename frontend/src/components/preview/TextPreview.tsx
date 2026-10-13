@@ -18,6 +18,7 @@ import {
   Code,
   Copy,
   Download,
+  Eye,
   FileDown,
   LayoutList,
   ListOrdered,
@@ -80,6 +81,7 @@ import {
 import { cn } from '@/lib/utils'
 
 import { RowsViewHint } from './RowsViewHint'
+import { HtmlPreview } from './HtmlPreview'
 import type { PreviewerProps } from './types'
 
 // Lazy-loaded so Vite keeps `marked` + `dompurify` out of the main bundle.
@@ -157,18 +159,27 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
     return ext === 'md' || ext === 'markdown'
   }, [fileKey])
 
-  // Per-file view preference — no localStorage persistence since the component
-  // remounts per file anyway and the default (Rendered for .md) is the right
-  // starting point each time.
-  const [view, setView] = useState<'rendered' | 'raw'>(() =>
-    isMarkdown ? 'rendered' : 'raw',
-  )
+  const extension = extensionOf(fileKey)
+  const isHtml = extension === 'html' || extension === 'htm'
+  const hasRenderedView = isMarkdown || isHtml
+
+  // HTML starts in source mode; scripts run only after Preview is selected.
+  // Bind the choice to src so reusing this component for a different file or
+  // storage cannot render its HTML for a frame before the reset effect runs.
+  const [viewChoice, setViewChoice] = useState<{
+    src: string
+    mode: 'rendered' | 'raw'
+  } | null>(null)
+  const view = viewChoice?.src === src
+    ? viewChoice.mode
+    : isMarkdown ? 'rendered' : 'raw'
+  const setView = (mode: 'rendered' | 'raw') => setViewChoice({ src, mode })
 
   // If `fileKey` changes (same component reused across files), re-derive the
   // default view rather than carrying over the previous file's preference.
   useEffect(() => {
-    setView(isMarkdown ? 'rendered' : 'raw')
-  }, [fileKey, isMarkdown])
+    setViewChoice(null)
+  }, [src])
 
   // .jsonl / .ndjson get a "Browse as cards" button that jumps to the Rows
   // page — same UX as parquet's ParquetPreview but lazy: text-preview-able
@@ -555,7 +566,7 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
   const [editing, setEditing] = useState(false)
 
   // Find bar is only usable in raw/code mode with content loaded.
-  const findEnabled = !editing && (!isMarkdown || view === 'raw') && lines.length > 0
+  const findEnabled = !editing && (!hasRenderedView || view === 'raw') && lines.length > 0
 
   // Close find bar automatically when leaving the mode that renders it.
   useEffect(() => {
@@ -814,23 +825,22 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
                   </TooltipContent>
                 </Tooltip>
               )}
-              {/* Raw/Rendered toggle — only shown for Markdown files (.md /
-                  .markdown). Mirrors the line-numbers toggle style: `default`
-                  variant when the mode is active, `outline` otherwise, so the
-                  current state is immediately readable without hover. */}
-              {isMarkdown && (
+              {/* HTML shares the Markdown source/rendered toggle, with text
+                  labels to make the opt-in Preview action easy to discover. */}
+              {hasRenderedView && (
                 <>
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <Button
                         type="button"
-                        size="icon-sm"
+                        size={isHtml ? 'sm' : 'icon-sm'}
                         variant={view === 'raw' ? 'default' : 'outline'}
                         aria-pressed={view === 'raw'}
                         aria-label="View raw source"
                         onClick={() => setView('raw')}
                       >
                         <Code />
+                        {isHtml && 'Source'}
                       </Button>
                     </TooltipTrigger>
                     <TooltipContent>View raw source</TooltipContent>
@@ -839,16 +849,19 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
                     <TooltipTrigger asChild>
                       <Button
                         type="button"
-                        size="icon-sm"
+                        size={isHtml ? 'sm' : 'icon-sm'}
                         variant={view === 'rendered' ? 'default' : 'outline'}
                         aria-pressed={view === 'rendered'}
-                        aria-label="View rendered Markdown"
+                        aria-label={isHtml ? 'Preview HTML' : 'View rendered Markdown'}
                         onClick={() => setView('rendered')}
                       >
-                        <BookText />
+                        {isHtml ? <Eye /> : <BookText />}
+                        {isHtml && 'Preview'}
                       </Button>
                     </TooltipTrigger>
-                    <TooltipContent>View rendered Markdown</TooltipContent>
+                    <TooltipContent>
+                      {isHtml ? 'Preview HTML' : 'View rendered Markdown'}
+                    </TooltipContent>
                   </Tooltip>
                 </>
               )}
@@ -978,7 +991,16 @@ export function TextPreview({ fileKey, src, storage }: PreviewerProps) {
             </Suspense>
           </div>
         )}
-        {(!isMarkdown || view === 'raw') && lines.length > 0 && (
+        {isHtml && view === 'rendered' && !errorMessage && state.text.length > 0 && (
+          state.done ? (
+            <HtmlPreview body={state.text} fileKey={fileKey} src={src} storage={storage} />
+          ) : (
+            <div className="p-6 text-center text-sm text-muted-foreground">
+              Load the entire file to preview HTML. Use Load all below.
+            </div>
+          )
+        )}
+        {(!hasRenderedView || view === 'raw') && lines.length > 0 && (
           // Per-row flex: gutter (fixed `ch`-width, right-aligned, top-anchored
           // so a wrapped content row keeps the number at its first visual line)
           // + content (`whitespace-pre-wrap break-words` so long lines wrap

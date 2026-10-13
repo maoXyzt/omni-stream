@@ -17,10 +17,14 @@ export default defineConfig({
     emptyOutDir: true,
   },
   server: {
-    // During `pnpm dev`, forward /api/* to the Rust backend.
+    // During `pnpm dev`, forward APIs and HTML preview resources to Rust.
     // Override via OMNI_BACKEND_URL when the default port is taken.
     proxy: {
       '/api': {
+        target: process.env.OMNI_BACKEND_URL ?? 'http://127.0.0.1:28080',
+        changeOrigin: true,
+      },
+      '/raw': {
         target: process.env.OMNI_BACKEND_URL ?? 'http://127.0.0.1:28080',
         changeOrigin: true,
       },
