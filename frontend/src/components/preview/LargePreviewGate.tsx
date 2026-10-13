@@ -8,7 +8,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { colorForKey, iconForKey } from './registry'
 import { formatBytes, formatTime } from '@/lib/format'
 import { basenameOf } from '@/lib/path'
-import { rawUrl } from '@/api/storage'
+import { confirmRawOpen, rawUrl } from '@/api/storage'
 
 import { isLargePreview } from './large-preview-gate'
 import type { PreviewKind, PreviewerProps } from './types'
@@ -68,7 +68,14 @@ function LargePreviewCard({
         <div className="flex flex-wrap justify-center gap-2">
           <Button onClick={onPreview}>{previewLabel}</Button>
           <Button variant="outline" asChild>
-            <a href={externalUrl} target="_blank" rel="noreferrer">
+            <a
+              href={externalUrl}
+              target="_blank"
+              rel="noreferrer"
+              onClick={(event) => {
+                if (!confirmRawOpen(fileKey, storage)) event.preventDefault()
+              }}
+            >
               <ExternalLink className="size-4" />
               Open in new tab
             </a>

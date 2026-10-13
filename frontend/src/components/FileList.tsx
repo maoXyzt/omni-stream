@@ -50,7 +50,13 @@ import {
 } from 'lucide-react'
 
 import { ApiError, getStoredToken, setStoredToken } from '@/api/client'
-import { listFiles, proxyUrl, rawUrl, statFile } from '@/api/storage'
+import {
+  confirmRawOpen,
+  listFiles,
+  proxyUrl,
+  rawUrl,
+  statFile,
+} from '@/api/storage'
 import {
   canShowInlinePreview,
   getBrowseScrollTarget,
@@ -1948,6 +1954,9 @@ export function FileList() {
                         size="icon-sm"
                         aria-label="Open in new tab"
                         onClick={() => {
+                          if (!confirmRawOpen(previewState!.key, storageName)) {
+                            return
+                          }
                           window.open(
                             storageName
                               ? rawUrl(previewState!.key, storageName)

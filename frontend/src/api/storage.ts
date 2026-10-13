@@ -102,6 +102,16 @@ export function rawUrl(key: string, storage: string): string {
   return `/raw/${encodeURIComponent(storage)}/${encodeKey(key)}`
 }
 
+/// Ask before opening a stored file directly in a new same-origin tab.
+/// Embedded previews remain sandboxed; this confirmation makes the higher-risk
+/// live-page behavior an explicit user choice.
+export function confirmRawOpen(key: string, storage?: string): boolean {
+  if (!storage) return true
+  return window.confirm(
+    `This file will open directly from storage in a new tab. If it contains scripts, they may run with this site's permissions. Continue only if you trust this file.\n\n${key}`,
+  )
+}
+
 export interface ThumbOptions {
   storage?: string
   width?: number
