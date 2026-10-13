@@ -50,7 +50,7 @@ import {
 } from 'lucide-react'
 
 import { ApiError, getStoredToken, setStoredToken } from '@/api/client'
-import { listFiles, proxyUrl, statFile } from '@/api/storage'
+import { listFiles, proxyUrl, rawUrl, statFile } from '@/api/storage'
 import {
   canShowInlinePreview,
   getBrowseScrollTarget,
@@ -1949,7 +1949,9 @@ export function FileList() {
                         aria-label="Open in new tab"
                         onClick={() => {
                           window.open(
-                            proxyUrl(previewState!.key, storageName || undefined),
+                            storageName
+                              ? rawUrl(previewState!.key, storageName)
+                              : proxyUrl(previewState!.key),
                             '_blank',
                             'noreferrer',
                           )
@@ -1963,7 +1965,10 @@ export function FileList() {
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <a
-                        href={proxyUrl(previewState!.key, storageName || undefined)}
+                        href={proxyUrl(
+                          previewState!.key,
+                          storageName || undefined,
+                        )}
                         download={basenameOf(previewState!.key)}
                         className="inline-flex size-7 items-center justify-center rounded-[min(var(--radius-md),12px)] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                         aria-label="Download"
