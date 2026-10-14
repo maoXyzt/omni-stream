@@ -135,17 +135,16 @@ export function PreviewModal({
 
         <DialogFooter className="gap-2 sm:justify-end">
           <Button variant="outline" asChild>
-            <a
-              href={externalUrl}
-              target="_blank"
-              rel="noreferrer"
-              onClick={(event) => {
-                if (!confirmRawOpen(fileKey, storage)) event.preventDefault()
+            <button
+              type="button"
+              onClick={() => {
+                if (!confirmRawOpen(fileKey, storage)) return
+                window.open(externalUrl, '_blank', 'noreferrer')
               }}
             >
               <ExternalLink className="size-4" />
               Open in new tab
-            </a>
+            </button>
           </Button>
           <Button asChild>
             <a href={src} download>

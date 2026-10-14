@@ -68,17 +68,16 @@ function LargePreviewCard({
         <div className="flex flex-wrap justify-center gap-2">
           <Button onClick={onPreview}>{previewLabel}</Button>
           <Button variant="outline" asChild>
-            <a
-              href={externalUrl}
-              target="_blank"
-              rel="noreferrer"
-              onClick={(event) => {
-                if (!confirmRawOpen(fileKey, storage)) event.preventDefault()
+            <button
+              type="button"
+              onClick={() => {
+                if (!confirmRawOpen(fileKey, storage)) return
+                window.open(externalUrl, '_blank', 'noreferrer')
               }}
             >
               <ExternalLink className="size-4" />
               Open in new tab
-            </a>
+            </button>
           </Button>
           <Button variant="outline" asChild>
             <a href={src} download>
