@@ -16,7 +16,7 @@ import {
 
 import { ApiError } from '@/api/client'
 import { deleteFile, moveFile } from '@/api/files'
-import { proxyUrl, rawUrl } from '@/api/storage'
+import { confirmRawOpen, proxyUrl, rawUrl } from '@/api/storage'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { TokenPrompt } from '@/components/TokenPrompt'
 import { Button } from '@/components/ui/button'
@@ -177,6 +177,7 @@ export function EntryContextMenu({
   }
 
   function openInNewTab() {
+    if (!confirmRawOpen(entry.key, storageName)) return
     window.open(fileUrl(), '_blank', 'noreferrer')
   }
 

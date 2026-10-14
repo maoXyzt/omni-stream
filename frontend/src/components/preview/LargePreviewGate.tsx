@@ -8,6 +8,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { colorForKey, iconForKey } from './registry'
 import { formatBytes, formatTime } from '@/lib/format'
 import { basenameOf } from '@/lib/path'
+import { confirmRawOpen, rawUrl } from '@/api/storage'
 
 import { isLargePreview } from './large-preview-gate'
 import type { PreviewKind, PreviewerProps } from './types'
@@ -30,6 +31,7 @@ interface CardProps extends PreviewerProps {
 function LargePreviewCard({
   fileKey,
   src,
+  storage,
   kind,
   size,
   stat,
@@ -40,6 +42,7 @@ function LargePreviewCard({
   const color = colorForKey(fileKey)
   const name = basenameOf(fileKey)
   const previewLabel = kind === 'numpy' ? 'NumPy preview' : '3D preview'
+  const externalUrl = storage ? rawUrl(fileKey, storage) : src
 
   return (
     <div className="flex h-full w-full flex-col items-center overflow-y-auto p-8">
@@ -65,10 +68,16 @@ function LargePreviewCard({
         <div className="flex flex-wrap justify-center gap-2">
           <Button onClick={onPreview}>{previewLabel}</Button>
           <Button variant="outline" asChild>
-            <a href={src} target="_blank" rel="noreferrer">
+            <button
+              type="button"
+              onClick={() => {
+                if (!confirmRawOpen(fileKey, storage)) return
+                window.open(externalUrl, '_blank', 'noreferrer')
+              }}
+            >
               <ExternalLink className="size-4" />
               Open in new tab
-            </a>
+            </button>
           </Button>
           <Button variant="outline" asChild>
             <a href={src} download>

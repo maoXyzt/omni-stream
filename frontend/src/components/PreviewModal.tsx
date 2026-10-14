@@ -1,7 +1,7 @@
 import { useRef, type RefObject } from 'react'
 import { Download, ExternalLink } from 'lucide-react'
 
-import { proxyUrl } from '@/api/storage'
+import { confirmRawOpen, proxyUrl, rawUrl } from '@/api/storage'
 import { useGlobalShortcut } from '@/hooks/use-global-shortcut'
 import { getPreviewType } from '@/components/preview/registry'
 import type { PreviewKind } from '@/components/preview/types'
@@ -47,6 +47,7 @@ export function PreviewModal({
   const contentRef = useRef<HTMLDivElement>(null)
   const previousFocusRef = useRef<HTMLElement | null>(null)
   const src = proxyUrl(fileKey, storage, version)
+  const externalUrl = storage ? rawUrl(fileKey, storage) : src
   const type = getPreviewType(kind)
   const Previewer = type?.Component
 
@@ -134,10 +135,16 @@ export function PreviewModal({
 
         <DialogFooter className="gap-2 sm:justify-end">
           <Button variant="outline" asChild>
-            <a href={src} target="_blank" rel="noreferrer">
+            <button
+              type="button"
+              onClick={() => {
+                if (!confirmRawOpen(fileKey, storage)) return
+                window.open(externalUrl, '_blank', 'noreferrer')
+              }}
+            >
               <ExternalLink className="size-4" />
               Open in new tab
-            </a>
+            </button>
           </Button>
           <Button asChild>
             <a href={src} download>
