@@ -108,14 +108,9 @@ async fn main() -> anyhow::Result<()> {
   if let Some(t) = thumb.as_ref() {
     spawn_thumb_sweep(t.clone());
   }
-  // gethostname() syscall once at startup; the value is immutable for the
-  // process lifetime so it's safe to share via Arc.
-  let hostname = Arc::new(
-    hostname::get()
-      .ok()
-      .and_then(|s| s.into_string().ok())
-      .unwrap_or_else(|| "unknown".into()),
-  );
+  // Resolve the display hostname once at startup; the value is immutable for
+  // the process lifetime so it's safe to share via Arc.
+  let hostname = Arc::new(resolve_display_hostname(cfg.server.hostname.as_deref()));
   // One shared token, applied to two route groups with different strictness:
   // the read group enforces it only on a full lockdown (`!public_read`), the
   // write group enforces it whenever the gate is on.
@@ -308,6 +303,35 @@ async fn main() -> anyhow::Result<()> {
     .with_graceful_shutdown(shutdown_signal())
     .await?;
   Ok(())
+}
+
+fn resolve_display_hostname(configured: Option<&str>) -> String {
+  let configured = configured.map(str::trim).filter(|s| !s.is_empty());
+  configured.map(str::to_owned).unwrap_or_else(|| {
+    hostname::get()
+      .ok()
+      .and_then(|s| s.into_string().ok())
+      .unwrap_or_else(|| "unknown".into())
+  })
+}
+
+#[cfg(test)]
+mod tests {
+  use super::resolve_display_hostname;
+
+  #[test]
+  fn configured_display_hostname_is_used() {
+    assert_eq!(
+      resolve_display_hostname(Some(" example-host ")),
+      "example-host"
+    );
+  }
+
+  #[test]
+  fn blank_display_hostname_falls_back_to_system_hostname() {
+    let value = resolve_display_hostname(Some("  "));
+    assert!(!value.is_empty());
+  }
 }
 
 fn init_tracing() {

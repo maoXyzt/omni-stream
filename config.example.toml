@@ -8,12 +8,13 @@
 #   # key = val  # optional no default; uncomment only if you need it
 #
 # Env overrides (prefix OMNI_, separator _):
-#   OMNI_SERVER_HOST, OMNI_SERVER_PORT, OMNI_AUTH_TOKEN,
+#   OMNI_SERVER_HOST, OMNI_SERVER_PORT, OMNI_SERVER_HOSTNAME, OMNI_AUTH_TOKEN,
 #   OMNI_TRANSCODING_ENABLED
 
 [server]
 # host = "127.0.0.1"  # default; use "0.0.0.0" to allow external access
 # port = 28080        # default
+# hostname = "node-a"  # optional frontend display name; defaults to system hostname
 
 [auth]
 # Optional bearer-token gate. Disabled = API open to anyone who can reach the

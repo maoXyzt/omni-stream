@@ -114,6 +114,7 @@ s3 = { endpoint = "http://minio.local:9000", access_key = "...", secret_key = ".
 | --- | --- |
 | `OMNI_SERVER_HOST` | overrides `server.host` |
 | `OMNI_SERVER_PORT` | overrides `server.port` |
+| `OMNI_SERVER_HOSTNAME` | overrides `server.hostname` (frontend display name; defaults to the system hostname) |
 | `OMNI_AUTH_ENABLED` | overrides `auth.enabled` (`true` / `false`) |
 | `OMNI_AUTH_TOKEN` | overrides `auth.token` (recommended for keeping the secret out of the config file) |
 | `OMNI_AUTH_PUBLIC_READ` | overrides `auth.public_read` (`true` / `false`) |

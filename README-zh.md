@@ -120,6 +120,7 @@ s3 = { endpoint = "http://minio.local:9000", access_key = "...", secret_key = ".
 | --- | --- |
 | `OMNI_SERVER_HOST` | 覆盖 `server.host` |
 | `OMNI_SERVER_PORT` | 覆盖 `server.port` |
+| `OMNI_SERVER_HOSTNAME` | 覆盖 `server.hostname`（前端展示名称；未配置时使用系统 hostname） |
 | `OMNI_AUTH_ENABLED` | 覆盖 `auth.enabled`（`true` / `false`） |
 | `OMNI_AUTH_TOKEN` | 覆盖 `auth.token`（建议把 secret 放这里而不是配置文件） |
 | `OMNI_AUTH_PUBLIC_READ` | 覆盖 `auth.public_read`（`true` / `false`） |

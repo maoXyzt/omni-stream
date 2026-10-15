@@ -81,6 +81,10 @@ pub struct ServerConfig {
   pub host: String,
   #[serde(default = "default_port")]
   pub port: u16,
+  /// Optional hostname shown by the frontend. When omitted or blank, the
+  /// process hostname is used at startup.
+  #[serde(default)]
+  pub hostname: Option<String>,
 }
 
 impl Default for ServerConfig {
@@ -88,6 +92,7 @@ impl Default for ServerConfig {
     Self {
       host: default_host(),
       port: default_port(),
+      hostname: None,
     }
   }
 }
@@ -782,6 +787,23 @@ local = { root_path = "/tmp" }
     let cfg = parse(raw);
     assert_eq!(cfg.server.host, "127.0.0.1");
     assert_eq!(cfg.server.port, 28080);
+    assert_eq!(cfg.server.hostname, None);
+  }
+
+  #[test]
+  fn server_hostname_is_optional_and_configurable() {
+    let raw = r#"
+[server]
+hostname = "  edge-node-1  "
+
+[[storages]]
+name = "x"
+type = "local"
+active = true
+local = { root_path = "/tmp" }
+"#;
+    let cfg = parse(raw);
+    assert_eq!(cfg.server.hostname.as_deref(), Some("  edge-node-1  "));
   }
 
   #[test]
