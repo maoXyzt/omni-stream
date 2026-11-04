@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use aws_config::BehaviorVersion;
 use aws_sdk_s3::Client;
-use aws_sdk_s3::config::{Credentials, Region};
+use aws_sdk_s3::config::Credentials;
 use aws_sdk_s3::error::{ProvideErrorMetadata, SdkError};
 use aws_sdk_s3::operation::get_object::GetObjectError;
 use aws_sdk_s3::operation::head_object::HeadObjectError;
@@ -15,7 +15,7 @@ use tokio_util::io::ReaderStream;
 use super::{
   FileEntry, FileMeta, GetOptions, ListResult, PutOptions, StorageBackend, StorageResponse,
 };
-use crate::config::S3Config;
+use crate::config::{S3Config, S3Credentials};
 use crate::error::AppError;
 
 const LIST_PAGE_SIZE: i32 = 100;
@@ -171,26 +171,37 @@ impl S3Backend {
     // bucket is optional now — `S3Config::fixed_bucket()` reports `None` for
     // omit / "" / "*" / whitespace. In that case the backend enters
     // multi-bucket mode and routes via the path's first segment.
+    cfg
+      .validate_credentials()
+      .map_err(|e| AppError::Backend(e.to_string()))?;
     let pinned_bucket = cfg.fixed_bucket().map(str::to_string);
 
     let mut loader = aws_config::defaults(BehaviorVersion::latest());
 
-    // SigV4 requires a region even against MinIO / LocalStack where the
-    // server itself doesn't validate it. Fall back to "us-east-1" so users
-    // don't have to set AWS_REGION just to talk to a local S3-compatible
-    // endpoint.
-    let region = cfg
-      .region
-      .clone()
-      .unwrap_or_else(|| "us-east-1".to_string());
-    loader = loader.region(Region::new(region));
+    loader = loader.region(super::aws::resolve_region(cfg).await);
     let custom_endpoint = cfg.endpoint.is_some();
     if let Some(endpoint) = cfg.endpoint.clone() {
       loader = loader.endpoint_url(endpoint);
     }
-    if let (Some(akid), Some(sak)) = (cfg.access_key.clone(), cfg.secret_key.clone()) {
-      let creds = Credentials::new(akid, sak, None, None, CREDENTIAL_PROVIDER_NAME);
+    if let (Some(akid), Some(sak)) = cfg.static_credentials() {
+      let creds = Credentials::new(
+        akid.to_owned(),
+        sak.to_owned(),
+        None,
+        None,
+        CREDENTIAL_PROVIDER_NAME,
+      );
       loader = loader.credentials_provider(creds);
+    }
+
+    if let Some(S3Credentials::AwsProfile { profile_name }) = &cfg.credentials {
+      // Select this storage's profile directly, without environment credentials
+      // or another storage's profile overriding its identity.
+      loader = loader.credentials_provider(
+        aws_config::profile::ProfileFileCredentialsProvider::builder()
+          .profile_name(profile_name)
+          .build(),
+      );
     }
 
     let shared = loader.load().await;
@@ -865,6 +876,7 @@ impl StorageBackend for S3Backend {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use aws_sdk_s3::config::Region;
 
   fn file(key: &str) -> FileEntry {
     FileEntry {
@@ -1264,3 +1276,7 @@ mod tests {
     );
   }
 }
+
+#[cfg(test)]
+#[path = "s3/profile_tests.rs"]
+mod profile_tests;

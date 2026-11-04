@@ -149,7 +149,7 @@ pub async fn query_handler(
 
   let target = sql_state.resolve(req.storage.as_deref())?;
   validate::validate_readonly(&req.sql)?;
-  let setup = session::setup_statements(&sql_state.cfg, target, &sql_state.scratch_dir)?;
+  let setup = session::setup_statements(&sql_state.cfg, target, &sql_state.scratch_dir).await?;
 
   let timeout_secs = sql_state.cfg.query_timeout_secs;
   let max_rows = sql_state.cfg.max_rows as usize;

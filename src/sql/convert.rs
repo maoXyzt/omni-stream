@@ -131,7 +131,7 @@ pub async fn convert_handler(
     );
   }
   convert_cfg.threads = convert_cfg.convert_threads.max(1);
-  let setup = session::setup_statements(&convert_cfg, target, &sql_state.scratch_dir)?;
+  let setup = session::setup_statements(&convert_cfg, target, &sql_state.scratch_dir).await?;
   // TSV/CSV: read_csv_auto auto-detects comma vs tab (and other delimiters).
   // JSONL/NDJSON: read_json_auto handles newline-delimited JSON.
   let read_fn = if is_json_lines {
@@ -545,6 +545,7 @@ mod tests {
       bucket: Some("my-bucket".into()),
       access_key: Some("k".into()),
       secret_key: Some("s".into()),
+      credentials: None,
       region: None,
       force_path_style: true,
     };
@@ -562,6 +563,7 @@ mod tests {
       bucket: None, // multi-bucket
       access_key: Some("k".into()),
       secret_key: Some("s".into()),
+      credentials: None,
       region: None,
       force_path_style: true,
     };

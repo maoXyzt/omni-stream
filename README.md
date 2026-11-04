@@ -38,7 +38,6 @@ For `uv`, see the [official documentation](https://docs.astral.sh/uv/).
 > [docs/development_guide.md](docs/development_guide.md) and
 > [docs/how_to_release.md](docs/how_to_release.md).
 
-
 ## 2. Configuration
 
 If `$OMNI_CONFIG` is set, OmniStream uses that exact path without falling back,
@@ -70,8 +69,40 @@ Or S3 / S3-compatible (MinIO / OSS):
 name = "production-s3"
 type = "s3"
 active = true
-s3 = { endpoint = "http://minio.local:9000", bucket = "data", access_key = "...", secret_key = "..." }
+[storages.s3]
+endpoint = "http://minio.local:9000"
+bucket = "data"
+credentials = { type = "static", access_key = "...", secret_key = "..." }
 ```
+
+To reuse an existing AWS profile for authentication:
+
+```toml
+[[storages]]
+name = "profile-s3"
+type = "s3"
+[storages.s3]
+bucket = "my-bucket"
+region = "ap-southeast-1"
+credentials = { type = "aws_profile", profile_name = "sh01b" }
+```
+
+File operations and SQL queries load the named profile from the AWS shared
+configuration and credentials files (normally `~/.aws/config` and
+`~/.aws/credentials`). Different storages may select different profiles.
+
+For SQL queries, DuckDB's current `config` credential chain also requires a
+matching `[profile <name>]` section in the AWS config file (`AWS_CONFIG_FILE`,
+default `~/.aws/config`), for example `[profile sh01b]` with
+`region = ap-southeast-1`. Defining the profile only in the credentials file
+is sufficient for file operations but not for SQL queries. The default profile
+uses `[default]` in the config file.
+
+SSO and `credential_process` profiles are supported by the Rust AWS SDK for
+file operations, but are not supported by the current SQL credential chain.
+Profiles with `role_arn` are handled by DuckDB's `config` chain without adding
+an `sts` chain entry. See the [configuration design](docs/configuration_module_design.md)
+for details (Chinese).
 
 The local backend supports `follow_symlinks` (default `true`; when `false`, symlinks appear as entries but reads return Forbidden, and that storage refuses all DuckDB/SQL operations):
 
@@ -83,9 +114,11 @@ active = true
 local = { root_path = "/var/lib/omni-stream", follow_symlinks = false }  # default true
 ```
 
+> An explicit `s3.region` takes precedence; otherwise, `aws_profile` credentials
+> inherit the selected profile's region. Without a profile region,
 > `s3.region` defaults to `us-east-1`, which is fine for MinIO / LocalStack
 > and AWS us-east-1 buckets — leave it out by default. **Only set it when:**
-> (1) the target AWS bucket lives outside us-east-1, since SigV4 has to use
+> (1) the target AWS bucket's region differs from the inherited/default region, since SigV4 has to use
 > the bucket's actual region (otherwise AWS returns
 > `AuthorizationHeaderMalformed`); or (2) the S3-compatible gateway
 > validates the region strictly (most don't).
@@ -102,7 +135,9 @@ drills down with the usual prefix listing. The credentials must hold the
 [[storages]]
 name = "all-prod-s3"
 type = "s3"
-s3 = { endpoint = "http://minio.local:9000", access_key = "...", secret_key = "..." }
+[storages.s3]
+endpoint = "http://minio.local:9000"
+credentials = { type = "static", access_key = "...", secret_key = "..." }
 ```
 
 > Multiple `[[storages]]` entries can coexist; on startup the one with `active = true` wins, and if none is active the first entry is used.

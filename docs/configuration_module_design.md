@@ -23,14 +23,22 @@ OmniStream 使用 **TOML** 作为标准配置文件格式。系统支持定义�
 name = "production-s3"
 type = "s3"
 active = true
-s3 = { endpoint = "...", bucket = "...", access_key = "...", secret_key = "...", region = "...", force_path_style = true }  # 虚拟主机网关（部分 AOSS/OSS）设 false
+[storages.s3]
+endpoint = "..."
+bucket = "..."
+credentials = { type = "static", access_key = "...", secret_key = "..." }
+region = "..."
+force_path_style = true  # 虚拟主机网关（部分 AOSS/OSS）设 false
 
 # 省略 bucket（或设为 "*"）开启多 bucket 模式：根目录展开 ListBuckets，
 # 每个可见 bucket 作为顶层目录显示。需要 s3:ListAllMyBuckets 权限。
 [[storages]]
 name = "all-prod-s3"
 type = "s3"
-s3 = { endpoint = "...", access_key = "...", secret_key = "...", region = "..." }
+[storages.s3]
+endpoint = "..."
+credentials = { type = "static", access_key = "...", secret_key = "..." }
+region = "..."
 
 [[storages]]
 name = "local-data"
@@ -52,6 +60,24 @@ local = { root_path = "/data/files", follow_symlinks = true }  # false 时 symli
 # convert_timeout_secs = 1800 # 默认（30 分钟）；后台 JSONL/CSV→Parquet 转换超时
 # max_rows = 10000            # 默认；结果超出此数时截断
 ```
+
+S3 凭据统一通过 `credentials` 配置：静态密钥使用 `type = "static"`；
+本地 AWS profile 使用 `credentials = { type = "aws_profile", profile_name = "sh01b" }`。
+每个存储独立选择 profile，文件操作和 SQL 共用同一凭据来源。
+区域优先级为：显式 `s3.region` > 所选 profile 的 region > `us-east-1`。
+SQL 查询通过 `storage` 参数选择 `[[storages]].name`，后端会将该存储配置的
+`credentials.profile_name` 传给 DuckDB，由 DuckDB 解析实际凭据，用户无需在 SQL 中指定 profile。
+当前 DuckDB 使用 `CHAIN 'config'`，要求 AWS config 文件（`AWS_CONFIG_FILE`，
+默认 `~/.aws/config`）中存在对应的 `[profile <name>]` 段（例如配置 `region`）；
+默认 profile 使用 `[default]` 段。仅在 credentials 文件
+（`AWS_SHARED_CREDENTIALS_FILE`，默认 `~/.aws/credentials`）中定义同名 profile
+可以用于文件操作，但不足以支持 SQL 查询，后者会报 `no profile ... found in config file`。
+
+文件操作使用的 Rust AWS SDK 支持 SSO 和 `credential_process` profile，
+但当前 SQL 凭据链未启用 `sso` / `process` provider，不支持这两种凭据来源。
+带 `role_arn` 的 profile 由 DuckDB 的 `config` 链自动选择 STS provider，
+无需添加 `sts` 链条目；单独的 `sts` 链条目要求提供 `ASSUME_ROLE_ARN`，
+不能通过简单改成 `CHAIN 'config;sts'` 来补齐 SSO / process 支持。
 
 `s3.bucket` 为可选字段，缺省 / 空串 / `"*"` 三种写法语义等价：均触发多 bucket
 模式。给出具体 bucket 名时，`S3Backend` 行为与本特性引入前完全一致，无回归。
