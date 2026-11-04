@@ -545,6 +545,7 @@ mod tests {
       bucket: Some("my-bucket".into()),
       access_key: Some("k".into()),
       secret_key: Some("s".into()),
+      credentials: None,
       region: None,
       force_path_style: true,
     };
@@ -562,6 +563,7 @@ mod tests {
       bucket: None, // multi-bucket
       access_key: Some("k".into()),
       secret_key: Some("s".into()),
+      credentials: None,
       region: None,
       force_path_style: true,
     };

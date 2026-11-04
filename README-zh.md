@@ -47,7 +47,6 @@
 > [docs/development_guide.md](docs/development_guide.md) 与
 > [docs/how_to_release.md](docs/how_to_release.md)。
 
-
 ## 2. 配置
 
 如果设置了 `$OMNI_CONFIG`，OmniStream 会固定使用该路径，即使文件不存在也不会
@@ -78,8 +77,26 @@ local = { root_path = "/var/lib/omni-stream" }
 name = "production-s3"
 type = "s3"
 active = true
-s3 = { endpoint = "http://minio.local:9000", bucket = "data", access_key = "...", secret_key = "..." }
+[storages.s3]
+endpoint = "http://minio.local:9000"
+bucket = "data"
+credentials = { type = "static", access_key = "...", secret_key = "..." }
 ```
+
+复用用户 AWS profile 作为验证凭据时:
+
+```toml
+[[storages]]
+name = "profile-s3"
+type = "s3"
+[storages.s3]
+bucket = "my-bucket"
+region = "ap-southeast-1"
+credentials = { type = "aws_profile", profile_name = "sh01b" }
+```
+
+文件操作和 SQL 查询均从 AWS 共享配置与凭据文件（通常为 `~/.aws/config`
+和 `~/.aws/credentials`）加载指定 profile。不同存储可以选择不同 profile。
 
 local 后端可选 `follow_symlinks`（默认 `true`；`false` 时符号链接作为条目出现但读取返回 Forbidden，且该 storage 完全拒绝 DuckDB/SQL 功能）：
 
@@ -108,7 +125,9 @@ local = { root_path = "/var/lib/omni-stream", follow_symlinks = false }  # 默�
 [[storages]]
 name = "all-prod-s3"
 type = "s3"
-s3 = { endpoint = "http://minio.local:9000", access_key = "...", secret_key = "..." }
+[storages.s3]
+endpoint = "http://minio.local:9000"
+credentials = { type = "static", access_key = "...", secret_key = "..." }
 ```
 
 > 多个 `[[storages]]` 表项可同时存在；启动时挑 `active = true` 的那一个，没配 active 就用第一个。

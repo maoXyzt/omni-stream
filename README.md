@@ -38,7 +38,6 @@ For `uv`, see the [official documentation](https://docs.astral.sh/uv/).
 > [docs/development_guide.md](docs/development_guide.md) and
 > [docs/how_to_release.md](docs/how_to_release.md).
 
-
 ## 2. Configuration
 
 If `$OMNI_CONFIG` is set, OmniStream uses that exact path without falling back,
@@ -70,8 +69,27 @@ Or S3 / S3-compatible (MinIO / OSS):
 name = "production-s3"
 type = "s3"
 active = true
-s3 = { endpoint = "http://minio.local:9000", bucket = "data", access_key = "...", secret_key = "..." }
+[storages.s3]
+endpoint = "http://minio.local:9000"
+bucket = "data"
+credentials = { type = "static", access_key = "...", secret_key = "..." }
 ```
+
+To reuse an existing AWS profile for authentication:
+
+```toml
+[[storages]]
+name = "profile-s3"
+type = "s3"
+[storages.s3]
+bucket = "my-bucket"
+region = "ap-southeast-1"
+credentials = { type = "aws_profile", profile_name = "sh01b" }
+```
+
+File operations and SQL queries load the named profile from the AWS shared
+configuration and credentials files (normally `~/.aws/config` and
+`~/.aws/credentials`). Different storages may select different profiles.
 
 The local backend supports `follow_symlinks` (default `true`; when `false`, symlinks appear as entries but reads return Forbidden, and that storage refuses all DuckDB/SQL operations):
 
@@ -102,7 +120,9 @@ drills down with the usual prefix listing. The credentials must hold the
 [[storages]]
 name = "all-prod-s3"
 type = "s3"
-s3 = { endpoint = "http://minio.local:9000", access_key = "...", secret_key = "..." }
+[storages.s3]
+endpoint = "http://minio.local:9000"
+credentials = { type = "static", access_key = "...", secret_key = "..." }
 ```
 
 > Multiple `[[storages]]` entries can coexist; on startup the one with `active = true` wins, and if none is active the first entry is used.

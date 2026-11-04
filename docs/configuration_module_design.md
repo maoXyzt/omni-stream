@@ -23,14 +23,22 @@ OmniStream 使用 **TOML** 作为标准配置文件格式。系统支持定义�
 name = "production-s3"
 type = "s3"
 active = true
-s3 = { endpoint = "...", bucket = "...", access_key = "...", secret_key = "...", region = "...", force_path_style = true }  # 虚拟主机网关（部分 AOSS/OSS）设 false
+[storages.s3]
+endpoint = "..."
+bucket = "..."
+credentials = { type = "static", access_key = "...", secret_key = "..." }
+region = "..."
+force_path_style = true  # 虚拟主机网关（部分 AOSS/OSS）设 false
 
 # 省略 bucket（或设为 "*"）开启多 bucket 模式：根目录展开 ListBuckets，
 # 每个可见 bucket 作为顶层目录显示。需要 s3:ListAllMyBuckets 权限。
 [[storages]]
 name = "all-prod-s3"
 type = "s3"
-s3 = { endpoint = "...", access_key = "...", secret_key = "...", region = "..." }
+[storages.s3]
+endpoint = "..."
+credentials = { type = "static", access_key = "...", secret_key = "..." }
+region = "..."
 
 [[storages]]
 name = "local-data"
@@ -52,6 +60,14 @@ local = { root_path = "/data/files", follow_symlinks = true }  # false 时 symli
 # convert_timeout_secs = 1800 # 默认（30 分钟）；后台 JSONL/CSV→Parquet 转换超时
 # max_rows = 10000            # 默认；结果超出此数时截断
 ```
+
+S3 凭据统一通过 `credentials` 配置：静态密钥使用 `type = "static"`；
+本地 AWS profile 使用 `credentials = { type = "aws_profile", profile_name = "sh01b" }`。
+每个存储独立选择 profile，文件操作和 SQL 共用同一凭据来源。
+SQL 查询通过 `storage` 参数选择 `[[storages]].name`，后端会将该存储配置的
+`credentials.profile_name` 传给 DuckDB，由 DuckDB 解析实际凭据，用户无需在 SQL 中指定 profile。
+当前 DuckDB 解析方式还要求 AWS `config` 文件中存在对应的 `[profile <name>]` 段
+（例如配置 `region`）；仅在 `credentials` 文件中定义同名 profile 不够。
 
 `s3.bucket` 为可选字段，缺省 / 空串 / `"*"` 三种写法语义等价：均触发多 bucket
 模式。给出具体 bucket 名时，`S3Backend` 行为与本特性引入前完全一致，无回归。

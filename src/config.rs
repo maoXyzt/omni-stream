@@ -131,6 +131,38 @@ pub struct StorageConfig {
   pub local: Option<LocalConfig>,
 }
 
+/// Explicit credential sources are scoped to a single storage.
+#[derive(Clone, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum S3Credentials {
+  AwsProfile {
+    profile_name: String,
+  },
+  Static {
+    access_key: String,
+    secret_key: String,
+  },
+}
+
+impl fmt::Debug for S3Credentials {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    match self {
+      Self::AwsProfile { profile_name } => f
+        .debug_struct("AwsProfile")
+        .field("profile_name", profile_name)
+        .finish(),
+      Self::Static {
+        access_key,
+        secret_key,
+      } => f
+        .debug_struct("Static")
+        .field("access_key", &mask_secret(Some(access_key)))
+        .field("secret_key", &mask_secret(Some(secret_key)))
+        .finish(),
+    }
+  }
+}
+
 #[derive(Clone, Deserialize)]
 pub struct S3Config {
   #[serde(default)]
@@ -147,6 +179,9 @@ pub struct S3Config {
   pub access_key: Option<String>,
   #[serde(default)]
   pub secret_key: Option<String>,
+  /// Omit to retain the AWS default credential chain / legacy static keys.
+  #[serde(default)]
+  pub credentials: Option<S3Credentials>,
   #[serde(default)]
   pub region: Option<String>,
   // Path-style addressing (`https://endpoint/bucket/key`). Disable for
@@ -161,6 +196,27 @@ fn default_force_path_style() -> bool {
 }
 
 impl S3Config {
+  /// Resolve new static credentials or the backward-compatible top-level keys.
+  pub fn static_credentials(&self) -> (Option<&str>, Option<&str>) {
+    match &self.credentials {
+      Some(S3Credentials::Static {
+        access_key,
+        secret_key,
+      }) => (Some(access_key), Some(secret_key)),
+      Some(S3Credentials::AwsProfile { .. }) => (None, None),
+      None => (self.access_key.as_deref(), self.secret_key.as_deref()),
+    }
+  }
+
+  pub fn validate_credentials(&self) -> anyhow::Result<()> {
+    if let Some(S3Credentials::AwsProfile { profile_name }) = &self.credentials
+      && profile_name.trim().is_empty()
+    {
+      bail!("s3.credentials.profile_name must not be empty");
+    }
+    Ok(())
+  }
+
   /// Returns the configured bucket name when this storage pins to a single
   /// bucket, or `None` when it should operate in multi-bucket mode.
   ///
@@ -185,6 +241,7 @@ impl Default for S3Config {
       bucket: None,
       access_key: None,
       secret_key: None,
+      credentials: None,
       region: None,
       force_path_style: default_force_path_style(),
     }
@@ -202,6 +259,7 @@ impl fmt::Debug for S3Config {
       )
       .field("access_key", &mask_secret(self.access_key.as_deref()))
       .field("secret_key", &mask_secret(self.secret_key.as_deref()))
+      .field("credentials", &self.credentials)
       .field("region", &self.region)
       .field("force_path_style", &self.force_path_style)
       .finish()
@@ -433,6 +491,21 @@ impl fmt::Debug for AuthConfig {
 }
 
 impl Config {
+  /// Warn once at startup per storage, including legacy fields ignored by the
+  /// new credentials configuration. Never include credential values in logs.
+  fn warn_deprecated_credentials(&self) {
+    for storage in &self.storages {
+      if let Some(s3) = &storage.s3
+        && (s3.access_key.is_some() || s3.secret_key.is_some())
+      {
+        tracing::warn!(
+          storage = %storage.name,
+          "deprecated S3 configuration: top-level s3.access_key / s3.secret_key; migrate to s3.credentials. When credentials is set, legacy keys are ignored."
+        );
+      }
+    }
+  }
+
   /// Build the minimal, zero-config setup used by `omni-stream serve <path>`.
   /// `port` overrides the listen port; `None` keeps the built-in default.
   pub fn for_local_root(root_path: PathBuf, port: Option<u16>) -> anyhow::Result<Self> {
@@ -502,6 +575,8 @@ impl Config {
     cfg
       .validate()
       .with_context(|| format!("validate config: {shown}"))?;
+
+    cfg.warn_deprecated_credentials();
 
     // Logged at info post-validate (not pre-build) so a successful line means
     // "this is the file actually serving traffic" — load failures surface via
@@ -655,6 +730,8 @@ impl Config {
               s.name
             )
           })?;
+          s3.validate_credentials()
+            .with_context(|| format!("storage '{}'", s.name))?;
           // bucket is now optional: omitted / "" / "*" all mean "multi-bucket
           // mode" (root listing performs ListBuckets). When a literal name is
           // supplied it must be a single S3 bucket — reject anything that
@@ -1133,12 +1210,182 @@ local = { root_path = "/tmp" }
   }
 
   #[test]
+  fn startup_warns_for_legacy_keys_even_when_ignored_without_logging_secrets() {
+    use std::io::Write;
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Clone)]
+    struct LogBuffer(Arc<Mutex<Vec<u8>>>);
+    impl Write for LogBuffer {
+      fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(bytes);
+        Ok(bytes.len())
+      }
+      fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+      }
+    }
+
+    for (fields, warned) in [
+      ("access_key = 'legacy-secret-ak'", true),
+      ("secret_key = 'legacy-secret-sk'", true),
+      (
+        "access_key = 'legacy-secret-ak'\nsecret_key = 'legacy-secret-sk'",
+        true,
+      ),
+      (
+        "access_key = 'legacy-secret-ak'\ncredentials = { type = 'aws_profile', profile_name = 'dev' }",
+        true,
+      ),
+      (
+        "secret_key = 'legacy-secret-sk'\ncredentials = { type = 'static', access_key = 'modern-secret-ak', secret_key = 'modern-secret-sk' }",
+        true,
+      ),
+      (
+        "credentials = { type = 'static', access_key = 'modern-secret-ak', secret_key = 'modern-secret-sk' }",
+        false,
+      ),
+      (
+        "credentials = { type = 'aws_profile', profile_name = 'dev' }",
+        false,
+      ),
+      ("", false),
+    ] {
+      let cfg: Config = toml::from_str(&format!(
+        "[[storages]]\nname = 'test-s3'\ntype = 's3'\n[storages.s3]\n{fields}"
+      ))
+      .unwrap();
+      cfg.validate().unwrap();
+      let buffer = LogBuffer(Arc::new(Mutex::new(Vec::new())));
+      let writer = buffer.clone();
+      let subscriber = tracing_subscriber::fmt()
+        .without_time()
+        .with_ansi(false)
+        .with_max_level(tracing::Level::WARN)
+        .with_writer(move || writer.clone())
+        .finish();
+      tracing::subscriber::with_default(subscriber, || cfg.warn_deprecated_credentials());
+      let logs = String::from_utf8(buffer.0.lock().unwrap().clone()).unwrap();
+      assert_eq!(logs.contains("deprecated"), warned, "{fields}: {logs}");
+      if warned {
+        assert!(logs.contains("WARN"));
+        assert!(logs.contains("test-s3"));
+        assert!(logs.contains("s3.credentials"));
+        assert_eq!(logs.lines().count(), 1);
+      }
+      for secret in [
+        "legacy-secret-ak",
+        "legacy-secret-sk",
+        "modern-secret-ak",
+        "modern-secret-sk",
+      ] {
+        assert!(!logs.contains(secret), "{logs}");
+      }
+    }
+  }
+
+  #[test]
+  fn static_credentials_new_and_legacy_are_equivalent_and_redacted() {
+    let modern: S3Config = toml::from_str(
+      "credentials = { type = 'static', access_key = 'new-ak-secret', secret_key = 'new-sk-secret' }"
+    ).unwrap();
+    let legacy: S3Config =
+      toml::from_str("access_key = 'new-ak-secret'\nsecret_key = 'new-sk-secret'").unwrap();
+    modern.validate_credentials().unwrap();
+    assert_eq!(modern.static_credentials(), legacy.static_credentials());
+    let debug = format!("{modern:?}");
+    assert!(!debug.contains("new-ak-secret"));
+    assert!(!debug.contains("new-sk-secret"));
+    assert!(debug.contains("REDACTED"));
+    let conflict = S3Config {
+      access_key: Some("legacy".into()),
+      ..modern
+    };
+    conflict.validate_credentials().unwrap();
+    assert_eq!(
+      conflict.static_credentials(),
+      (Some("new-ak-secret"), Some("new-sk-secret"))
+    );
+    assert!(
+      toml::from_str::<S3Config>("credentials = { type = 'static', access_key = 'ak' }").is_err()
+    );
+  }
+
+  #[test]
+  fn aws_profile_credentials_parse_per_storage() {
+    let cfg: Config = toml::from_str(
+      r#"
+      [[storages]]
+      name = "one"
+      type = "s3"
+      s3.credentials = { type = "aws_profile", profile_name = "sh01b" }
+      [[storages]]
+      name = "two"
+      type = "s3"
+      s3.credentials = { type = "aws_profile", profile_name = "production" }
+    "#,
+    )
+    .unwrap();
+    cfg.validate().unwrap();
+    for (storage, expected) in cfg.storages.iter().zip(["sh01b", "production"]) {
+      let credentials = &storage.s3.as_ref().unwrap().credentials;
+      assert!(
+        matches!(credentials, Some(S3Credentials::AwsProfile { profile_name }) if profile_name == expected)
+      );
+    }
+    let legacy: S3Config = toml::from_str(
+      "access_key = 'ak'
+secret_key = 'sk'",
+    )
+    .unwrap();
+    assert!(legacy.credentials.is_none());
+    legacy.validate_credentials().unwrap();
+  }
+
+  #[test]
+  fn aws_profile_credentials_reject_invalid_configuration() {
+    for raw in [
+      "credentials = { type = 'unknown', profile_name = 'dev' }",
+      "credentials = { type = 'aws_profile' }",
+      "credentials = { type = 'aws_profile', profile_name = 'dev', typo = true }",
+    ] {
+      assert!(toml::from_str::<S3Config>(raw).is_err(), "{raw}");
+    }
+    for profile in ["", "   "] {
+      let cfg = S3Config {
+        credentials: Some(S3Credentials::AwsProfile {
+          profile_name: profile.into(),
+        }),
+        ..Default::default()
+      };
+      assert!(cfg.validate_credentials().is_err());
+    }
+    for (access_key, secret_key) in [
+      (Some("ak".into()), None),
+      (None, Some("sk".into())),
+      (Some("ak".into()), Some("sk".into())),
+    ] {
+      let cfg = S3Config {
+        access_key,
+        secret_key,
+        credentials: Some(S3Credentials::AwsProfile {
+          profile_name: "dev".into(),
+        }),
+        ..Default::default()
+      };
+      cfg.validate_credentials().unwrap();
+      assert_eq!(cfg.static_credentials(), (None, None));
+    }
+  }
+
+  #[test]
   fn debug_masks_s3_secrets() {
     let s3 = S3Config {
       endpoint: Some("https://example.com".into()),
       bucket: Some("b".into()),
       access_key: Some("AKIDsecret".into()),
       secret_key: Some("supersecret".into()),
+      credentials: None,
       region: Some("us-east-1".into()),
       force_path_style: true,
     };

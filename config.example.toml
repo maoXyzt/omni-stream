@@ -48,8 +48,10 @@ type = "s3"             # required
 #                       # files via the write API. Requires auth.enabled = true.
 
 [storages.s3]
-access_key = "minioadmin"              # required for static creds (omit for IAM role / anonymous)
-secret_key = "minioadmin"              # required for static creds
+credentials = { type = "static", access_key = "minioadmin", secret_key = "minioadmin" }
+# To use a local AWS profile, replace credentials above with:
+# credentials = { type = "aws_profile", profile_name = "sh01b" }
+# Profiles are per storage and also apply to SQL; region below remains explicit.
 # endpoint = "http://localhost:9000"   # optional; omit for real AWS, set for self-hosted gateways
 # bucket = "my-bucket"                 # optional; omit or "*" → multi-bucket (needs s3:ListAllMyBuckets)
 # region = "us-east-1"                 # default; set to the bucket's real region for AWS outside us-east-1

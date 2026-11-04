@@ -7,7 +7,7 @@
 
 use std::path::Path;
 
-use crate::config::{S3Config, SqlConfig};
+use crate::config::{S3Config, S3Credentials, SqlConfig};
 use crate::error::AppError;
 use crate::sql::SqlTarget;
 
@@ -56,7 +56,7 @@ pub fn setup_statements(
       // from the official extension repo on first use (network required
       // once), then it's cached under ~/.duckdb and INSTALL is a no-op.
       out.push_str("INSTALL httpfs;\nLOAD httpfs;\n");
-      if s3.access_key.is_none() && s3.secret_key.is_none() {
+      if s3.static_credentials() == (None, None) {
         // No static credentials → defer to the AWS credential chain (IAM
         // role / env / profile). The credential_chain provider lives in the
         // `aws` extension, fetched the same way as httpfs.
@@ -118,14 +118,22 @@ fn push_resource_limits(out: &mut String, cfg: &SqlConfig) {
 /// secret is SCOPEd to it, so queries against other buckets fail with "no
 /// credentials" instead of silently using this storage's keys.
 fn secret_sql(s3: &S3Config) -> Result<String, AppError> {
+  s3.validate_credentials()
+    .map_err(|e| AppError::Backend(e.to_string()))?;
   let mut parts: Vec<String> = vec!["TYPE s3".into()];
 
-  match (s3.access_key.as_deref(), s3.secret_key.as_deref()) {
+  match s3.static_credentials() {
     (Some(key), Some(secret)) => {
       parts.push(format!("KEY_ID '{}'", sql_escape(key)));
       parts.push(format!("SECRET '{}'", sql_escape(secret)));
     }
-    (None, None) => parts.push("PROVIDER credential_chain".into()),
+    (None, None) => {
+      parts.push("PROVIDER credential_chain".into());
+      if let Some(S3Credentials::AwsProfile { profile_name }) = &s3.credentials {
+        parts.push("CHAIN 'config'".into());
+        parts.push(format!("PROFILE '{}'", sql_escape(profile_name)));
+      }
+    }
     _ => {
       return Err(AppError::Backend(
         "S3 storage has only one of access_key / secret_key set; SQL queries need both or neither"
@@ -179,6 +187,7 @@ mod tests {
       bucket: Some("my-bucket".into()),
       access_key: Some("AKID".into()),
       secret_key: Some("SK".into()),
+      credentials: None,
       region: Some("eu-west-1".into()),
       force_path_style: true,
     }
@@ -235,6 +244,75 @@ mod tests {
     let sql = secret_sql(&cfg).unwrap();
     assert!(sql.contains("PROVIDER credential_chain"), "{sql}");
     assert!(!sql.contains("KEY_ID"));
+  }
+
+  #[test]
+  fn secret_nested_static_matches_legacy() {
+    let legacy = s3_base();
+    let modern = S3Config {
+      credentials: Some(S3Credentials::Static {
+        access_key: "AKID".into(),
+        secret_key: "SK".into(),
+      }),
+      access_key: Some("ignored-legacy-ak".into()),
+      secret_key: Some("ignored-legacy-sk".into()),
+      ..s3_base()
+    };
+    assert_eq!(secret_sql(&modern).unwrap(), secret_sql(&legacy).unwrap());
+    let setup = setup_statements(
+      &SqlConfig::default(),
+      &SqlTarget::S3(modern),
+      Path::new("/tmp/spill"),
+    )
+    .unwrap();
+    assert!(!setup.contains("INSTALL aws;"));
+  }
+
+  #[test]
+  fn secret_named_profile_is_scoped_and_escaped() {
+    let cfg = S3Config {
+      access_key: None,
+      secret_key: None,
+      credentials: Some(S3Credentials::AwsProfile {
+        profile_name: "team's-profile".into(),
+      }),
+      ..s3_base()
+    };
+    let sql = secret_sql(&cfg).unwrap();
+    assert!(sql.contains("PROVIDER credential_chain"));
+    assert!(sql.contains("CHAIN 'config'"));
+    assert!(sql.contains("PROFILE 'team''s-profile'"));
+    assert!(sql.contains("SCOPE 's3://my-bucket'"));
+    assert!(!sql.contains("KEY_ID"));
+    let setup = setup_statements(
+      &SqlConfig::default(),
+      &SqlTarget::S3(cfg),
+      Path::new("/tmp/spill"),
+    )
+    .unwrap();
+    assert!(setup.contains("INSTALL aws;"));
+    assert!(setup.contains("LOAD aws;"));
+  }
+
+  #[test]
+  fn secret_profile_takes_precedence_over_legacy_keys() {
+    let cfg = S3Config {
+      credentials: Some(S3Credentials::AwsProfile {
+        profile_name: "dev".into(),
+      }),
+      ..s3_base()
+    };
+    let sql = secret_sql(&cfg).unwrap();
+    assert!(sql.contains("PROFILE 'dev'"));
+    assert!(!sql.contains("KEY_ID"));
+    assert!(!sql.contains("SECRET 'SK'"));
+    let setup = setup_statements(
+      &SqlConfig::default(),
+      &SqlTarget::S3(cfg),
+      Path::new("/tmp/spill"),
+    )
+    .unwrap();
+    assert!(setup.contains("INSTALL aws;"));
   }
 
   #[test]

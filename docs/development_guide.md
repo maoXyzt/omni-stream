@@ -117,6 +117,15 @@ cargo fmt
 
 > CI 的 lint job 还会执行 `cargo check --locked`（不带 duckdb）来守护 crates.io 默认构建不报错。
 
+S3 profile 隔离测试使用临时生成的虚构凭据文件，并在独立子进程中覆盖 AWS
+环境变量，不需要真实 AWS 账号。SDK 测试通过模拟 HTTP 检查实际签名请求，随常规测试运行。
+DuckDB 测试执行实际的凭据加载与 SQL 初始化；需要已缓存的 `httpfs` / `aws`
+扩展，或允许首次下载扩展，因此默认忽略，合并凭据配置相关改动前需显式运行：
+
+```bash
+cargo test --features duckdb storage::s3::profile_tests -- --include-ignored
+```
+
 ### 前端
 
 ```bash

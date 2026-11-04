@@ -232,6 +232,7 @@ mod tests {
       bucket: Some("mybucket".into()),
       access_key: Some("key".into()),
       secret_key: Some("secret".into()),
+      credentials: None,
       region: Some("us-east-1".into()),
       force_path_style: true,
     })
