@@ -108,9 +108,10 @@ active = true
 local = { root_path = "/var/lib/omni-stream", follow_symlinks = false }  # 默认 true
 ```
 
-> `s3.region` 默认 `us-east-1`，对 MinIO / LocalStack / AWS us-east-1 桶都
-> 够用，可以省略。**只在两种情况下需要显式配置**：(1) 目标桶在 AWS 上但不
-> 是 us-east-1——SigV4 必须用桶实际所在的 region，否则 AWS 返回
+> 显式 `s3.region` 优先；未配置时，`aws_profile` 凭据会继承所选 profile 的 region。
+> profile 未提供 region 时默认 `us-east-1`，对 MinIO / LocalStack / AWS us-east-1 桶都
+> 够用，可以省略。**只在两种情况下需要显式配置**：(1) 目标 AWS 桶的区域与
+> 继承或默认的区域不同——SigV4 必须用桶实际所在的 region，否则 AWS 返回
 > `AuthorizationHeaderMalformed`；(2) 网关对 region 有严格校验（大部分网
 > 关都不校验）。
 > `s3.force_path_style` 默认 `true`（MinIO 等自托管网关必须用 true）；部分

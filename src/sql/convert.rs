@@ -131,7 +131,7 @@ pub async fn convert_handler(
     );
   }
   convert_cfg.threads = convert_cfg.convert_threads.max(1);
-  let setup = session::setup_statements(&convert_cfg, target, &sql_state.scratch_dir)?;
+  let setup = session::setup_statements(&convert_cfg, target, &sql_state.scratch_dir).await?;
   // TSV/CSV: read_csv_auto auto-detects comma vs tab (and other delimiters).
   // JSONL/NDJSON: read_json_auto handles newline-delimited JSON.
   let read_fn = if is_json_lines {

@@ -18,12 +18,12 @@ fn isolated_profiles(test: &str, verify: impl FnOnce(&Path)) {
   std::fs::create_dir_all(&root).unwrap();
   std::fs::write(
     root.join("config"),
-    "[profile one]\nregion = us-east-1\n[profile two]\nregion = us-east-1\n",
+    "[profile one]\nregion = us-west-2\n[profile two]\nregion = ap-southeast-1\n[profile no-region]\n",
   )
   .unwrap();
   std::fs::write(
     root.join("credentials"),
-    "[one]\naws_access_key_id = TEST_PROFILE_ONE\naws_secret_access_key = fake-secret-one\n[two]\naws_access_key_id = TEST_PROFILE_TWO\naws_secret_access_key = fake-secret-two\n",
+    "[one]\naws_access_key_id = TEST_PROFILE_ONE\naws_secret_access_key = fake-secret-one\n[two]\naws_access_key_id = TEST_PROFILE_TWO\naws_secret_access_key = fake-secret-two\n[no-region]\naws_access_key_id = TEST_NO_REGION\naws_secret_access_key = fake-secret-no-region\n",
   )
   .unwrap();
   let output = std::process::Command::new(std::env::current_exe().unwrap())
@@ -32,6 +32,8 @@ fn isolated_profiles(test: &str, verify: impl FnOnce(&Path)) {
     .env("AWS_CONFIG_FILE", root.join("config"))
     .env("AWS_SHARED_CREDENTIALS_FILE", root.join("credentials"))
     .env("AWS_PROFILE", "nonexistent-default")
+    .env("AWS_REGION", "eu-north-1")
+    .env("AWS_DEFAULT_REGION", "eu-north-1")
     .env("AWS_ACCESS_KEY_ID", "IGNORED_ENV_KEY")
     .env("AWS_SECRET_ACCESS_KEY", "ignored-env-secret")
     .env("AWS_SESSION_TOKEN", "ignored-env-token")
@@ -114,15 +116,19 @@ fn sdk_resolves_profiles_per_storage() {
             .await
             .unwrap();
         }
-        for (replay, key, count) in [
-          (&replay_one, "TEST_PROFILE_ONE", 2),
-          (&replay_two, "TEST_PROFILE_TWO", 1),
+        for (replay, key, region, count) in [
+          (&replay_one, "TEST_PROFILE_ONE", "us-west-2", 2),
+          (&replay_two, "TEST_PROFILE_TWO", "ap-southeast-1", 1),
         ] {
           let requests: Vec<_> = replay.actual_requests().collect();
           assert_eq!(requests.len(), count);
           for request in requests {
             let auth = request.headers().get("authorization").unwrap();
             assert!(auth.contains(&format!("Credential={key}/")), "{auth}");
+            assert!(
+              auth.contains(&format!("/{region}/s3/aws4_request")),
+              "{auth}"
+            );
             assert!(!auth.contains("IGNORED_"), "{auth}");
           }
         }
@@ -145,6 +151,31 @@ fn sdk_resolves_profiles_per_storage() {
   );
 }
 
+#[test]
+fn sdk_profile_region_override_and_fallback() {
+  isolated_profiles(
+    "storage::s3::profile_tests::sdk_profile_region_override_and_fallback",
+    |_| {
+      tokio::runtime::Runtime::new().unwrap().block_on(async {
+        for (name, configured, expected) in [
+          ("one", Some("eu-west-1"), "eu-west-1"),
+          ("no-region", None, "us-east-1"),
+        ] {
+          let mut cfg = profile(name);
+          cfg.region = configured.map(str::to_owned);
+          let backend = S3Backend::new(&cfg).await.unwrap();
+          assert_eq!(backend.client.config().region().unwrap().as_ref(), expected);
+        }
+        let backend = S3Backend::new(&S3Config::default()).await.unwrap();
+        assert_eq!(
+          backend.client.config().region().unwrap().as_ref(),
+          "us-east-1"
+        );
+      });
+    },
+  );
+}
+
 #[cfg(feature = "duckdb")]
 #[test]
 #[ignore = "requires cached DuckDB httpfs/aws extensions or extension download access"]
@@ -155,22 +186,56 @@ fn duckdb_resolves_profiles_per_storage() {
   isolated_profiles(
     "storage::s3::profile_tests::duckdb_resolves_profiles_per_storage",
     |root| {
+      let runtime = tokio::runtime::Runtime::new().unwrap();
       let mut connections = Vec::new();
-      for (name, key, secret) in [
-        ("one", "TEST_PROFILE_ONE", "fake-secret-one"),
-        ("two", "TEST_PROFILE_TWO", "fake-secret-two"),
+      for (name, key, secret, configured, region) in [
+        (
+          "one",
+          "TEST_PROFILE_ONE",
+          "fake-secret-one",
+          None,
+          "us-west-2",
+        ),
+        (
+          "two",
+          "TEST_PROFILE_TWO",
+          "fake-secret-two",
+          None,
+          "ap-southeast-1",
+        ),
+        (
+          "one",
+          "TEST_PROFILE_ONE",
+          "fake-secret-one",
+          Some("eu-west-1"),
+          "eu-west-1",
+        ),
+        (
+          "no-region",
+          "TEST_NO_REGION",
+          "fake-secret-no-region",
+          None,
+          "us-east-1",
+        ),
       ] {
         let config = duckdb::Config::default()
           .with("allow_unredacted_secrets", "true")
           .unwrap();
         let connection = duckdb::Connection::open_in_memory_with_flags(config).unwrap();
-        let setup =
-          setup_statements(&SqlConfig::default(), &SqlTarget::S3(profile(name)), root).unwrap();
+        let mut cfg = profile(name);
+        cfg.region = configured.map(str::to_owned);
+        let setup = runtime
+          .block_on(setup_statements(
+            &SqlConfig::default(),
+            &SqlTarget::S3(cfg),
+            root,
+          ))
+          .unwrap();
         // Execute the production setup, including CREATE SECRET and sandbox.
         connection.execute_batch(&setup).unwrap();
-        connections.push((connection, key, secret));
+        connections.push((connection, key, secret, region));
       }
-      for (connection, key, secret) in &connections {
+      for (connection, key, secret, region) in &connections {
         let resolved: String = connection
           .query_row(
             "SELECT secret_string FROM duckdb_secrets(redact := false) WHERE name = 'omni_query'",
@@ -180,15 +245,17 @@ fn duckdb_resolves_profiles_per_storage() {
           .unwrap();
         assert!(resolved.contains(key), "{resolved}");
         assert!(resolved.contains(secret), "{resolved}");
+        assert!(resolved.contains(&format!("region={region}")), "{resolved}");
         assert!(!resolved.contains("IGNORED_"), "{resolved}");
       }
       let missing = duckdb::Connection::open_in_memory().unwrap();
-      let setup = setup_statements(
-        &SqlConfig::default(),
-        &SqlTarget::S3(profile("missing")),
-        root,
-      )
-      .unwrap();
+      let setup = runtime
+        .block_on(setup_statements(
+          &SqlConfig::default(),
+          &SqlTarget::S3(profile("missing")),
+          root,
+        ))
+        .unwrap();
       assert!(missing.execute_batch(&setup).is_err());
     },
   );

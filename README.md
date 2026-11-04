@@ -101,9 +101,11 @@ active = true
 local = { root_path = "/var/lib/omni-stream", follow_symlinks = false }  # default true
 ```
 
+> An explicit `s3.region` takes precedence; otherwise, `aws_profile` credentials
+> inherit the selected profile's region. Without a profile region,
 > `s3.region` defaults to `us-east-1`, which is fine for MinIO / LocalStack
 > and AWS us-east-1 buckets — leave it out by default. **Only set it when:**
-> (1) the target AWS bucket lives outside us-east-1, since SigV4 has to use
+> (1) the target AWS bucket's region differs from the inherited/default region, since SigV4 has to use
 > the bucket's actual region (otherwise AWS returns
 > `AuthorizationHeaderMalformed`); or (2) the S3-compatible gateway
 > validates the region strictly (most don't).

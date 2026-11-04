@@ -244,8 +244,8 @@ mod tests {
     assert_eq!(format_date(19_789), "2024-03-07");
   }
 
-  #[test]
-  fn local_sandbox_blocks_reads_outside_root() {
+  #[tokio::test]
+  async fn local_sandbox_blocks_reads_outside_root() {
     use crate::config::SqlConfig;
     use crate::sql::SqlTarget;
 
@@ -263,6 +263,7 @@ mod tests {
       },
       &scratch,
     )
+    .await
     .unwrap();
     c.execute_batch(&setup).unwrap();
 

@@ -38,12 +38,13 @@ fn expand_tilde(s: &str) -> std::path::PathBuf {
 /// Build the setup batch executed ahead of the user query. Statement order
 /// matters: extension INSTALL/LOAD needs filesystem + network access, so all
 /// restrictions come after; `lock_configuration` must be last.
+/// Profile region lookup uses asynchronous IO before executing any DuckDB SQL.
 ///
 /// `scratch_dir` is the host-local directory DuckDB may use for spill-to-disk
 /// (large intermediate results, Parquet row-group buffers). It must exist
 /// before the connection is opened; `SqlState::from_config` creates it at
 /// server startup.
-pub fn setup_statements(
+pub async fn setup_statements(
   cfg: &SqlConfig,
   target: &SqlTarget,
   scratch_dir: &Path,
@@ -62,7 +63,14 @@ pub fn setup_statements(
         // `aws` extension, fetched the same way as httpfs.
         out.push_str("INSTALL aws;\nLOAD aws;\n");
       }
-      out.push_str(&secret_sql(s3)?);
+      let mut resolved = s3.clone();
+      resolved.region = Some(
+        crate::storage::aws::resolve_region(s3)
+          .await
+          .as_ref()
+          .to_owned(),
+      );
+      out.push_str(&secret_sql(&resolved)?);
       push_resource_limits(&mut out, cfg);
       // All required extensions are loaded explicitly above, so turn OFF lazy
       // autoload/autoinstall. A lazy load attempted after the sandbox is
@@ -246,8 +254,8 @@ mod tests {
     assert!(!sql.contains("KEY_ID"));
   }
 
-  #[test]
-  fn secret_nested_static_matches_legacy() {
+  #[tokio::test]
+  async fn secret_nested_static_matches_legacy() {
     let legacy = s3_base();
     let modern = S3Config {
       credentials: Some(S3Credentials::Static {
@@ -264,12 +272,13 @@ mod tests {
       &SqlTarget::S3(modern),
       Path::new("/tmp/spill"),
     )
+    .await
     .unwrap();
     assert!(!setup.contains("INSTALL aws;"));
   }
 
-  #[test]
-  fn secret_named_profile_is_scoped_and_escaped() {
+  #[tokio::test]
+  async fn secret_named_profile_is_scoped_and_escaped() {
     let cfg = S3Config {
       access_key: None,
       secret_key: None,
@@ -289,13 +298,14 @@ mod tests {
       &SqlTarget::S3(cfg),
       Path::new("/tmp/spill"),
     )
+    .await
     .unwrap();
     assert!(setup.contains("INSTALL aws;"));
     assert!(setup.contains("LOAD aws;"));
   }
 
-  #[test]
-  fn secret_profile_takes_precedence_over_legacy_keys() {
+  #[tokio::test]
+  async fn secret_profile_takes_precedence_over_legacy_keys() {
     let cfg = S3Config {
       credentials: Some(S3Credentials::AwsProfile {
         profile_name: "dev".into(),
@@ -311,6 +321,7 @@ mod tests {
       &SqlTarget::S3(cfg),
       Path::new("/tmp/spill"),
     )
+    .await
     .unwrap();
     assert!(setup.contains("INSTALL aws;"));
   }
@@ -338,11 +349,11 @@ mod tests {
     PathBuf::from("/tmp/omni-test-scratch")
   }
 
-  #[test]
-  fn s3_setup_order() {
+  #[tokio::test]
+  async fn s3_setup_order() {
     let cfg = SqlConfig::default();
     let target = SqlTarget::S3(s3_base());
-    let sql = setup_statements(&cfg, &target, &scratch()).unwrap();
+    let sql = setup_statements(&cfg, &target, &scratch()).await.unwrap();
     let pos = |needle: &str| {
       sql
         .find(needle)
@@ -372,25 +383,25 @@ mod tests {
     assert!(sql.contains("'/tmp/omni-test-scratch'"), "{sql}");
   }
 
-  #[test]
-  fn s3_setup_installs_aws_for_credential_chain() {
+  #[tokio::test]
+  async fn s3_setup_installs_aws_for_credential_chain() {
     let cfg = SqlConfig::default();
     let target = SqlTarget::S3(S3Config {
       access_key: None,
       secret_key: None,
       ..s3_base()
     });
-    let sql = setup_statements(&cfg, &target, &scratch()).unwrap();
+    let sql = setup_statements(&cfg, &target, &scratch()).await.unwrap();
     assert!(sql.contains("INSTALL aws"), "{sql}");
   }
 
-  #[test]
-  fn local_setup_sandbox() {
+  #[tokio::test]
+  async fn local_setup_sandbox() {
     let cfg = SqlConfig::default();
     let target = SqlTarget::Local {
       root_path: PathBuf::from("/var/data"),
     };
-    let sql = setup_statements(&cfg, &target, &scratch()).unwrap();
+    let sql = setup_statements(&cfg, &target, &scratch()).await.unwrap();
     let pos = |needle: &str| {
       sql
         .find(needle)

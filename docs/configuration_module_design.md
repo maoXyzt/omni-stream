@@ -64,6 +64,7 @@ local = { root_path = "/data/files", follow_symlinks = true }  # false 时 symli
 S3 凭据统一通过 `credentials` 配置：静态密钥使用 `type = "static"`；
 本地 AWS profile 使用 `credentials = { type = "aws_profile", profile_name = "sh01b" }`。
 每个存储独立选择 profile，文件操作和 SQL 共用同一凭据来源。
+区域优先级为：显式 `s3.region` > 所选 profile 的 region > `us-east-1`。
 SQL 查询通过 `storage` 参数选择 `[[storages]].name`，后端会将该存储配置的
 `credentials.profile_name` 传给 DuckDB，由 DuckDB 解析实际凭据，用户无需在 SQL 中指定 profile。
 当前 DuckDB 解析方式还要求 AWS `config` 文件中存在对应的 `[profile <name>]` 段
