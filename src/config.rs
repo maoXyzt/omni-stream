@@ -208,11 +208,25 @@ impl S3Config {
     }
   }
 
+  /// Reject blank explicit credentials without including their values in errors.
+  /// Legacy fields retain their existing validation behavior.
   pub fn validate_credentials(&self) -> anyhow::Result<()> {
-    if let Some(S3Credentials::AwsProfile { profile_name }) = &self.credentials
-      && profile_name.trim().is_empty()
-    {
-      bail!("s3.credentials.profile_name must not be empty");
+    match &self.credentials {
+      Some(S3Credentials::AwsProfile { profile_name }) if profile_name.trim().is_empty() => {
+        bail!("s3.credentials.profile_name must not be empty");
+      }
+      Some(S3Credentials::Static {
+        access_key,
+        secret_key,
+      }) => {
+        if access_key.trim().is_empty() {
+          bail!("s3.credentials.access_key must not be empty");
+        }
+        if secret_key.trim().is_empty() {
+          bail!("s3.credentials.secret_key must not be empty");
+        }
+      }
+      _ => {}
     }
     Ok(())
   }
@@ -1340,6 +1354,54 @@ secret_key = 'sk'",
     .unwrap();
     assert!(legacy.credentials.is_none());
     legacy.validate_credentials().unwrap();
+  }
+
+  #[test]
+  fn static_credentials_reject_blank_keys_without_exposing_values() {
+    for (access_key, secret_key) in [
+      ("", "sensitive-secret"),
+      (" \t\n", "sensitive-secret"),
+      ("sensitive-access", ""),
+      ("sensitive-access", " \t\n"),
+      ("", ""),
+    ] {
+      let cfg = S3Config {
+        // Explicit invalid credentials must not fall back to legacy keys.
+        access_key: Some("legacy-access".into()),
+        secret_key: Some("legacy-secret".into()),
+        credentials: Some(S3Credentials::Static {
+          access_key: access_key.into(),
+          secret_key: secret_key.into(),
+        }),
+        ..Default::default()
+      };
+      let error = cfg.validate_credentials().unwrap_err().to_string();
+      assert!(error.contains("must not be empty"));
+      for value in [
+        "sensitive-secret",
+        "sensitive-access",
+        "legacy-access",
+        "legacy-secret",
+      ] {
+        assert!(
+          !error.contains(value),
+          "credential leaked in validation error"
+        );
+      }
+    }
+
+    let cfg = S3Config {
+      credentials: Some(S3Credentials::Static {
+        access_key: " access ".into(),
+        secret_key: " secret ".into(),
+      }),
+      ..Default::default()
+    };
+    cfg.validate_credentials().unwrap();
+    assert_eq!(
+      cfg.static_credentials(),
+      (Some(" access "), Some(" secret "))
+    );
   }
 
   #[test]
