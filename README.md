@@ -91,6 +91,19 @@ File operations and SQL queries load the named profile from the AWS shared
 configuration and credentials files (normally `~/.aws/config` and
 `~/.aws/credentials`). Different storages may select different profiles.
 
+For SQL queries, DuckDB's current `config` credential chain also requires a
+matching `[profile <name>]` section in the AWS config file (`AWS_CONFIG_FILE`,
+default `~/.aws/config`), for example `[profile sh01b]` with
+`region = ap-southeast-1`. Defining the profile only in the credentials file
+is sufficient for file operations but not for SQL queries. The default profile
+uses `[default]` in the config file.
+
+SSO and `credential_process` profiles are supported by the Rust AWS SDK for
+file operations, but are not supported by the current SQL credential chain.
+Profiles with `role_arn` are handled by DuckDB's `config` chain without adding
+an `sts` chain entry. See the [configuration design](docs/configuration_module_design.md)
+for details (Chinese).
+
 The local backend supports `follow_symlinks` (default `true`; when `false`, symlinks appear as entries but reads return Forbidden, and that storage refuses all DuckDB/SQL operations):
 
 ```toml

@@ -67,8 +67,17 @@ S3 凭据统一通过 `credentials` 配置：静态密钥使用 `type = "static"
 区域优先级为：显式 `s3.region` > 所选 profile 的 region > `us-east-1`。
 SQL 查询通过 `storage` 参数选择 `[[storages]].name`，后端会将该存储配置的
 `credentials.profile_name` 传给 DuckDB，由 DuckDB 解析实际凭据，用户无需在 SQL 中指定 profile。
-当前 DuckDB 解析方式还要求 AWS `config` 文件中存在对应的 `[profile <name>]` 段
-（例如配置 `region`）；仅在 `credentials` 文件中定义同名 profile 不够。
+当前 DuckDB 使用 `CHAIN 'config'`，要求 AWS config 文件（`AWS_CONFIG_FILE`，
+默认 `~/.aws/config`）中存在对应的 `[profile <name>]` 段（例如配置 `region`）；
+默认 profile 使用 `[default]` 段。仅在 credentials 文件
+（`AWS_SHARED_CREDENTIALS_FILE`，默认 `~/.aws/credentials`）中定义同名 profile
+可以用于文件操作，但不足以支持 SQL 查询，后者会报 `no profile ... found in config file`。
+
+文件操作使用的 Rust AWS SDK 支持 SSO 和 `credential_process` profile，
+但当前 SQL 凭据链未启用 `sso` / `process` provider，不支持这两种凭据来源。
+带 `role_arn` 的 profile 由 DuckDB 的 `config` 链自动选择 STS provider，
+无需添加 `sts` 链条目；单独的 `sts` 链条目要求提供 `ASSUME_ROLE_ARN`，
+不能通过简单改成 `CHAIN 'config;sts'` 来补齐 SSO / process 支持。
 
 `s3.bucket` 为可选字段，缺省 / 空串 / `"*"` 三种写法语义等价：均触发多 bucket
 模式。给出具体 bucket 名时，`S3Backend` 行为与本特性引入前完全一致，无回归。

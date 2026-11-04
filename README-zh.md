@@ -98,6 +98,17 @@ credentials = { type = "aws_profile", profile_name = "sh01b" }
 文件操作和 SQL 查询均从 AWS 共享配置与凭据文件（通常为 `~/.aws/config`
 和 `~/.aws/credentials`）加载指定 profile。不同存储可以选择不同 profile。
 
+SQL 查询还要求 DuckDB 当前使用的 `config` 凭据链能在 AWS config 文件
+（`AWS_CONFIG_FILE`，默认 `~/.aws/config`）中找到对应的 `[profile <name>]` 段，
+例如 `[profile sh01b]` 中配置 `region = ap-southeast-1`。
+仅在 credentials 文件中定义 profile 可以用于文件操作，但不足以支持 SQL 查询。
+默认 profile 在 config 文件中使用 `[default]` 段。
+
+Rust AWS SDK 支持文件操作使用 SSO 和 `credential_process` profile，
+但当前 SQL 凭据链不支持这两种来源。带 `role_arn` 的 profile 由 DuckDB 的
+`config` 凭据链处理，无需额外添加 `sts` 链条目。
+详见[配置模块设计](docs/configuration_module_design.md)。
+
 local 后端可选 `follow_symlinks`（默认 `true`；`false` 时符号链接作为条目出现但读取返回 Forbidden，且该 storage 完全拒绝 DuckDB/SQL 功能）：
 
 ```toml
