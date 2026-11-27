@@ -19,6 +19,7 @@
 - **3D 模型** —— glb / gltf / obj / ply / stl / pcd / fbx，支持轨道旋转、网格和坐标轴
   （FBX 外部纹理需嵌入文件；GLTF sidecar 从同一存储加载）
 - **NumPy 数组** —— npy / npz 元数据，以及抽样 `(N, 3)` / `(N, 6)` 点云渲染
+- **Lance 数据集** —— 可浏览数据集目录、预览当前快照，或打开单个 Lance v2 数据文件查看物理行。用法与限制见 [Lance 数据集与数据文件预览](docs/lance_preview.md)。
 - **Safetensors 权重** —— 只读取 Header 展示 Tensor key / shape / dtype，并估算元素数量和存储体积；预览不会下载大块权重数据
 - **其它格式** —— 通用 fallback：图标 + 元信息 + 浏览器内置 viewer
 

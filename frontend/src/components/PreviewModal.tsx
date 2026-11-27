@@ -107,7 +107,7 @@ export function PreviewModal({
         <DialogHeader>
           <DialogTitle className="break-all pr-8">{fileKey}</DialogTitle>
           <DialogDescription>
-            Streamed via <code>/api/proxy</code>.
+            {kind === 'lance' ? 'Lance preview' : <>Streamed via <code>/api/proxy</code>.</>}
           </DialogDescription>
         </DialogHeader>
 
@@ -133,7 +133,7 @@ export function PreviewModal({
           )}
         </div>
 
-        <DialogFooter className="gap-2 sm:justify-end">
+        {(kind !== 'lance' || !fileKey.endsWith('/')) && <DialogFooter className="gap-2 sm:justify-end">
           <Button variant="outline" asChild>
             <button
               type="button"
@@ -152,7 +152,7 @@ export function PreviewModal({
               Download
             </a>
           </Button>
-        </DialogFooter>
+        </DialogFooter>}
       </DialogContent>
     </Dialog>
   )

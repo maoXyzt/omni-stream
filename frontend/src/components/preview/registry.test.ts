@@ -22,3 +22,11 @@ describe('visual file preview registry', () => {
     expect(previewTypeForKey('samples/shape.npz')?.kind).toBe('numpy')
   })
 })
+
+it('recognizes Lance dataset directories only when supported', () => {
+  expect(previewableKind('nested/test.LANCE/', true)).toBe('lance')
+  expect(previewableKind('nested/test.LANCE/')).not.toBe('lance')
+  expect(previewableKind('dataset.lance/data/part.lance', true)).toBe('lance')
+  expect(previewableKind('standalone.LANCE', true)).toBe('lance')
+  expect(previewableKind('standalone.LANCE', false)).toBe('generic')
+})

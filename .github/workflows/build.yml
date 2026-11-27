@@ -132,9 +132,9 @@ jobs:
           # codebase that the musl-gcc cross setup can't compile, so musl
           # artifacts simply ship without the SQL endpoint.
           if $full; then
-            matrix='{"include":[{"target":"x86_64-unknown-linux-gnu","runner":"ubuntu-latest","features":"duckdb"},{"target":"x86_64-unknown-linux-musl","runner":"ubuntu-latest","features":""},{"target":"aarch64-apple-darwin","runner":"macos-latest","features":"duckdb"}]}'
+            matrix='{"include":[{"target":"x86_64-unknown-linux-gnu","runner":"ubuntu-latest","features":"duckdb,lance"},{"target":"x86_64-unknown-linux-musl","runner":"ubuntu-latest","features":""},{"target":"aarch64-apple-darwin","runner":"macos-latest","features":"duckdb,lance"}]}'
           else
-            matrix='{"include":[{"target":"x86_64-unknown-linux-gnu","runner":"ubuntu-latest","features":"duckdb"}]}'
+            matrix='{"include":[{"target":"x86_64-unknown-linux-gnu","runner":"ubuntu-latest","features":"duckdb,lance"}]}'
           fi
           echo "matrix=$matrix" >>"$GITHUB_OUTPUT"
 
@@ -217,11 +217,14 @@ jobs:
       # and its real-engine integration tests gate merges. The extra
       # no-feature `cargo check` guards the crates.io default build against
       # a missing #[cfg] — cheap, since it shares the same cache.
+      - name: Install protobuf compiler
+        run: sudo apt-get install -y protobuf-compiler
+
       - name: cargo clippy
-        run: cargo clippy --all-targets --locked --features duckdb -- -D warnings
+        run: cargo clippy --all-targets --locked --features duckdb,lance -- -D warnings
 
       - name: cargo test
-        run: cargo test --locked --features duckdb
+        run: cargo test --locked --features duckdb,lance
 
       - name: cargo check (no default features)
         run: cargo check --locked
@@ -241,6 +244,11 @@ jobs:
         with:
           name: frontend-dist
           path: frontend/dist
+
+      - name: Install protobuf compiler
+        if: contains(matrix.features, 'lance')
+        run: |
+          if [[ "$RUNNER_OS" == macOS ]]; then brew install protobuf; else sudo apt-get install -y protobuf-compiler; fi
 
       - name: Install musl toolchain
         if: matrix.target == 'x86_64-unknown-linux-musl'
@@ -329,11 +337,16 @@ jobs:
       # so httpfs INSTALL would break at runtime even if compilation were
       # forced). 2_28 (AlmaLinux 8) uses the modern ABI; resulting wheels
       # need glibc ≥ 2.28 (RHEL 8+ / Ubuntu 18.10+ / Debian 10+).
+      - name: Install protobuf compiler on macOS
+        if: runner.os == 'macOS'
+        run: brew install protobuf
+
       - name: Build wheel
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.target }}
           args: --release --locked --strip ${{ matrix.features && format('--features {0}', matrix.features) || '' }}
+          before-script-linux: ${{ contains(matrix.features, 'lance') && '/opt/python/cp311-cp311/bin/pip install --target /tmp/omni-protoc protoc-wheel-0==30.2 && ln -sf /tmp/omni-protoc/protoc/data/bin/protoc /usr/local/bin/protoc' || '' }}
           manylinux: ${{ matrix.target == 'x86_64-unknown-linux-musl' && 'musllinux_1_2' || matrix.target == 'x86_64-unknown-linux-gnu' && '2_28' || 'auto' }}
           rust-toolchain: '1.91'
           sccache: 'true'

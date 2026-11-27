@@ -360,6 +360,24 @@ fn temp_name() -> String {
 
 #[async_trait]
 impl StorageBackend for LocalFsBackend {
+  #[cfg(feature = "lance")]
+  async fn check_read_scope(&self, root: &str, member: &str) -> Result<(), AppError> {
+    let storage_root = fs::canonicalize(&self.root).await?;
+    let dataset_key = safe_join(&storage_root, root)?;
+    let member_key = safe_join(&storage_root, member)?;
+    let dataset = fs::canonicalize(&dataset_key).await?;
+    let path = fs::canonicalize(&member_key).await?;
+    if !dataset.starts_with(&storage_root)
+      || !path.starts_with(&dataset)
+      || (!self.follow_symlinks && (dataset != dataset_key || path != member_key))
+    {
+      return Err(AppError::Forbidden(
+        "dataset member outside its permitted scope".into(),
+      ));
+    }
+    Ok(())
+  }
+
   async fn get_file(&self, path: &str, opts: GetOptions) -> Result<StorageResponse, AppError> {
     let full = self.resolve(path)?;
 

@@ -7,6 +7,7 @@ export type PreviewKind =
   | 'audio'
   | 'pdf'
   | 'text'
+  | 'lance'
   | 'parquet'
   | 'csv'
   | 'safetensors'

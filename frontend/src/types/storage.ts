@@ -109,6 +109,7 @@ export interface ServerInfo {
   public_read: boolean
   /// Whether POST /api/query is live (server built with the duckdb feature,
   /// [sql] enabled, auth on). Gates the SQL editor entry points.
+  lance_enabled?: boolean
   sql_enabled: boolean
   /// Whether user-triggered FFmpeg compatibility playback is available.
   transcode_enabled: boolean

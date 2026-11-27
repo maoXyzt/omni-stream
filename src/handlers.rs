@@ -232,6 +232,7 @@ pub struct ServerInfo {
   /// Whether `POST /api/query` is live (duckdb build + [sql] enabled +
   /// auth on). The SPA hides the SQL editor entry point when false.
   pub sql_enabled: bool,
+  pub lance_enabled: bool,
   /// Whether the optional FFmpeg compatibility stream passed its startup
   /// probe and is available for user-triggered video playback.
   pub transcode_enabled: bool,
@@ -275,6 +276,7 @@ pub async fn server_info_handler(State(state): State<AppState>) -> Json<ServerIn
     auth_enabled: state.auth_enabled,
     public_read: state.public_read,
     sql_enabled: state.sql_enabled,
+    lance_enabled: cfg!(feature = "lance"),
     transcode_enabled: state.transcode.is_some(),
     write_enabled: state.write_enabled(),
     httpfs_ready,

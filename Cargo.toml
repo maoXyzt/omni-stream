@@ -29,6 +29,7 @@ include = [
 
 [features]
 default = []
+lance = ["dep:lance", "dep:lance-io", "dep:lance-file", "dep:lance-encoding", "dep:object_store", "dep:arrow-json", "dep:arrow-schema", "dep:async-stream", "dep:url"]
 # Read-only SQL query endpoint backed by an embedded DuckDB engine.
 # Off by default so `cargo install omni-stream` / crates.io builds skip the
 # heavy bundled C++ build; CI enables it per-platform (PyPI wheels and
@@ -36,6 +37,15 @@ default = []
 duckdb = ["dep:duckdb"]
 
 [dependencies]
+lance = { version = "13.0", default-features = false, optional = true }
+lance-file = { version = "13.0", default-features = false, optional = true }
+lance-encoding = { version = "13.0", default-features = false, optional = true }
+lance-io = { version = "13.0", default-features = false, optional = true }
+object_store = { version = "0.14", optional = true }
+arrow-json = { version = "58", optional = true }
+arrow-schema = { version = "58", optional = true }
+async-stream = { version = "0.3", optional = true }
+url = { version = "2", optional = true }
 tokio = { version = "1", features = ["fs", "io-util", "macros", "rt-multi-thread", "sync", "net", "process", "signal", "time"] }
 async-trait = "0.1"
 bytes = "1"
@@ -79,6 +89,7 @@ webp = "0.3"
 sha2 = "0.10"
 
 [dev-dependencies]
+tempfile = "3"
 # S3 HTTP mocking for backend tests: StaticReplayClient scripts canned
 # responses so put_file's conditional-write / fallback branches can be tested
 # without a live S3. `http` builds the canned request/response pairs.

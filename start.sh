@@ -6,7 +6,7 @@ export OMNI_BACKEND_URL=${OMNI_BACKEND_URL:-http://127.0.0.1:28080}
 export CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-/tmp/cargo_build_target}
 
 build_service() {
-    cargo build --release --bin omni-stream --features duckdb
+    cargo build --release --bin omni-stream --features duckdb,lance
 }
 
 build_frontend() {

@@ -3,6 +3,8 @@ mod cli_style;
 mod config;
 mod error;
 mod handlers;
+#[cfg(feature = "lance")]
+mod lance_preview;
 mod safetensors;
 #[cfg(feature = "duckdb")]
 mod sql;
@@ -214,6 +216,12 @@ async fn main() -> anyhow::Result<()> {
     .route("/raw/{storage}", get(raw_root_handler))
     .route("/raw/{storage}/", get(raw_root_handler))
     .route("/raw/{storage}/{*path}", get(raw_handler));
+
+  #[cfg(feature = "lance")]
+  let app = app.route(
+    "/api/lance/{*key}",
+    get(lance_preview::handler).layer(catalog_timeout),
+  );
 
   // `/api/query` is a read-only surface: SELECT / DESCRIBE / EXPLAIN / etc.
   // COPY and all mutating statements are rejected at the validation layer.

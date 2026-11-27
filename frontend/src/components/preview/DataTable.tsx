@@ -33,6 +33,7 @@ import { cn } from '@/lib/utils'
 export interface DataTableColumn {
   name: string
   type: string
+  omitted?: boolean
 }
 
 export interface DataTableProps {
@@ -264,7 +265,7 @@ export function DataTable({ columns, rows, loading, pageIndex, pageSize }: DataT
                 </TableCell>
                 {columns.map((c) => {
                   const value = row[c.name]
-                  const text = formatCell(value)
+                  const text = c.omitted ? '(value omitted)' : formatCell(value)
                   return (
                     <DataCell
                       key={c.name}
