@@ -106,6 +106,7 @@ import { FileGrid } from '@/components/FileGrid'
 import { PathBreadcrumb } from '@/components/PathBreadcrumb'
 import { PathNavigator } from '@/components/PathNavigator'
 import { PreviewModal } from '@/components/PreviewModal'
+import { BrowseAsCardsButton } from '@/components/preview/BrowseAsCardsButton'
 import { LargePreviewGate } from '@/components/preview/LargePreviewGate'
 import { Sidebar } from '@/components/Sidebar'
 import {
@@ -1498,18 +1499,13 @@ export function FileList() {
             </div>
             <div className="flex w-full shrink-0 flex-wrap items-center justify-between gap-2 @5xl/file-list:w-auto @5xl/file-list:justify-start">
               {inLanceDataset && previewState?.key !== prefix && (
-                <Button
-                  variant="outline"
-                  size="sm"
+                <BrowseAsCardsButton
                   onClick={() => setSearchParams((prev) => {
                     const next = new URLSearchParams(prev)
                     next.set(PREVIEW_PARAM, '.')
                     return next
                   })}
-                >
-                  <Eye className="size-4" />
-                  Preview dataset
-                </Button>
+                />
               )}
               {/* Sort dropdown — field selector (name/size/mtime/type) and
                   direction toggle. The dropdown is compact so it doesn't

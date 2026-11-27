@@ -59,6 +59,10 @@ struct DatasetPage {
   version: Option<u64>,
   #[serde(skip_serializing_if = "Option::is_none")]
   file_format: Option<String>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  fragments: Option<usize>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  file_size: Option<u64>,
   total: usize,
   offset: usize,
   columns: Vec<Column>,
@@ -71,12 +75,15 @@ struct Column {
   #[serde(rename = "type")]
   data_type: String,
   omitted: bool,
+  nullable: bool,
 }
 
 #[derive(Deserialize)]
 pub struct PageQuery {
   #[serde(default)]
   physical: bool,
+  #[serde(default)]
+  schema_only: bool,
   storage: Option<String>,
   #[serde(default)]
   offset: usize,
@@ -168,6 +175,7 @@ async fn page(
       dataset_error(error)
     }
   };
+  let mut file_size = None;
   let source = if query.physical {
     if query.version.is_some() {
       return Err(AppError::Unsupported(
@@ -176,6 +184,7 @@ async fn page(
     }
     backend.check_read_scope(root, root).await?;
     let meta = backend.stat(root).await?;
+    file_size = Some(meta.size);
     let virtual_uri =
       url::Url::parse("memory:///selected-file").map_err(|e| AppError::Backend(e.to_string()))?;
     let object_store = store
@@ -251,8 +260,6 @@ async fn page(
       "offset exceeds dataset row count".into(),
     ));
   }
-  let mut projection = schema.clone();
-  projection.fields.retain(|f| projected(&f.data_type()));
   let columns: Vec<_> = schema
     .fields
     .iter()
@@ -262,9 +269,28 @@ async fn page(
         name: field.name.clone(),
         data_type: ty.to_string(),
         omitted: !projected(&ty),
+        nullable: field.nullable,
       }
     })
     .collect();
+  let mut result = DatasetPage {
+    version,
+    file_format,
+    file_size,
+    total,
+    offset: query.offset,
+    columns,
+    rows: Vec::new(),
+    fragments: match &source {
+      Source::Dataset(ds) => Some(ds.manifest().fragments.len()),
+      Source::File(_) => None,
+    },
+  };
+  if query.schema_only {
+    return Ok(result);
+  }
+  let mut projection = schema.clone();
+  projection.fields.retain(|f| projected(&f.data_type()));
   let range = query.offset..query.offset.saturating_add(limit).min(total);
   let mut rows: Vec<Value> = if range.is_empty() || projection.fields.is_empty() {
     vec![json!({}); range.len()]
@@ -330,14 +356,8 @@ async fn page(
     offset = query.offset,
     "read Lance page"
   );
-  Ok(DatasetPage {
-    version,
-    file_format,
-    total,
-    offset: query.offset,
-    columns,
-    rows,
-  })
+  result.rows = rows;
+  Ok(result)
 }
 
 // Preserve values that a JavaScript Number cannot represent exactly.
@@ -405,6 +425,7 @@ mod tests {
     let storage = Arc::new(LocalFsBackend::new(dir.path(), false));
     let query = PageQuery {
       physical: false,
+      schema_only: false,
       storage: None,
       offset: 1,
       limit: Some(20),
@@ -427,7 +448,24 @@ mod tests {
       limit: None,
       version: None,
       physical,
+      schema_only: false,
     };
+    for (key, physical) in [("fixture.lance", false), (file.as_str(), true)] {
+      let metadata = page(
+        storage.clone(),
+        key,
+        PageQuery {
+          schema_only: true,
+          ..query(physical)
+        },
+      )
+      .await
+      .unwrap();
+      assert!(metadata.rows.is_empty());
+      assert_eq!(metadata.file_size.is_some(), physical);
+      assert_eq!(metadata.fragments, (!physical).then_some(1));
+      assert!(metadata.columns[1].nullable);
+    }
     let snapshot = page(storage.clone(), "fixture.lance", query(false))
       .await
       .unwrap();

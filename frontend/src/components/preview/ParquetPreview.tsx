@@ -5,7 +5,6 @@ import {
   AlertCircle,
   ChevronLeft,
   ChevronRight,
-  LayoutList,
   Loader2,
   RotateCw,
 } from 'lucide-react'
@@ -15,18 +14,11 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
+
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useFileStat, useServerInfo } from '@/hooks/use-storage'
 import { formatBytes } from '@/lib/format'
-import { cn } from '@/lib/utils'
+import { SchemaTable, Stat } from './TabularSchema'
 import {
   type ParquetColumnInfo,
   compressionSummary,
@@ -39,6 +31,7 @@ import {
 
 import { DataTable } from './DataTable'
 import { ParquetSqlTab } from './ParquetSqlTab'
+import { BrowseAsCardsButton } from './BrowseAsCardsButton'
 import { RowsViewHint } from './RowsViewHint'
 import type { PreviewerProps } from './types'
 
@@ -254,15 +247,7 @@ export function ParquetPreview({ fileKey, src, storage }: PreviewerProps) {
               `/r/<storage>/<file>`. The button takes the user there while
               forwarding any `?rows=` rules already in the URL so the
               transition is seamless. */}
-          <Button
-            size="sm"
-            onClick={openRowsPage}
-            disabled={!storage}
-            className="shadow-sm"
-          >
-            <LayoutList className="size-4" />
-            Browse as cards
-          </Button>
+          <BrowseAsCardsButton onClick={openRowsPage} disabled={!storage} />
         </div>
 
         <TabsContent
@@ -353,23 +338,6 @@ function InfoBar({ rows, cols, groups, codec, size }: InfoBarProps) {
       {codec && <Stat label="Codec" value={codec} mono />}
       {size !== undefined && <Stat label="Size" value={formatBytes(size)} />}
     </dl>
-  )
-}
-
-function Stat({
-  label,
-  value,
-  mono,
-}: {
-  label: string
-  value: string
-  mono?: boolean
-}) {
-  return (
-    <div className="flex items-baseline gap-1.5">
-      <dt className="text-muted-foreground">{label}</dt>
-      <dd className={mono ? 'font-mono text-xs' : ''}>{value}</dd>
-    </div>
   )
 }
 
@@ -500,46 +468,6 @@ function PageJumpInput({
         className="h-7 w-14 text-center text-sm"
       />
       <span className="text-muted-foreground">/ {pageCount}</span>
-    </div>
-  )
-}
-
-function SchemaTable({ columns }: { columns: ParquetColumnInfo[] }) {
-  return (
-    <div className="rounded-md border">
-      <Table>
-        <TableHeader className="bg-muted/70 [&_tr]:border-b">
-          <TableRow>
-            <TableHead className="w-48 text-foreground">Name</TableHead>
-            <TableHead className="text-foreground">Type</TableHead>
-            <TableHead className="w-28 text-foreground">Repetition</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {columns.map((c) => (
-            <TableRow key={c.name} className="odd:bg-muted/30">
-              <TableCell className="font-mono text-xs align-top text-sky-700 dark:text-sky-300">
-                {c.name}
-              </TableCell>
-              {/* Nested signatures (LIST<STRUCT<...>>) can get long; allow
-                  wrapping at type-list boundaries so the table stays usable. */}
-              <TableCell className="font-mono text-xs whitespace-normal break-words align-top text-rose-700 dark:text-rose-300">
-                {c.type}
-              </TableCell>
-              <TableCell
-                className={cn(
-                  'text-xs align-top',
-                  c.repetition === 'REQUIRED' && 'text-emerald-700 dark:text-emerald-300',
-                  c.repetition === 'OPTIONAL' && 'text-muted-foreground',
-                  c.repetition === 'REPEATED' && 'text-violet-700 dark:text-violet-300',
-                )}
-              >
-                {c.repetition}
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
     </div>
   )
 }

@@ -5,7 +5,6 @@ import {
   AlertCircle,
   Check,
   Copy,
-  LayoutList,
   Loader2,
   RotateCw,
 } from 'lucide-react'
@@ -42,6 +41,7 @@ import { cn } from '@/lib/utils'
 
 import { PageControls } from './PageControls'
 import { PartialInfoNotice } from './PartialInfoNotice'
+import { BrowseAsCardsButton } from './BrowseAsCardsButton'
 import { RowsViewHint } from './RowsViewHint'
 import type { PreviewerProps } from './types'
 
@@ -228,15 +228,7 @@ export function CsvPreview({ fileKey, src, storage }: PreviewerProps) {
             onJump={(p) => setPageIndex(p)}
           />
         </div>
-        <Button
-          size="sm"
-          onClick={openRowsPage}
-          disabled={!storage}
-          className="shadow-sm"
-        >
-          <LayoutList className="size-4" />
-          Browse as cards
-        </Button>
+        <BrowseAsCardsButton onClick={openRowsPage} disabled={!storage} />
       </div>
 
       {rowsError ? (
