@@ -25,6 +25,7 @@ import { CsvPreview } from './CsvPreview'
 import { GenericPreview } from './GenericPreview'
 import { ImagePreview } from './ImagePreview'
 import { LazyModel3DPreview, LazyNpzPreview } from './LazyPreviewers'
+import { LancePreview } from './LancePreview'
 import { ParquetPreview } from './ParquetPreview'
 import { PdfPreview } from './PdfPreview'
 import { SafetensorsPreview } from './SafetensorsPreview'
@@ -86,6 +87,7 @@ export const PREVIEW_TYPES: readonly PreviewType[] = [
     icon: FileText,
     Component: TextPreview,
   },
+  { kind: 'lance', extensions: [], icon: Database, Component: LancePreview },
   {
     kind: 'parquet',
     extensions: ['parquet', 'parq', 'pq'],
@@ -141,12 +143,14 @@ export function previewTypeForKey(key: string): PreviewType | null {
   return EXT_TO_TYPE.get(ext) ?? null
 }
 
+/// Directory keys retain their trailing slash for shareable dataset previews.
 /// Returns the preview kind for any non-empty file key. Known extensions
 /// route to their registered preview; everything else falls back to 'generic'
-/// (file icon + metadata + optional iframe). Returns null only for the empty
-/// string, which never represents a real entry.
-export function previewableKind(key: string): PreviewKind | null {
+/// (file icon + metadata + optional iframe).
+export function previewableKind(key: string, lanceEnabled = false): PreviewKind | null {
   if (!key) return null
+  if (lanceEnabled && /\.lance\/?$/i.test(key)) return 'lance'
+  if (key.endsWith('/')) return null
   return previewTypeForKey(key)?.kind ?? 'generic'
 }
 

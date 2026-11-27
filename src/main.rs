@@ -3,6 +3,8 @@ mod cli_style;
 mod config;
 mod error;
 mod handlers;
+#[cfg(feature = "lance")]
+mod lance_preview;
 mod safetensors;
 #[cfg(feature = "duckdb")]
 mod sql;
@@ -48,6 +50,13 @@ const MAX_PUT_BYTES: usize = 16 * 1024 * 1024;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+  #[cfg(feature = "lance")]
+  if std::env::args_os()
+    .nth(1)
+    .is_some_and(|arg| arg == "lance-preview-worker")
+  {
+    return lance_preview::run_worker().await;
+  }
   init_tracing();
 
   // CLI subcommands short-circuit the server. Dispatch happens BEFORE
@@ -214,6 +223,12 @@ async fn main() -> anyhow::Result<()> {
     .route("/raw/{storage}", get(raw_root_handler))
     .route("/raw/{storage}/", get(raw_root_handler))
     .route("/raw/{storage}/{*path}", get(raw_handler));
+
+  #[cfg(feature = "lance")]
+  let app = app.route(
+    "/api/lance/{*key}",
+    get(lance_preview::handler).layer(catalog_timeout),
+  );
 
   // `/api/query` is a read-only surface: SELECT / DESCRIBE / EXPLAIN / etc.
   // COPY and all mutating statements are rejected at the validation layer.

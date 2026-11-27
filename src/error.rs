@@ -20,6 +20,10 @@ pub enum AppError {
   #[error("object read forbidden: {0}")]
   ObjectReadForbidden(String),
 
+  #[cfg(feature = "lance")]
+  #[error("{0}")]
+  LancePageTooLarge(&'static str),
+
   #[error("invalid range: {0}")]
   InvalidRange(String),
 
@@ -100,6 +104,8 @@ impl AppError {
     match self {
       AppError::NotFound(_) => StatusCode::NOT_FOUND,
       AppError::Forbidden(_) | AppError::ObjectReadForbidden(_) => StatusCode::FORBIDDEN,
+      #[cfg(feature = "lance")]
+      AppError::LancePageTooLarge(_) => StatusCode::PAYLOAD_TOO_LARGE,
       AppError::InvalidRange(_) => StatusCode::RANGE_NOT_SATISFIABLE,
       AppError::InvalidPath(_) | AppError::InvalidModel(_) | AppError::Unsupported(_) => {
         StatusCode::BAD_REQUEST

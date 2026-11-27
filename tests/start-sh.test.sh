@@ -37,7 +37,7 @@ touch "${service_bin}.duckdb-enabled"
     ./start.sh run
 )
 
-expected=$'fnm use\npnpm build\ncargo build --release --bin omni-stream --features duckdb\nservice'
+expected=$'fnm use\npnpm build\ncargo build --release --bin omni-stream --features duckdb,lance\nservice'
 actual=$(<"$START_SH_TEST_LOG")
 [[ "$actual" == "$expected" ]] || {
     printf 'unexpected command order:\n%s\n' "$actual" >&2

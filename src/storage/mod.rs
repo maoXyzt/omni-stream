@@ -84,6 +84,24 @@ pub struct ListResult {
 
 #[async_trait]
 pub trait StorageBackend: Send + Sync {
+  /// Check a dataset member before opening it. Object-storage keys have no
+  /// symlinks. Filesystem implementations also verify the resolved scope.
+  #[cfg(feature = "lance")]
+  async fn check_read_scope(&self, _root: &str, _member: &str) -> Result<(), AppError> {
+    Ok(())
+  }
+
+  #[cfg(feature = "lance")]
+  async fn get_scoped_file(
+    &self,
+    root: &str,
+    path: &str,
+    opts: GetOptions,
+  ) -> Result<StorageResponse, AppError> {
+    self.check_read_scope(root, path).await?;
+    self.get_file(path, opts).await
+  }
+
   async fn get_file(&self, path: &str, opts: GetOptions) -> Result<StorageResponse, AppError>;
   async fn list_files(&self, prefix: &str, token: Option<String>) -> Result<ListResult, AppError>;
   async fn stat(&self, path: &str) -> Result<FileMeta, AppError>;

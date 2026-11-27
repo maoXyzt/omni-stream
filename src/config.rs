@@ -105,6 +105,7 @@ fn default_port() -> u16 {
   28080
 }
 
+#[cfg_attr(feature = "lance", derive(serde::Serialize))]
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum StorageType {
@@ -112,6 +113,7 @@ pub enum StorageType {
   Local,
 }
 
+#[cfg_attr(feature = "lance", derive(serde::Serialize))]
 #[derive(Debug, Clone, Deserialize)]
 pub struct StorageConfig {
   pub name: String,
@@ -132,6 +134,7 @@ pub struct StorageConfig {
 }
 
 /// Explicit credential sources are scoped to a single storage.
+#[cfg_attr(feature = "lance", derive(serde::Serialize))]
 #[derive(Clone, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum S3Credentials {
@@ -163,6 +166,7 @@ impl fmt::Debug for S3Credentials {
   }
 }
 
+#[cfg_attr(feature = "lance", derive(serde::Serialize))]
 #[derive(Clone, Deserialize)]
 pub struct S3Config {
   #[serde(default)]
@@ -287,6 +291,7 @@ fn mask_secret(s: Option<&str>) -> &'static str {
   }
 }
 
+#[cfg_attr(feature = "lance", derive(serde::Serialize))]
 #[derive(Debug, Clone, Deserialize)]
 pub struct LocalConfig {
   #[serde(deserialize_with = "deser_path_expand_tilde")]

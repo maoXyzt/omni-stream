@@ -106,6 +106,7 @@ import { FileGrid } from '@/components/FileGrid'
 import { PathBreadcrumb } from '@/components/PathBreadcrumb'
 import { PathNavigator } from '@/components/PathNavigator'
 import { PreviewModal } from '@/components/PreviewModal'
+import { BrowseAsCardsButton } from '@/components/preview/BrowseAsCardsButton'
 import { LargePreviewGate } from '@/components/preview/LargePreviewGate'
 import { Sidebar } from '@/components/Sidebar'
 import {
@@ -600,15 +601,18 @@ export function FileList() {
     setTypeFilter('')
   }, [prefix])
 
+  const inLanceDataset = previewableKind(prefix, serverInfo.data?.lance_enabled) === 'lance'
   const previewName = searchParams.get(PREVIEW_PARAM)
   const previewState = useMemo(() => {
     if (!previewName) return null
-    const kind = previewableKind(previewName)
+    // "." previews the open dataset alongside its own directory listing.
+    if (previewName === '.' && !inLanceDataset) return null
+    const key = previewName === '.' ? prefix : prefix + previewName
+    const kind = previewableKind(key, serverInfo.data?.lance_enabled)
     if (!kind) return null
-    const key = prefix + previewName
     const size = listQuery.data?.entries.find((entry) => entry.key === key)?.size
     return { key, kind, size }
-  }, [listQuery.data, previewName, prefix])
+  }, [inLanceDataset, listQuery.data, previewName, prefix, serverInfo.data?.lance_enabled])
 
   // Look up the entry currently being previewed so we can pass its
   // last_modified into the previewer as a cache buster. Falls back to null
@@ -952,7 +956,7 @@ export function FileList() {
   // page hasn't been fetched yet. Filters apply here too so arrow keys
   // skip over rows the user hid.
   const previewableEntries = useMemo(
-    () => filteredEntries.filter((e) => !e.is_dir && previewableKind(e.key)),
+    () => filteredEntries.filter((entry) => !entry.is_dir),
     [filteredEntries],
   )
 
@@ -1494,6 +1498,15 @@ export function FileList() {
               <PathNavigator prefix={prefix} activeStorage={activeStorage} onNavigate={goToPathOrFile} />
             </div>
             <div className="flex w-full shrink-0 flex-wrap items-center justify-between gap-2 @5xl/file-list:w-auto @5xl/file-list:justify-start">
+              {inLanceDataset && previewState?.key !== prefix && (
+                <BrowseAsCardsButton
+                  onClick={() => setSearchParams((prev) => {
+                    const next = new URLSearchParams(prev)
+                    next.set(PREVIEW_PARAM, '.')
+                    return next
+                  })}
+                />
+              )}
               {/* Sort dropdown — field selector (name/size/mtime/type) and
                   direction toggle. The dropdown is compact so it doesn't
                   crowd the toolbar on narrow viewports. */}
@@ -1946,7 +1959,7 @@ export function FileList() {
                     showInvisible={showInvisiblePathChars}
                   />
                 </span>
-                <div className="flex shrink-0 items-center gap-1">
+                {(previewState!.kind !== 'lance' || !previewState!.key.endsWith('/')) && <div className="flex shrink-0 items-center gap-1">
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <Button
@@ -1987,7 +2000,7 @@ export function FileList() {
                     </TooltipTrigger>
                     <TooltipContent>Download</TooltipContent>
                   </Tooltip>
-                </div>
+                </div>}
               </div>
               <InlinePreview
                 fileKey={previewState!.key}

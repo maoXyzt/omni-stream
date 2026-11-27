@@ -15,6 +15,7 @@
 - **3D models** — glb / gltf / obj / ply / stl / pcd / fbx with orbit, grid, and axis controls
   (FBX external textures must be embedded; GLTF sidecars are loaded from the same storage)
 - **NumPy arrays** — npy / npz metadata and sampled `(N, 3)` / `(N, 6)` point-cloud rendering
+- **Lance datasets** — browse a dataset directory, preview its current snapshot, or open a single Lance v2 data file to inspect physical rows. See the [Lance preview guide](docs/lance_preview.md).
 - **Safetensors weights** — header-only Tensor key / shape / dtype listing with stored-element counts and storage-size estimates; large weight data is never downloaded for the preview
 - **Anything else** — generic fallback: icon + metadata + the browser's built-in viewer
 
