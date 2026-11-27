@@ -79,6 +79,17 @@ fn failure(message: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> Erro
   }
 }
 
+fn modification_time(value: Option<&str>) -> chrono::DateTime<chrono::Utc> {
+  value
+    .and_then(|s| {
+      s.parse::<i64>()
+        .ok()
+        .and_then(|secs| chrono::DateTime::from_timestamp(secs, 0))
+        .or_else(|| s.parse().ok())
+    })
+    .unwrap_or_default()
+}
+
 fn storage_error(path: &Path, error: AppError) -> Error {
   let path = path.to_string();
   if matches!(error, AppError::NotFound(_))
@@ -129,10 +140,7 @@ impl ObjectStore for DatasetStore {
     let meta = ObjectMeta {
       location: location.clone(),
       size: info.size,
-      last_modified: info
-        .last_modified
-        .and_then(|v| v.parse().ok())
-        .unwrap_or_default(),
+      last_modified: modification_time(info.last_modified.as_deref()),
       e_tag: info.etag,
       version: None,
     };
@@ -156,7 +164,8 @@ impl ObjectStore for DatasetStore {
         })?;
       let response = self
         .backend
-        .get_file(
+        .get_scoped_file(
+          &self.root,
           &key,
           StorageGet {
             range: Some(format!("bytes={}-{}", range.start, range.end - 1)),
@@ -196,7 +205,7 @@ impl ObjectStore for DatasetStore {
         let page = store.backend.list_files(&key, token).await.map_err(|e| storage_error(&prefix,e))?;
         for entry in page.entries.into_iter().filter(|e| !e.is_dir) {
           let name = entry.key.strip_prefix(&key).ok_or_else(|| failure("invalid listing entry"))?;
-          yield ObjectMeta {location: prefix.clone().join(name), size: entry.size, last_modified: Default::default(), e_tag: None, version: None};
+          yield ObjectMeta {location: prefix.clone().join(name), size: entry.size, last_modified: modification_time(entry.last_modified.as_deref()), e_tag: None, version: None};
         }
         token = page.next_token;
         if token.is_none() { break; }
@@ -231,5 +240,21 @@ impl ObjectStore for DatasetStore {
   }
   async fn copy_opts(&self, _: &Path, _: &Path, _: CopyOptions) -> Result<()> {
     Err(failure("read-only"))
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::modification_time;
+  #[test]
+  fn accepts_both_backend_timestamp_formats() {
+    assert_eq!(
+      modification_time(Some("1712345678")).timestamp(),
+      1712345678
+    );
+    assert_eq!(
+      modification_time(Some("2024-04-05T19:34:38Z")).timestamp(),
+      1712345678
+    );
   }
 }

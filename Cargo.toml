@@ -29,7 +29,7 @@ include = [
 
 [features]
 default = []
-lance = ["dep:lance", "dep:lance-io", "dep:lance-file", "dep:lance-encoding", "dep:object_store", "dep:arrow-json", "dep:arrow-schema", "dep:async-stream", "dep:url"]
+lance = ["dep:lance", "dep:lance-io", "dep:lance-file", "dep:lance-encoding", "dep:object_store", "dep:arrow-array", "dep:chrono", "dep:arrow-json", "dep:arrow-schema", "dep:async-stream", "dep:url"]
 # Read-only SQL query endpoint backed by an embedded DuckDB engine.
 # Off by default so `cargo install omni-stream` / crates.io builds skip the
 # heavy bundled C++ build; CI enables it per-platform (PyPI wheels and
@@ -42,6 +42,8 @@ lance-file = { version = "13.0", default-features = false, optional = true }
 lance-encoding = { version = "13.0", default-features = false, optional = true }
 lance-io = { version = "13.0", default-features = false, optional = true }
 object_store = { version = "0.14", optional = true }
+arrow-array = { version = "58", optional = true }
+chrono = { version = "0.4", default-features = false, optional = true }
 arrow-json = { version = "58", optional = true }
 arrow-schema = { version = "58", optional = true }
 async-stream = { version = "0.3", optional = true }
@@ -52,6 +54,8 @@ bytes = "1"
 futures = "0.3"
 thiserror = "2"
 anyhow = "1"
+cap-std = "3.4.5"
+cap-fs-ext = "3.4.5"
 tokio-util = { version = "0.7", features = ["io"] }
 mime_guess = "2"
 

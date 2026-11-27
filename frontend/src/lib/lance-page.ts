@@ -7,6 +7,15 @@ export interface LanceCursor {
   backwards?: boolean
 }
 
+export class LanceRowTooLarge extends Error {
+  readonly offset: number
+
+  constructor(offset: number, cause: ApiError) {
+    super(`Cannot preview row ${(offset + 1).toLocaleString()} even when read alone. ${cause.message}`, { cause })
+    this.offset = offset
+  }
+}
+
 // Each smaller size divides the previous one, so existing row boundaries
 // still fall on whole pages for the shared page-jump control.
 export async function readLancePage<T>(
@@ -22,7 +31,7 @@ export async function readLancePage<T>(
     } catch (error) {
       if (!(error instanceof ApiError) || error.status !== 413) throw error
       if (limit === 1) {
-        throw new Error(`Cannot preview row ${(offset + 1).toLocaleString()} even when read alone. ${error.message}`, { cause: error })
+        throw new LanceRowTooLarge(offset, error)
       }
       limit = limit === 10 ? 5 : 1
     }

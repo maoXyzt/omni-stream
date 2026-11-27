@@ -126,6 +126,109 @@ impl LocalFsBackend {
     }
   }
 
+  async fn read_file(
+    &self,
+    scope: &str,
+    path: &str,
+    opts: GetOptions,
+  ) -> Result<StorageResponse, AppError> {
+    let storage = self.root.clone();
+    let follow = self.follow_symlinks;
+    let scope_key = safe_join(Path::new(""), scope)?;
+    let member_key = safe_join(Path::new(""), path)?;
+    let file = tokio::task::spawn_blocking(move || {
+      use cap_fs_ext::{DirExt, FollowSymlinks, OpenOptionsFollowExt};
+      use cap_std::{
+        ambient_authority,
+        fs::{Dir, OpenOptions},
+      };
+
+      let storage = std::fs::canonicalize(storage)?;
+      let mut dir = Dir::open_ambient_dir(&storage, ambient_authority())?;
+      let scope_path = storage.join(scope_key);
+      let member_path = storage.join(member_key);
+      let scope = std::fs::canonicalize(&scope_path)?;
+      let member = std::fs::canonicalize(&member_path)?;
+      if !scope.starts_with(&storage)
+        || !member.starts_with(&scope)
+        || (!follow && (scope_path != scope || member_path != member))
+      {
+        return Err(AppError::Forbidden(
+          "file outside its permitted read scope".into(),
+        ));
+      }
+      // Resolve permitted links above, then open the resolved components relative
+      // to pinned directory handles. A replacement link cannot redirect the read.
+      let relative = member
+        .strip_prefix(&storage)
+        .map_err(|e| AppError::Forbidden(e.to_string()))?;
+      let name = relative
+        .file_name()
+        .ok_or_else(|| AppError::Unsupported("cannot read a directory".into()))?;
+      if let Some(parent) = relative.parent() {
+        for component in parent.components() {
+          dir = dir.open_dir_nofollow(component.as_os_str())?;
+        }
+      }
+      Ok(
+        dir
+          .open_with(
+            name,
+            OpenOptions::new().read(true).follow(FollowSymlinks::No),
+          )?
+          .into_std(),
+      )
+    })
+    .await
+    .map_err(|e| AppError::Backend(e.to_string()))?;
+    let mut file = fs::File::from_std(file.map_err(|e| match e {
+      AppError::Io(e) if e.kind() == std::io::ErrorKind::NotFound => {
+        AppError::NotFound(path.into())
+      }
+      other => other,
+    })?);
+    let metadata = file.metadata().await?;
+    if metadata.is_dir() {
+      return Err(AppError::Unsupported(format!(
+        "path is a directory: {path}"
+      )));
+    }
+    let total_size = metadata.len();
+
+    // Empty files: ignore any Range and return an empty 200. RFC 7233 lets us
+    // 416 here, but that's user-hostile — the text previewer would surface
+    // "Range Not Satisfiable" for a perfectly valid 0-byte file.
+    let (start, end, is_partial, content_range) = if total_size == 0 {
+      (0, 0, false, None)
+    } else if let Some(range) = opts.range {
+      let (s, e) = parse_range(&range, total_size)?;
+      file.seek(SeekFrom::Start(s)).await?;
+      (s, e, true, Some(format!("bytes {s}-{e}/{total_size}")))
+    } else {
+      (0, total_size - 1, false, None)
+    };
+
+    let length = if total_size == 0 { 0 } else { end - start + 1 };
+    let limited = file.take(length);
+    let stream = ReaderStream::new(limited);
+
+    let content_type = mime_guess::from_path(path).first_raw().map(str::to_string);
+    let last_modified = metadata
+      .modified()
+      .ok()
+      .and_then(system_time_to_unix_string);
+
+    Ok(StorageResponse {
+      body: Box::pin(stream),
+      content_length: Some(length),
+      content_type,
+      etag: None,
+      last_modified,
+      content_range,
+      is_partial,
+    })
+  }
+
   async fn leaf_metadata(&self, full: &Path) -> std::io::Result<std::fs::Metadata> {
     if self.follow_symlinks {
       fs::metadata(full).await
@@ -378,64 +481,18 @@ impl StorageBackend for LocalFsBackend {
     Ok(())
   }
 
+  #[cfg(feature = "lance")]
+  async fn get_scoped_file(
+    &self,
+    root: &str,
+    path: &str,
+    opts: GetOptions,
+  ) -> Result<StorageResponse, AppError> {
+    self.read_file(root, path, opts).await
+  }
+
   async fn get_file(&self, path: &str, opts: GetOptions) -> Result<StorageResponse, AppError> {
-    let full = self.resolve(path)?;
-
-    let metadata = match self.leaf_metadata(&full).await {
-      Ok(m) => m,
-      Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-        return Err(AppError::NotFound(path.to_string()));
-      }
-      Err(e) => return Err(AppError::Io(e)),
-    };
-
-    if !self.follow_symlinks && metadata.file_type().is_symlink() {
-      return Err(AppError::Forbidden(format!(
-        "symlink traversal disabled: {path}"
-      )));
-    }
-
-    if metadata.is_dir() {
-      return Err(AppError::Unsupported(format!(
-        "path is a directory: {path}"
-      )));
-    }
-
-    let total_size = metadata.len();
-    let mut file = fs::File::open(&full).await?;
-
-    // Empty files: ignore any Range and return an empty 200. RFC 7233 lets us
-    // 416 here, but that's user-hostile — the text previewer would surface
-    // "Range Not Satisfiable" for a perfectly valid 0-byte file.
-    let (start, end, is_partial, content_range) = if total_size == 0 {
-      (0, 0, false, None)
-    } else if let Some(range) = opts.range {
-      let (s, e) = parse_range(&range, total_size)?;
-      file.seek(SeekFrom::Start(s)).await?;
-      (s, e, true, Some(format!("bytes {s}-{e}/{total_size}")))
-    } else {
-      (0, total_size - 1, false, None)
-    };
-
-    let length = if total_size == 0 { 0 } else { end - start + 1 };
-    let limited = file.take(length);
-    let stream = ReaderStream::new(limited);
-
-    let content_type = mime_guess::from_path(&full).first_raw().map(str::to_string);
-    let last_modified = metadata
-      .modified()
-      .ok()
-      .and_then(system_time_to_unix_string);
-
-    Ok(StorageResponse {
-      body: Box::pin(stream),
-      content_length: Some(length),
-      content_type,
-      etag: None,
-      last_modified,
-      content_range,
-      is_partial,
-    })
+    self.read_file("", path, opts).await
   }
 
   async fn list_files(&self, prefix: &str, token: Option<String>) -> Result<ListResult, AppError> {
@@ -718,6 +775,32 @@ mod tests {
     ));
     std::fs::create_dir_all(&dir).unwrap();
     dir
+  }
+
+  #[cfg(unix)]
+  #[tokio::test]
+  async fn range_response_uses_the_open_file_after_replacement() {
+    use futures::TryStreamExt;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("part");
+    fs::write(&path, b"abcdef").await.unwrap();
+    let storage = LocalFsBackend::new(dir.path(), true);
+    let response = storage
+      .get_file(
+        "part",
+        GetOptions {
+          range: Some("bytes=1-3".into()),
+        },
+      )
+      .await
+      .unwrap();
+    fs::rename(&path, dir.path().join("old-part"))
+      .await
+      .unwrap();
+    fs::write(&path, b"replacement").await.unwrap();
+    assert_eq!(response.content_range.as_deref(), Some("bytes 1-3/6"));
+    let chunks: Vec<_> = response.body.try_collect().await.unwrap();
+    assert_eq!(chunks.concat(), b"bcd");
   }
 
   fn seed_files(root: &Path, names: &[&str]) {

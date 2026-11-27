@@ -4,7 +4,7 @@ import { Link, Navigate, useSearchParams } from 'react-router-dom'
 
 import { apiClient, ApiError } from '@/api/client'
 import { getSidebarEntryRoute } from '@/lib/route-path'
-import { readLancePage, type LanceCursor } from '@/lib/lance-page'
+import { LanceRowTooLarge, readLancePage, type LanceCursor } from '@/lib/lance-page'
 import { encodeKey } from '@/lib/path'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -23,11 +23,11 @@ interface Page {
 }
 
 export function LancePreview(props: PreviewerProps) {
-  return <DatasetPage key={JSON.stringify([props.storage, props.fileKey])} {...props} />
+  return <DatasetPage key={JSON.stringify([props.storage, props.fileKey, props.fileKey.endsWith('/') ? undefined : props.src])} {...props} />
 }
 
-function DatasetPage({ storage, fileKey }: PreviewerProps) {
-  const [cursor, setCursor] = useState<LanceCursor>({ offset: 0, limit: 10 })
+function DatasetPage({ storage, fileKey, src }: PreviewerProps) {
+  const [cursor, setCursor] = useState<LanceCursor & { total?: number }>({ offset: 0, limit: 10 })
   const physical = !fileKey.endsWith('/')
   const [searchParams] = useSearchParams()
   const directory = getSidebarEntryRoute(
@@ -35,7 +35,7 @@ function DatasetPage({ storage, fileKey }: PreviewerProps) {
     searchParams.get('view') ?? undefined,
   )
   const query = useQuery({
-    queryKey: ['lance', storage, fileKey, cursor],
+    queryKey: ['lance', storage, fileKey, physical ? src : undefined, cursor],
     queryFn: ({ signal }) => readLancePage(cursor, async (offset, limit) => {
       const { data } = await apiClient.get<Page>(`/api/lance/${encodeKey(fileKey)}`, {
         params: { storage, physical: physical || undefined, offset, limit, version: cursor.version },
@@ -62,19 +62,36 @@ function DatasetPage({ storage, fileKey }: PreviewerProps) {
       <Link to={directory}>Browse directory</Link>
     </Button>
   )
-  if (query.isError) {
+  const failedRow = query.error instanceof LanceRowTooLarge ? query.error.offset : undefined
+  const data = query.data?.data
+  const limit = failedRow !== undefined ? 1 : query.data?.limit ?? cursor.limit
+  const offset = failedRow ?? data?.offset ?? cursor.offset
+  const total = data?.total ?? cursor.total
+  const pageIndex = offset / limit
+  const jump = (page: number, backwards = false) =>
+    setCursor({ offset: page * limit, limit, total, version: data?.version ?? cursor.version, backwards })
+  const navigation = (total !== undefined ? total > 0 : failedRow !== undefined || offset > 0) && (
+    <PageControls
+      pageIndex={pageIndex}
+      pageCount={total === undefined ? null : Math.ceil(total / limit)}
+      hasMore={total === undefined || offset + limit < total}
+      loading={query.isFetching}
+      showLoadingStatus
+      onPrev={() => jump(pageIndex - 1, true)}
+      onNext={() => jump(pageIndex + 1)}
+      onJump={jump}
+    />
+  )
+  if (query.isError || !data) {
     return (
       <Alert variant="destructive">
-        <AlertDescription>{query.error.message}</AlertDescription>
+        <AlertDescription>{query.error?.message}</AlertDescription>
         <Button onClick={() => query.refetch()}>Retry</Button>
         {browse}
+        {navigation}
       </Alert>
     )
   }
-  const { data, limit } = query.data
-  const pageIndex = data.offset / limit
-  const jump = (page: number, backwards = false) =>
-    setCursor({ offset: page * limit, limit, version: data.version, backwards })
   return (
     <div className="flex min-h-0 w-full flex-col gap-2 overflow-auto p-2">
       <div className="flex flex-wrap items-center gap-2 text-sm">
@@ -82,18 +99,7 @@ function DatasetPage({ storage, fileKey }: PreviewerProps) {
           ? `Lance file · format ${data.file_format} · ${data.total.toLocaleString()} physical rows`
           : `Lance · v${data.version} · ${data.total.toLocaleString()} rows`}</span>
         {browse}
-        {data.total > 0 && (
-          <PageControls
-            pageIndex={pageIndex}
-            pageCount={Math.ceil(data.total / limit)}
-            hasMore={data.offset + data.rows.length < data.total}
-            loading={query.isFetching}
-            showLoadingStatus
-            onPrev={() => jump(pageIndex - 1, true)}
-            onNext={() => jump(pageIndex + 1)}
-            onJump={jump}
-          />
-        )}
+        {navigation}
       </div>
       <DataTable
         columns={data.columns}

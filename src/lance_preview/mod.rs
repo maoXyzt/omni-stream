@@ -1,3 +1,4 @@
+mod decimal;
 mod store;
 
 use crate::{error::AppError, handlers::AppState, storage::StorageBackend};
@@ -91,7 +92,8 @@ pub async fn handler(
 ) -> Result<Response, AppError> {
   let backend = state.resolve(query.storage.as_deref())?;
   let _permit = READERS
-    .try_acquire()
+    .acquire()
+    .await
     .map_err(|_| AppError::Busy("Lance previews are busy".into()))?;
   let page = page(backend, &key, query).await?;
   let mut output = PageBuffer::default();
@@ -269,9 +271,14 @@ async fn page(
   } else {
     let mut batches = match &source {
       Source::Dataset(ds) => {
-        let indices = range.map(|i| i as u64).collect::<Vec<_>>();
-        let batch = ds.take(&indices, projection).await.map_err(read_error)?;
-        stream::once(async { Ok(batch) }).boxed()
+        // take() materializes every requested row. Decode successive rows on
+        // demand so an over-budget page can stop before fetching its tail.
+        stream::iter(range)
+          .then(move |row| {
+            let projection = projection.clone();
+            async move { ds.take(&[row as u64], projection).await.map_err(read_error) }
+          })
+          .boxed()
       }
       Source::File(f) => {
         let names = projection
@@ -284,7 +291,7 @@ async fn page(
             .map_err(read_error)?;
         f.read_stream_projected(
           ReadBatchParams::Range(range),
-          limit as u32,
+          1,
           1,
           projection,
           lance_encoding::decoder::FilterExpression::no_filter(),
@@ -295,7 +302,9 @@ async fn page(
         .boxed()
       }
     };
-    let mut writer = arrow_json::ArrayWriter::new(PageBuffer::default());
+    let mut writer: arrow_json::ArrayWriter<_> = arrow_json::WriterBuilder::new()
+      .with_encoder_factory(Arc::new(decimal::DecimalStrings))
+      .build(PageBuffer::default());
     let write_error = |e: arrow_schema::ArrowError| match e {
       arrow_schema::ArrowError::IoError(_, cause)
         if cause.kind() == io::ErrorKind::FileTooLarge =>
@@ -314,9 +323,7 @@ async fn page(
     serde_json::from_slice(&writer.into_inner().0).map_err(|e| AppError::Backend(e.to_string()))?
   };
   for row in &mut rows {
-    if let Some(fields) = row.as_object_mut() {
-      fields.values_mut().for_each(preserve_integer_precision);
-    }
+    preserve_integer_precision(row);
   }
   tracing::debug!(
     range_bytes = store.bytes_requested(),
@@ -343,6 +350,7 @@ fn preserve_integer_precision(value: &mut Value) {
     {
       *value = Value::String(n.to_string());
     }
+    Value::Object(fields) => fields.values_mut().for_each(preserve_integer_precision),
     Value::Array(values) => values.iter_mut().for_each(preserve_integer_precision),
     _ => {}
   }
@@ -351,6 +359,32 @@ fn preserve_integer_precision(value: &mut Value) {
 #[cfg(test)]
 mod tests {
   use super::*;
+  #[test]
+  fn preserves_nested_integer_and_decimal_precision() {
+    use arrow_array::{Decimal128Array, RecordBatch};
+    let mut nested = json!({"items":[{"id":9007199254740993_i64,"count":7}]});
+    preserve_integer_precision(&mut nested);
+    assert_eq!(
+      nested,
+      json!({"items":[{"id":"9007199254740993","count":7}]})
+    );
+
+    let values = Decimal128Array::from(vec![Some(12345678901234567890123456789_i128), None])
+      .with_precision_and_scale(30, 8)
+      .unwrap();
+    let batch =
+      RecordBatch::try_from_iter([("price", Arc::new(values) as arrow_array::ArrayRef)]).unwrap();
+    let mut writer: arrow_json::ArrayWriter<_> = arrow_json::WriterBuilder::new()
+      .with_encoder_factory(Arc::new(decimal::DecimalStrings))
+      .build(Vec::new());
+    writer.write(&batch).unwrap();
+    writer.finish().unwrap();
+    assert_eq!(
+      serde_json::from_slice::<Value>(&writer.into_inner()).unwrap(),
+      json!([{"price":"123456789012345678901.23456789"}, {}])
+    );
+  }
+
   #[tokio::test]
   async fn file_keeps_deleted_rows_and_dataset_respects_snapshot() {
     use crate::storage::local::LocalFsBackend;
@@ -453,6 +487,15 @@ mod tests {
         .await,
       Err(AppError::Forbidden(_))
     ));
+    for follow in [true, false] {
+      let backend = LocalFsBackend::new(dir.path(), follow);
+      assert!(matches!(
+        backend
+          .get_scoped_file("preview.lance", "preview.lance/part", Default::default())
+          .await,
+        Err(AppError::Forbidden(_))
+      ));
+    }
   }
 
   #[test]
