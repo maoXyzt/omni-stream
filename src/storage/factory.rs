@@ -36,6 +36,9 @@ pub enum StorageDetails {
 /// to expose `/api/storages` without holding on to the full `Config`.
 #[derive(Clone)]
 pub struct NamedBackend {
+  /// Passed privately to an isolated Lance reader to open this same storage.
+  #[cfg(feature = "lance")]
+  pub(crate) config: StorageConfig,
   pub name: String,
   pub r#type: StorageType,
   pub backend: Arc<dyn StorageBackend>,
@@ -159,6 +162,8 @@ pub async fn create_registry(cfg: &Config) -> anyhow::Result<BackendRegistry> {
         backends.insert(
           entry.name.clone(),
           NamedBackend {
+            #[cfg(feature = "lance")]
+            config: entry.clone(),
             name: entry.name.clone(),
             r#type: entry.r#type,
             backend,
@@ -223,7 +228,7 @@ pub async fn create_registry(cfg: &Config) -> anyhow::Result<BackendRegistry> {
   })
 }
 
-async fn build_one(entry: &StorageConfig) -> anyhow::Result<Arc<dyn StorageBackend>> {
+pub(crate) async fn build_one(entry: &StorageConfig) -> anyhow::Result<Arc<dyn StorageBackend>> {
   let backend: Arc<dyn StorageBackend> = match entry.r#type {
     StorageType::S3 => {
       let s3 = entry.s3.as_ref().ok_or_else(|| {

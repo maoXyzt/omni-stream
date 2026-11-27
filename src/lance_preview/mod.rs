@@ -1,3 +1,6 @@
+mod budget;
+mod worker;
+pub(crate) use worker::run_worker;
 mod decimal;
 mod store;
 
@@ -78,7 +81,7 @@ struct Column {
   nullable: bool,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 pub struct PageQuery {
   #[serde(default)]
   physical: bool,
@@ -97,14 +100,26 @@ pub async fn handler(
   Path(key): Path<String>,
   Query(query): Query<PageQuery>,
 ) -> Result<Response, AppError> {
-  let backend = state.resolve(query.storage.as_deref())?;
+  let entry = state.resolve_entry(query.storage.as_deref())?;
   let _permit = READERS
     .acquire()
     .await
     .map_err(|_| AppError::Busy("Lance previews are busy".into()))?;
-  let page = page(backend, &key, query).await?;
+  if query.schema_only {
+    page_response(entry.backend.clone(), &key, query).await
+  } else {
+    worker::request(&entry.config, &key, &query).await
+  }
+}
+
+async fn page_response(
+  backend: Arc<dyn StorageBackend>,
+  key: &str,
+  query: PageQuery,
+) -> Result<Response, AppError> {
+  let page = page(backend, key, query).await?;
   let mut output = PageBuffer::default();
-  serde_json::to_writer(&mut output, &page).map_err(|e| {
+  budget::format_output(|| serde_json::to_writer(&mut output, &page)).map_err(|e| {
     if e.io_error_kind() == Some(io::ErrorKind::FileTooLarge) {
       AppError::LancePageTooLarge(DISPLAY_LIMIT)
     } else {
@@ -343,10 +358,11 @@ async fn page(
       if batch.get_array_memory_size() > DISPLAY_BYTES {
         return Err(AppError::LancePageTooLarge(DISPLAY_LIMIT));
       }
-      writer.write(&batch).map_err(write_error)?;
+      budget::format_output(|| writer.write(&batch)).map_err(write_error)?;
     }
-    writer.finish().map_err(write_error)?;
-    serde_json::from_slice(&writer.into_inner().0).map_err(|e| AppError::Backend(e.to_string()))?
+    budget::format_output(|| writer.finish()).map_err(write_error)?;
+    budget::format_output(|| serde_json::from_slice(&writer.into_inner().0))
+      .map_err(|e| AppError::Backend(e.to_string()))?
   };
   for row in &mut rows {
     preserve_integer_precision(row);

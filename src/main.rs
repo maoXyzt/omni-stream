@@ -50,6 +50,13 @@ const MAX_PUT_BYTES: usize = 16 * 1024 * 1024;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+  #[cfg(feature = "lance")]
+  if std::env::args_os()
+    .nth(1)
+    .is_some_and(|arg| arg == "lance-preview-worker")
+  {
+    return lance_preview::run_worker().await;
+  }
   init_tracing();
 
   // CLI subcommands short-circuit the server. Dispatch happens BEFORE

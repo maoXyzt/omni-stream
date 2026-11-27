@@ -79,12 +79,16 @@ impl AppState {
   }
 
   pub(crate) fn resolve(&self, name: Option<&str>) -> Result<Arc<dyn StorageBackend>, AppError> {
+    Ok(self.resolve_entry(name)?.backend.clone())
+  }
+
+  pub(crate) fn resolve_entry(&self, name: Option<&str>) -> Result<&NamedBackend, AppError> {
     let key = name
       .map(str::trim)
       .filter(|s| !s.is_empty())
       .unwrap_or_else(|| self.default_name.as_str());
     if let Some(nb) = self.backends.get(key) {
-      return Ok(nb.backend.clone());
+      return Ok(nb);
     }
     // Invalid (configured but failed to init) — distinct from "never
     // configured", so callers get a 503 with the init failure reason
@@ -106,23 +110,14 @@ impl AppState {
     &self,
     name: Option<&str>,
   ) -> Result<Arc<dyn StorageBackend>, AppError> {
-    let key = name
-      .map(str::trim)
-      .filter(|s| !s.is_empty())
-      .unwrap_or_else(|| self.default_name.as_str());
-    match self.backends.get(key) {
-      Some(nb) if nb.writeable => Ok(nb.backend.clone()),
-      Some(_) => Err(AppError::Forbidden(format!("storage '{key}' is read-only"))),
-      None => {
-        if let Some(inv) = self.invalid.get(key) {
-          Err(AppError::StorageInvalid(format!(
-            "storage '{key}' is invalid: {}",
-            inv.reason
-          )))
-        } else {
-          Err(AppError::NotFound(format!("storage '{key}'")))
-        }
-      }
+    let entry = self.resolve_entry(name)?;
+    if entry.writeable {
+      Ok(entry.backend.clone())
+    } else {
+      Err(AppError::Forbidden(format!(
+        "storage '{}' is read-only",
+        entry.name
+      )))
     }
   }
 
@@ -1119,6 +1114,15 @@ mod tests {
         name: name.to_string(),
         r#type: crate::config::StorageType::Local,
         backend: Arc::new(StubBackend::new(0, 1)),
+        #[cfg(feature = "lance")]
+        config: crate::config::StorageConfig {
+          name: name.to_owned(),
+          r#type: crate::config::StorageType::Local,
+          active: true,
+          writeable,
+          s3: None,
+          local: None,
+        },
         details: StorageDetails::Local {
           root_path: "/tmp".into(),
         },
